@@ -33,6 +33,7 @@ from lerobot.common.policies.factory import (
     get_policy_class,
     make_policy,
     make_policy_config,
+    make_rgb_encoder,
 )
 from lerobot.common.policies.normalize import Normalize, Unnormalize
 from lerobot.common.policies.pretrained import PreTrainedPolicy
@@ -90,6 +91,7 @@ def test_get_policy_and_config_classes(policy_name: str):
     [
         ("lerobot/xarm_lift_medium", "xarm", {}, "tdmpc", {"use_mpc": True}),
         ("lerobot/pusht", "pusht", {}, "diffusion", {}),
+        ("lerobot/pusht", "pusht", {}, "flow_matching", {}),
         ("lerobot/pusht", "pusht", {}, "vqbet", {}),
         ("lerobot/pusht", "pusht", {}, "act", {}),
         ("lerobot/aloha_sim_insertion_human", "aloha", {"task": "AlohaInsertion-v0"}, "act", {}),
@@ -202,6 +204,70 @@ def test_policy(ds_repo_id, env_name, env_kwargs, policy_name, policy_kwargs):
     # Test step through policy
     env.step(action)
 
+
+@pytest.mark.parametrize(
+    "ds_repo_id,policy_name,policy_kwargs",
+    [
+        ("lerobot/pusht", "diffusion", {}),
+        ("lerobot/pusht", "flow_matching", {}),
+        ("lerobot/pusht", "vqbet", {}),
+    ]
+)
+def test_rgb_encoder(ds_repo_id, policy_name, policy_kwargs):
+    policy_config = make_policy_config(policy_name, **policy_kwargs)
+    dataset_config = DatasetConfig(repo_id=ds_repo_id, episodes=[0])
+    train_cfg = TrainPipelineConfig(
+        dataset=dataset_config,
+        policy=policy_config,
+    )
+    dataset = make_dataset(train_cfg)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        num_workers=0,
+        batch_size=2,
+        shuffle=True,
+        pin_memory=DEVICE != "cpu",
+        drop_last=True,
+    )
+
+    rgb_encoder = make_rgb_encoder(policy_config, dataset.meta)
+
+    if len(policy_config.image_features) == 0:
+        pytest.skip(
+            f"Dataset {ds_repo_id} does not have visual inputs; RGB‑encoder "
+            "test is not applicable."
+        )
+
+    dl_iter = cycle(dataloader)
+    batch = next(dl_iter)
+
+    batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
+    num_cameras = len(policy_config.image_features)
+    batch["observation.images"] = torch.stack(
+        [batch[key] for key in policy_config.image_features], dim=-4
+    )
+
+    # Combine batch, sequence, and "which camera" dims before passing to shared encoder.
+    img_features = rgb_encoder(
+        einops.rearrange(batch["observation.images"], "b s n ... -> (b s n) ...")
+    )
+    # Separate batch dim and sequence dim back out. The camera index dim gets absorbed into the
+    # feature dim (effectively concatenating the camera features).
+    img_features = einops.rearrange(
+        img_features, "(b s n) ... -> b s (n ...)",
+        b=dataloader.batch_size, s=policy_config.n_obs_steps
+    )
+
+    expected_output_shape = (
+        dataloader.batch_size,
+        policy_config.n_obs_steps,
+        num_cameras * rgb_encoder.feature_dim,
+    )
+
+    assert img_features.shape == expected_output_shape, (
+        "RGB‑encoder output has wrong shape: "
+        f"got {tuple(img_features.shape)}, expected {expected_output_shape}."
+    )
 
 # TODO(rcadene, aliberts): This test is quite end-to-end. Move this test in test_optimizer?
 def test_act_backbone_lr():

@@ -171,6 +171,7 @@ available_datasets = sorted(
 available_policies = [
     "act",
     "diffusion",
+    "flow_matching",
     "tdmpc",
     "vqbet",
 ]

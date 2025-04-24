@@ -105,7 +105,7 @@ class VQBeTConfig(PreTrainedConfig):
     )
 
     # Architecture / modeling.
-    # Vision backbone.
+    # Vision backbone. Must also be registered in FINAL_FEATURE_MAP_MODULE constant.
     vision_backbone: str = "resnet18"
     crop_shape: tuple[int, int] | None = (84, 84)
     crop_is_random: bool = True

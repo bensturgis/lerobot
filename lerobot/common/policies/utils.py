@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Callable
+
 import torch
 from torch import nn
 
@@ -32,6 +34,33 @@ def populate_queues(queues, batch):
             # add latest observation to the queue
             queues[key].append(batch[key])
     return queues
+
+
+def replace_submodules(
+    root_module: nn.Module, predicate: Callable[[nn.Module], bool], func: Callable[[nn.Module], nn.Module]
+) -> nn.Module:
+    """
+    Args:
+        root_module: The module for which the submodules need to be replaced
+        predicate: Takes a module as an argument and must return True if the that module is to be replaced.
+        func: Takes a module as an argument and returns a new module to replace it with.
+    Returns:
+        The root module with its submodules replaced.
+    """
+    if predicate(root_module):
+        return func(root_module)
+
+    replace_list = [k.split(".") for k, m in root_module.named_modules(remove_duplicate=True) if predicate(m)]
+    for *parents, k in replace_list:
+        parent_module = root_module
+        if len(parents) > 0:
+            parent_module = root_module.get_submodule(".".join(parents))
+        src_module = getattr(parent_module, k)
+        tgt_module = func(src_module)
+        setattr(parent_module, k, tgt_module)
+    
+    assert not any(predicate(m) for _, m in root_module.named_modules(remove_duplicate=True))
+    return root_module
 
 
 def get_device_from_parameters(module: nn.Module) -> torch.device:

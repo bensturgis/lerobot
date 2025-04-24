@@ -17,6 +17,12 @@ from pathlib import Path
 
 from huggingface_hub.constants import HF_HOME
 
+# Which layer in each vision backbone produces the spatial feature map
+FINAL_FEATURE_MAP_MODULE = {
+    "resnet18": "layer4",
+    # add more backbones here
+}
+
 OBS_ENV = "observation.environment_state"
 OBS_ROBOT = "observation.state"
 OBS_IMAGE = "observation.image"

@@ -18,7 +18,7 @@
 
 import warnings
 from collections import deque
-from typing import Callable, List
+from typing import List
 
 import einops
 import numpy as np
@@ -27,9 +27,15 @@ import torch.nn.functional as F  # noqa: N812
 import torchvision
 from torch import Tensor, nn
 
+from lerobot.common.constants import FINAL_FEATURE_MAP_MODULE
 from lerobot.common.policies.normalize import Normalize, Unnormalize
 from lerobot.common.policies.pretrained import PreTrainedPolicy
-from lerobot.common.policies.utils import get_device_from_parameters, get_output_shape, populate_queues
+from lerobot.common.policies.utils import (
+    get_device_from_parameters,
+    get_output_shape, 
+    populate_queues,
+    replace_submodules,
+)
 from lerobot.common.policies.vqbet.configuration_vqbet import VQBeTConfig
 from lerobot.common.policies.vqbet.vqbet_utils import GPT, ResidualVQ
 
@@ -678,15 +684,25 @@ class VQBeTRgbEncoder(nn.Module):
         backbone_model = getattr(torchvision.models, config.vision_backbone)(
             weights=config.pretrained_backbone_weights
         )
-        # Note: This assumes that the layer4 feature map is children()[-3]
-        # TODO(alexander-soare): Use a safer alternative.
-        self.backbone = nn.Sequential(*(list(backbone_model.children())[:-2]))
+        # Extract feature extractor.
+        if config.vision_backbone not in FINAL_FEATURE_MAP_MODULE:
+            raise ValueError(f"No feature-map module registered for backbone “{config.vision_backbone}”")
+        final_feature_map_module = FINAL_FEATURE_MAP_MODULE[config.vision_backbone]
+        self.backbone = nn.Sequential()
+        final_feature_map_module_found = False
+        for name, module in backbone_model.named_children():
+            self.backbone.add_module(name, module)
+            if name == final_feature_map_module:
+                final_feature_map_module_found = True
+                break
+        if not final_feature_map_module_found:
+            raise RuntimeError(f"Final feature‐map module “{final_feature_map_module}” not found in {config.vision_backbone}")
         if config.use_group_norm:
             if config.pretrained_backbone_weights:
                 raise ValueError(
                     "You can't replace BatchNorm in a pretrained model without ruining the weights!"
                 )
-            self.backbone = _replace_submodules(
+            self.backbone = replace_submodules(
                 root_module=self.backbone,
                 predicate=lambda x: isinstance(x, nn.BatchNorm2d),
                 func=lambda x: nn.GroupNorm(num_groups=x.num_features // 16, num_channels=x.num_features),
@@ -727,39 +743,6 @@ class VQBeTRgbEncoder(nn.Module):
         # Final linear layer with non-linearity.
         x = self.relu(self.out(x))
         return x
-
-
-def _replace_submodules(
-    root_module: nn.Module, predicate: Callable[[nn.Module], bool], func: Callable[[nn.Module], nn.Module]
-) -> nn.Module:
-    """
-    Args:
-        root_module: The module for which the submodules need to be replaced
-        predicate: Takes a module as an argument and must return True if the that module is to be replaced.
-        func: Takes a module as an argument and returns a new module to replace it with.
-    Returns:
-        The root module with its submodules replaced.
-    """
-    if predicate(root_module):
-        return func(root_module)
-
-    replace_list = [k.split(".") for k, m in root_module.named_modules(remove_duplicate=True) if predicate(m)]
-    for *parents, k in replace_list:
-        parent_module = root_module
-        if len(parents) > 0:
-            parent_module = root_module.get_submodule(".".join(parents))
-        if isinstance(parent_module, nn.Sequential):
-            src_module = parent_module[int(k)]
-        else:
-            src_module = getattr(parent_module, k)
-        tgt_module = func(src_module)
-        if isinstance(parent_module, nn.Sequential):
-            parent_module[int(k)] = tgt_module
-        else:
-            setattr(parent_module, k, tgt_module)
-    # verify that all BN are replaced
-    assert not any(predicate(m) for _, m in root_module.named_modules(remove_duplicate=True))
-    return root_module
 
 
 class VqVae(nn.Module):

@@ -24,6 +24,7 @@ from lerobot.common.envs.configs import EnvConfig
 from lerobot.common.envs.utils import env_to_policy_features
 from lerobot.common.policies.act.configuration_act import ACTConfig
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
+from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.common.policies.pretrained import PreTrainedPolicy
@@ -43,6 +44,10 @@ def get_policy_class(name: str) -> PreTrainedPolicy:
         from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
 
         return DiffusionPolicy
+    elif name == "flow_matching":
+        from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
+
+        return FlowMatchingPolicy
     elif name == "act":
         from lerobot.common.policies.act.modeling_act import ACTPolicy
 
@@ -68,6 +73,8 @@ def make_policy_config(policy_type: str, **kwargs) -> PreTrainedConfig:
         return TDMPCConfig(**kwargs)
     elif policy_type == "diffusion":
         return DiffusionConfig(**kwargs)
+    elif policy_type == "flow_matching":
+        return FlowMatchingConfig(**kwargs)
     elif policy_type == "act":
         return ACTConfig(**kwargs)
     elif policy_type == "vqbet":
@@ -78,6 +85,27 @@ def make_policy_config(policy_type: str, **kwargs) -> PreTrainedConfig:
         return PI0FASTConfig(**kwargs)
     else:
         raise ValueError(f"Policy type '{policy_type}' is not available.")
+
+
+def make_rgb_encoder(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
+    features = dataset_to_policy_features(ds_meta.features)
+    cfg.input_features = {key: ft for key, ft in features.items() if ft.type is not FeatureType.ACTION}
+    
+    policy_type = cfg.type
+    if policy_type == "diffusion":
+        from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionRgbEncoder
+        
+        return DiffusionRgbEncoder(cfg)
+    elif policy_type == "flow_matching":
+        from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingRgbEncoder
+
+        return FlowMatchingRgbEncoder(cfg)
+    elif policy_type == "vqbet":
+        from lerobot.common.policies.vqbet.modeling_vqbet import VQBeTRgbEncoder
+
+        return VQBeTRgbEncoder(cfg)
+    else:
+        raise ValueError(f"Policy type '{policy_type}' does not have a RGB encoder.")
 
 
 def make_policy(
