@@ -82,7 +82,7 @@ class FlowMatchingConfig(PreTrainedConfig):
     spatial_softmax_num_keypoints: int = 32
     use_separate_rgb_encoder_per_camera: bool = False
     # Unet.
-    down_dims: tuple[int, ...] = (512, 1024, 2048)
+    down_dims: tuple[int, ...] = (512,)
     kernel_size: int = 5
     n_groups: int = 8
     flow_matching_step_embed_dim: int = 128
@@ -116,7 +116,7 @@ class FlowMatchingConfig(PreTrainedConfig):
 
         # Check that the horizon size and U-Net downsampling is compatible.
         # U-Net downsamples by 2 with each stage.
-        downsampling_factor = 2 ** len(self.down_dims)
+        downsampling_factor = 2 ** max(len(self.down_dims) - 1, 0)
         if self.horizon % downsampling_factor != 0:
             raise ValueError(
                 "The horizon should be an integer multiple of the downsampling factor (which is determined "

@@ -132,6 +132,8 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             batch["observation.images"] = torch.stack(
                 [batch[key] for key in self.config.image_features], dim=-4
             )
+            if self.config.n_obs_steps == 1:
+                batch["observation.images"] = batch["observation.images"].unsqueeze(1)
         batch = self.normalize_targets(batch)
         loss = self.flow_matching.compute_loss(batch)
         # no output_dict so returning None
@@ -275,7 +277,6 @@ class FlowMatchingModel(nn.Module):
         assert n_obs_steps == self.config.n_obs_steps
 
         device = get_device_from_parameters(self)
-        dtype = get_dtype_from_parameters(self)
 
         # Encode image features and concatenate them all together along with the state vector.
         global_cond = self._prepare_global_conditioning(batch)  # (B, global_cond_dim)
