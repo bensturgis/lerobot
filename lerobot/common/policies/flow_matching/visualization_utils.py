@@ -1,5 +1,6 @@
 import imageio
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from pathlib import Path
@@ -8,11 +9,6 @@ from torch import nn, Tensor
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
-
-# TODO:
-# - Implement visualize_vector_field() method
-# - Retrain PushT Flow Matching Policy for H=1
-# - Retrain PushT Flow Matching Policy for scaled environment to better visualize flows
 
 class FlowMatchingVisualizer:
     """
@@ -135,11 +131,11 @@ class FlowMatchingVisualizer:
 
             # Show plot if requested
             if show:
-                fig.show()
+                fig.show(block=True)
 
             # Save plot if requested
             if save:
-                self._save_flow_figure(fig, action_step)
+                self._save_figure(fig, "flows", action_step)
         
         if create_gif:
             self._create_flows_gif(
@@ -147,7 +143,118 @@ class FlowMatchingVisualizer:
                 action_steps=action_steps,
             )
 
-    
+    def visualize_vector_field(
+        self,
+        min_action: np.array,
+        max_action: np.array,
+        grid_size: int = 50,
+        time: float = 0.5,
+        show: bool = True,
+        save: bool = True,
+    ):
+        if self.config.action_feature.shape[0] != 2 or self.config.horizon != 1:
+            raise ValueError(
+                "The vector-field visualisation requires action_dim = 2 and horizon = 1 "
+                f"(got action_dim = {self.config.action_feature.shape[0]}, "
+                f"horizon = {self.config.horizon})."
+            )
+        
+        device = get_device_from_parameters(self.velocity_model)
+        dtype = get_dtype_from_parameters(self.velocity_model)
+        
+        # Clamp values to [-3, +3]
+        min_lim = np.minimum(min_action, -3.0)
+        max_lim = np.maximum(max_action,  3.0)
+
+        # Unpack minimum x- and y-coordinates
+        x_min, y_min = min_lim
+        x_max, y_max = max_lim
+
+        # Create a 2D meshgrid in the range of [x_min, x_max] x [y_min, y_max]
+        x_lin = np.linspace(x_min, x_max, grid_size)
+        y_lin = np.linspace(y_min, y_max, grid_size)
+        x_grid, y_grid = np.meshgrid(x_lin, y_lin, indexing="xy")
+        
+        # Flatten numpy grids and turn them into a (num_grid_points,1,2) torch tensor to input into
+        # the velocity model
+        positions = np.stack([x_grid.reshape(-1), y_grid.reshape(-1)], axis=-1)
+        positions = torch.from_numpy(positions).unsqueeze(1).to(device=device, dtype=dtype)
+
+        # Build a time and condition vector tensor whose batch size is the number of grid points
+        num_grid_points = positions.shape[0]
+        time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
+        global_cond_batch = self.global_cond.repeat(num_grid_points, 1)
+
+        # Compute velocity at grid points as given by flow matching velocity model
+        with torch.no_grad():
+            velocities = self.velocity_model(positions, time_batch, global_cond_batch)
+
+        fig = self._create_vector_field_plot(
+            x_positions=x_grid.reshape(-1),
+            y_positions=y_grid.reshape(-1),
+            x_velocities=velocities[:, 0, 0].cpu().numpy(),
+            y_velocities=velocities[:, 0, 1].cpu().numpy(),
+            x_lim=(x_min, x_max),
+            y_lim=(y_min, y_max),
+            time=time,
+        )
+
+        # Show plot if requested
+        if show:
+            plt.show(block=True)
+
+        # Save plot if requested
+        if save:
+            self._save_figure(fig, "vector_field")
+
+    def _create_vector_field_plot(
+        self,
+        x_positions: np.array,
+        y_positions: np.array,
+        x_velocities: np.array,
+        y_velocities: np.array,
+        x_lim: tuple,
+        y_lim: tuple,
+        time: float,
+    ) -> plt.Figure:
+        """
+        Draw a quiver plot for the vector field of a single two-dimensional action at a
+        given time.
+        """
+        # Create quiver plot
+        fig, ax = plt.subplots(figsize=(10, 10))
+        fig.canvas.manager.set_window_title("Visualization of Vector Field")
+        ax.quiver(
+            x_positions, y_positions,
+            x_velocities, y_velocities,
+            angles='xy', scale=40,
+            scale_units='xy', width=0.004,
+            cmap='viridis'
+        )
+
+        # Set axis limits
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        ax.set_aspect('equal')
+        
+        # Title
+        ax.set_title(f"Vector Field at t={time:.2f}", fontsize=16)
+
+        # Axis labels
+        if self.action_dim_names:
+            x_label = self.action_dim_names[0]
+            y_label = self.action_dim_names[1]
+        else:
+            x_label = f"Action dimension {0}"
+            y_label = f"Action dimension {1}"
+        ax.set_xlabel(x_label, fontsize=14)
+        ax.set_ylabel(y_label, fontsize=14)
+
+        ax.tick_params(axis='both', labelsize=12)
+        ax.grid(True)
+        plt.tight_layout()
+        
+        return fig
 
     def _create_flow_plot(
         self,
@@ -204,13 +311,19 @@ class FlowMatchingVisualizer:
         plt.tight_layout()
         return fig
     
-    def _save_flow_figure(self, fig: plt.Figure, action_step: int) -> None:
+    def _save_figure(
+        self,
+        fig: plt.Figure,
+        vis_type: str,
+        action_step: int | None =  None
+    ) -> None:
         """
         Save the given figure as 'flows_action_##.png', skipping if it already exists.
         """
         # Create a new run folder if needed
         if self.output_dir is None:
-            base_dir = Path("outputs/visualizations/flows")
+            vis_dir = Path("outputs/visualizations/")
+            base_dir = vis_dir / vis_type
             base_dir.mkdir(parents=True, exist_ok=True)
             run_idx = 1
             while (base_dir / f"{run_idx:04d}").exists():
@@ -219,14 +332,20 @@ class FlowMatchingVisualizer:
             self.output_dir.mkdir()
 
         # Build and save (or skip) the file
-        filename = f"flows_action_{action_step+1:02d}.png"
+        if vis_type == "flows":
+            filename = f"flows_action_{action_step+1:02d}.png"
+        elif vis_type == "vector_field":
+            filename = f"vector_field.png"
+        else:
+            raise ValueError(
+                f"Invalid vis_type '{vis_type}'. Expected 'flows' or 'vector_field'."
+            )
         filepath = self.output_dir / filename
         if filepath.exists():
             print(f"Warning: File {filepath} already exists. Skipping save.")
         else:
             fig.savefig(filepath, dpi=300)
             print(f"Saved figure to {filepath}.")
-
 
     def _create_flows_gif(
         self,
