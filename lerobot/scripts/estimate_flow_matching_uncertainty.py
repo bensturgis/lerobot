@@ -1,37 +1,28 @@
 #!/usr/bin/env python
 """
-Visualize flows produced by a trained flow matching policy to generate actions.
+Estimate predictive uncertainty of a trained flow matching model for a given
+conditioning feature vector.
 
 Examples:
-    - Visualize the flow field of a policy trained on the Push-T dataset:
+    - Estimate the predictive uncertainty of a flow matching policy trained
+    on the Push-T dataset using the epsilon-ball expansion method:
     ```
-    local$ python lerobot/scripts/visualize_flow_matching.py \
-        -t flows \
+    local$ python lerobot/scripts/estimate_flow_matching_uncertainty.py \
         -r lerobot/pusht \
         -p outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
     ```
-
-    - Visualize vector field for a policy trained on Push-T dataset with a horizon of 1:
-    local$ python lerobot/scripts/visualize_flow_matching.py \
-        -t vector_field \
-        -r lerobot/pusht \
-        -p outputs/train/flow_matching_pusht_single_action/checkpoints/last/pretrained_model
 """
-
 import argparse
-import numpy as np
 import torch
 
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.datasets.utils import cycle
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
-from lerobot.common.policies.flow_matching.visualization_utils import FlowMatchingVisualizer
+from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintyEstimator
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
 
-
-def visualize_flow_matching(
-    vis_type: str,
+def estimate_flow_matching_uncertainty(
     ds_repo_id: str,
     pretrained_flow_matching_path: str
 ):
@@ -68,47 +59,19 @@ def visualize_flow_matching(
         )
         if flow_matching_policy.config.n_obs_steps == 1:
             batch["observation.images"] = batch["observation.images"].unsqueeze(1)
-
+    
     # Encode image features and concatenate them all together along with the state vector.
     global_cond = flow_matching_model._prepare_global_conditioning(batch).squeeze(0)  # (B, global_cond_dim)
 
-    flow_matching_visualizer = FlowMatchingVisualizer(
+    fm_uncertainty_estimator = FlowMatchingUncertaintyEstimator(
         config=flow_matching_policy.config,
         velocity_model=flow_matching_model.unet,
-        action_dim_names=["Position x", "Position y"]
     )
 
-    if vis_type == "flows":
-        # Visualize flow matching paths.
-        flow_matching_visualizer.visualize_flows(global_cond=global_cond)
-    elif vis_type == "vector_field":
-        # min_action = dataset.stats["action"]["min"]
-        # max_action = dataset.stats["action"]["max"]
-
-        min_action = np.array([-1, -1])
-        max_action = np.array([1, 1])
-
-        # Visualize vector field.
-        flow_matching_visualizer.visualize_vector_field(
-            global_cond=global_cond,
-            min_action=min_action,
-            max_action=max_action,
-        )
+    fm_uncertainty_estimator.epsilon_ball_expansion(global_cond=global_cond)
 
 def main():
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "-t", "--vis-type",
-        type=str,
-        required=True,
-        choices=["flows", "vector_field"],
-        help=(
-            "Type of visualization to generate:\n"
-            "flows: per-step flow matching visualizations.\n"
-            "vector_field: overall 2D action vector field (requires action_dim=2 and horizon=1)."
-        ),
-    )
 
     parser.add_argument(
         "-r", "--repo-id",
@@ -125,8 +88,7 @@ def main():
     )
 
     args = parser.parse_args()
-    visualize_flow_matching(
-        args.vis_type,
+    estimate_flow_matching_uncertainty(
         args.repo_id,
         args.pretrained_fm_path,
     )

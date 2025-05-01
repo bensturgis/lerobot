@@ -168,7 +168,7 @@ class FlowMatchingModel(nn.Module):
         device = get_device_from_parameters(self)
         dtype = get_dtype_from_parameters(self)
 
-        # Sample noise sprior.
+        # Sample noise prior.
         noise_sample = torch.randn(
             size=(batch_size, self.config.horizon, self.config.action_feature.shape[0]),
             dtype=dtype,

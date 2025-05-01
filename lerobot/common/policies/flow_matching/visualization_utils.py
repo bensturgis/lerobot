@@ -18,21 +18,18 @@ class FlowMatchingVisualizer:
         self,
         config: FlowMatchingConfig,
         velocity_model: nn.Module,
-        global_cond: Tensor,
         action_dim_names: list | tuple | None = None,
         output_dir: Path | str | None = None
     ):
         """
         Args:
             config: Configuration object for Flow Matching settings.
-            velocity_model: The learned velocity model.
-            global_cond: Conditioning tensor for the model.
+            velocity_model: The learned flow matching velocity model.
             action_dim_names: Optional names for action dimensions (used for axis labels).
             output_dir: Optional output directory for saving figures.
         """
         self.config = config
         self.velocity_model = velocity_model
-        self.global_cond = global_cond
         self.action_dim_names = action_dim_names
         self.output_dir = output_dir
 
@@ -40,6 +37,7 @@ class FlowMatchingVisualizer:
     # - Add option to visualize 3D flows
     def visualize_flows(
         self,
+        global_cond: Tensor,
         action_dims: list | tuple = (0, 1),
         action_steps: list | int | None = None,
         num_paths: int = 300,
@@ -51,12 +49,23 @@ class FlowMatchingVisualizer:
         Visualize flow fields for specified action steps and dimensions.
 
         Args:
+            global_cond: Single conditioning feature vector for the velocity model.
             action_dims: Two action dimensions to plot.
             action_steps: Steps to visualize; defaults to all.
             num_paths: Number of trajectories per step.
             show: If True, display the plots.
             save: If True, save the plots to disk.
         """
+        if global_cond.dim() == 1: # shape = (cond_dim,)
+            global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
+        elif global_cond.dim() == 2 and global_cond.size(0) == 1: # shape = (1, cond_dim)
+            pass
+        else:
+            raise ValueError(
+                f"Expected global_cond to contain exactly one feature vector "
+                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
+            )
+        
         if not isinstance(action_dims, (list, tuple)) or len(action_dims) != 2:
             raise ValueError(f"'action_dims' must be a list or tuple of exactly two elements, but got {action_dims}")
 
@@ -79,14 +88,14 @@ class FlowMatchingVisualizer:
         # Sample paths from the ODE
         paths = ode_solver.sample(
             x_0=noise_sample,
-            global_cond=self.global_cond.repeat(num_paths, 1),
+            global_cond=global_cond.repeat(num_paths, 1),
             step_size=self.config.ode_step_size,
             method=self.config.ode_solver_method,
             atol=self.config.atol,
             rtol=self.config.rtol,
             time_grid=time_grid,
             return_intermediates=True,
-        ).transpose(0, 1)  # Shape: (num_paths, horizon, action_dim)
+        ).transpose(0, 1)  # Shape: (num_paths, timesteps, horizon, action_dim)
 
         # Compute vector field (velocity at each position)
         vector_field = torch.empty_like(paths)
@@ -96,7 +105,7 @@ class FlowMatchingVisualizer:
                 path_velocities = self.velocity_model(
                     path,
                     time_grid,
-                    self.global_cond.repeat(len(time_grid), 1)
+                    global_cond.repeat(len(time_grid), 1)
                 )
             vector_field[p] = path_velocities
         
@@ -145,6 +154,7 @@ class FlowMatchingVisualizer:
 
     def visualize_vector_field(
         self,
+        global_cond: Tensor,
         min_action: np.array,
         max_action: np.array,
         grid_size: int = 50,
@@ -152,6 +162,28 @@ class FlowMatchingVisualizer:
         show: bool = True,
         save: bool = True,
     ):
+        """
+        Visualize the 2D action vector field produced by a flow matching policy at a given time.
+
+        Args:
+            global_cond: Single conditioning feature vector for the velocity model.
+            min_action: Lower bounds for x and y (shape (2,)).
+            max_action: Upper bounds for x and y (shape (2,)).
+            grid_size: Number of grid points per axis.
+            time: Time step in [0,1] at which to evaluate the velocity field.
+            show: If True, display the plot.
+            save: If True, save the figure to disk.
+        """
+        if global_cond.dim() == 1: # shape = (cond_dim,)
+            global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
+        elif global_cond.dim() == 2 and global_cond.size(0) == 1: # shape = (1, cond_dim)
+            pass
+        else:
+            raise ValueError(
+                f"Expected global_cond to contain exactly one feature vector "
+                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
+            )
+    
         if self.config.action_feature.shape[0] != 2 or self.config.horizon != 1:
             raise ValueError(
                 "The vector-field visualisation requires action_dim = 2 and horizon = 1 "
@@ -183,7 +215,7 @@ class FlowMatchingVisualizer:
         # Build a time and condition vector tensor whose batch size is the number of grid points
         num_grid_points = positions.shape[0]
         time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
-        global_cond_batch = self.global_cond.repeat(num_grid_points, 1)
+        global_cond_batch = global_cond.repeat(num_grid_points, 1)
 
         # Compute velocity at grid points as given by flow matching velocity model
         with torch.no_grad():
@@ -206,55 +238,6 @@ class FlowMatchingVisualizer:
         # Save plot if requested
         if save:
             self._save_figure(fig, "vector_field")
-
-    def _create_vector_field_plot(
-        self,
-        x_positions: np.array,
-        y_positions: np.array,
-        x_velocities: np.array,
-        y_velocities: np.array,
-        x_lim: tuple,
-        y_lim: tuple,
-        time: float,
-    ) -> plt.Figure:
-        """
-        Draw a quiver plot for the vector field of a single two-dimensional action at a
-        given time.
-        """
-        # Create quiver plot
-        fig, ax = plt.subplots(figsize=(10, 10))
-        fig.canvas.manager.set_window_title("Visualization of Vector Field")
-        ax.quiver(
-            x_positions, y_positions,
-            x_velocities, y_velocities,
-            angles='xy', scale=40,
-            scale_units='xy', width=0.004,
-            cmap='viridis'
-        )
-
-        # Set axis limits
-        ax.set_xlim(x_lim)
-        ax.set_ylim(y_lim)
-        ax.set_aspect('equal')
-        
-        # Title
-        ax.set_title(f"Vector Field at t={time:.2f}", fontsize=16)
-
-        # Axis labels
-        if self.action_dim_names:
-            x_label = self.action_dim_names[0]
-            y_label = self.action_dim_names[1]
-        else:
-            x_label = f"Action dimension {0}"
-            y_label = f"Action dimension {1}"
-        ax.set_xlabel(x_label, fontsize=14)
-        ax.set_ylabel(y_label, fontsize=14)
-
-        ax.tick_params(axis='both', labelsize=12)
-        ax.grid(True)
-        plt.tight_layout()
-        
-        return fig
 
     def _create_flow_plot(
         self,
@@ -311,6 +294,55 @@ class FlowMatchingVisualizer:
         plt.tight_layout()
         return fig
     
+    def _create_vector_field_plot(
+        self,
+        x_positions: np.array,
+        y_positions: np.array,
+        x_velocities: np.array,
+        y_velocities: np.array,
+        x_lim: tuple,
+        y_lim: tuple,
+        time: float,
+    ) -> plt.Figure:
+        """
+        Draw a quiver plot for the vector field of a single two-dimensional action at a
+        given time.
+        """
+        # Create quiver plot
+        fig, ax = plt.subplots(figsize=(10, 10))
+        fig.canvas.manager.set_window_title("Visualization of Vector Field")
+        ax.quiver(
+            x_positions, y_positions,
+            x_velocities, y_velocities,
+            angles='xy', scale=40,
+            scale_units='xy', width=0.004,
+            cmap='viridis'
+        )
+
+        # Set axis limits
+        ax.set_xlim(x_lim)
+        ax.set_ylim(y_lim)
+        ax.set_aspect('equal')
+        
+        # Title
+        ax.set_title(f"Vector Field at t={time:.2f}", fontsize=16)
+
+        # Axis labels
+        if self.action_dim_names:
+            x_label = self.action_dim_names[0]
+            y_label = self.action_dim_names[1]
+        else:
+            x_label = f"Action dimension {0}"
+            y_label = f"Action dimension {1}"
+        ax.set_xlabel(x_label, fontsize=14)
+        ax.set_ylabel(y_label, fontsize=14)
+
+        ax.tick_params(axis='both', labelsize=12)
+        ax.grid(True)
+        plt.tight_layout()
+        
+        return fig
+
     def _save_figure(
         self,
         fig: plt.Figure,
