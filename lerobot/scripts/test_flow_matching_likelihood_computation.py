@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 """
-Estimate predictive uncertainty of a trained flow matching model for a given
-conditioning feature vector.
+Test flow matching log-likelihood computation of a target sample x_1.
 
 Examples:
-    - Estimate the predictive uncertainty of a flow matching policy trained
-    on the Push-T dataset using the epsilon-ball expansion method:
+    - Estimate the log-likelihood computation of target sample x_1 for a flow
+    matching policy trained on the Push-T dataset:
     ```
-    local$ python lerobot/scripts/estimate_flow_matching_uncertainty.py \
+    local$ python lerobot/scripts/test_flow_matching_likelihood_computation.py \
         -r lerobot/pusht \
         -p outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
     ```
@@ -15,14 +14,16 @@ Examples:
 import argparse
 import torch
 
+from torch.distributions import Independent, Normal
+
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.datasets.utils import cycle
-from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintyEstimator
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
+from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
 
-def estimate_flow_matching_uncertainty(
+def test_log_likelihood_computation(
     ds_repo_id: str,
     pretrained_flow_matching_path: str,
 ):
@@ -36,11 +37,12 @@ def estimate_flow_matching_uncertainty(
     )
     dataset = make_dataset(train_cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    batch_size = 1
     dataloader = torch.utils.data.DataLoader(
         dataset,
         num_workers=0,
-        batch_size=1,
-        shuffle=True,
+        batch_size=batch_size,
+        shuffle=False,
         pin_memory=device != "cpu",
         drop_last=True,
     )
@@ -61,14 +63,51 @@ def estimate_flow_matching_uncertainty(
             batch["observation.images"] = batch["observation.images"].unsqueeze(1)
     
     # Encode image features and concatenate them all together along with the state vector.
-    global_cond = flow_matching_model._prepare_global_conditioning(batch).squeeze(0)  # (B, global_cond_dim)
+    global_cond = flow_matching_model._prepare_global_conditioning(batch)
 
-    fm_uncertainty_estimator = FlowMatchingUncertaintyEstimator(
-        config=flow_matching_policy.config,
-        velocity_model=flow_matching_model.unet,
+    # Create a noise generator with a fixed seed for reproducibility
+    seed = 42
+    generator = torch.Generator(device=device).manual_seed(seed)
+
+    sample = flow_matching_model.conditional_sample(
+        batch_size=batch_size,
+        global_cond=global_cond,
+        generator=generator,
     )
 
-    fm_uncertainty_estimator.epsilon_ball_expansion(global_cond=global_cond)
+    print(f"Sample x_1: {sample}")
+
+    ode_solver = ODESolver(velocity_model=flow_matching_model.unet)
+
+    # Noise distribution is an isotropic gaussian
+    horizon = flow_matching_policy.config.horizon
+    action_dim = flow_matching_policy.config.action_feature.shape[0]
+    gaussian_log_density = Independent(
+        Normal(
+            loc = torch.zeros(horizon, action_dim, device=device),
+            scale = torch.ones(horizon, action_dim, device=device),
+        ),
+        reinterpreted_batch_ndims=2
+    ).log_prob
+
+    exact_divergence = False
+    x_0, log_p_1_x_1 = ode_solver.compute_log_likelihood(
+        x_1=sample,
+        global_cond=global_cond,
+        log_p_0=gaussian_log_density,
+        step_size=flow_matching_policy.config.ode_step_size,
+        method=flow_matching_policy.config.ode_solver_method,
+        atol=flow_matching_policy.config.atol,
+        rtol=flow_matching_policy.config.rtol,
+        exact_divergence=exact_divergence
+    )
+
+    print("-------------------------------")
+    print("Exact Divergence") if exact_divergence else print("Hutchinson")
+    print("-------------------------------")
+        
+    print(f"Reconstructed x_0: {x_0}")
+    print(f"Log-likelihood of x_1: {log_p_1_x_1}")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -88,7 +127,7 @@ def main():
     )
 
     args = parser.parse_args()
-    estimate_flow_matching_uncertainty(
+    test_log_likelihood_computation(
         args.repo_id,
         args.pretrained_fm_path,
     )
