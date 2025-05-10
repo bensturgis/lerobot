@@ -5,6 +5,7 @@ import torch
 
 from pathlib import Path
 from torch import nn, Tensor
+from typing import Optional, Sequence, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
@@ -18,8 +19,8 @@ class FlowMatchingVisualizer:
         self,
         config: FlowMatchingConfig,
         velocity_model: nn.Module,
-        action_dim_names: list | tuple | None = None,
-        output_dir: Path | str | None = None
+        action_dim_names: Optional[Sequence[str]] = None,
+        output_dir: Optional[Union[Path, str]] = None
     ):
         """
         Args:
@@ -38,8 +39,8 @@ class FlowMatchingVisualizer:
     def visualize_flows(
         self,
         global_cond: Tensor,
-        action_dims: list | tuple = (0, 1),
-        action_steps: list | int | None = None,
+        action_dims: Sequence[int] = (0, 1),
+        action_steps: Optional[Union[Sequence[int], int]] = None,
         num_paths: int = 300,
         show: bool = False,
         save: bool = True,
@@ -144,12 +145,12 @@ class FlowMatchingVisualizer:
 
             # Save plot if requested
             if save:
-                self._save_figure(fig, "flows", action_step)
+                self._save_figure(fig, "flows", action_step=action_step)
         
         if create_gif:
             self._create_flows_gif(
                 images_dir=self.output_dir,
-                action_steps=action_steps,
+                vis_type="flows",
             )
 
     def visualize_vector_field(
@@ -158,9 +159,10 @@ class FlowMatchingVisualizer:
         min_action: np.array,
         max_action: np.array,
         grid_size: int = 50,
-        time: float = 0.5,
-        show: bool = True,
+        time_grid: Optional[Sequence[float]] = None,
+        show: bool = False,
         save: bool = True,
+        create_gif: bool = True,
     ):
         """
         Visualize the 2D action vector field produced by a flow matching policy at a given time.
@@ -170,9 +172,11 @@ class FlowMatchingVisualizer:
             min_action: Lower bounds for x and y (shape (2,)).
             max_action: Upper bounds for x and y (shape (2,)).
             grid_size: Number of grid points per axis.
-            time: Time step in [0,1] at which to evaluate the velocity field.
+            time_grid: A sequence of float values in [0.0, 1.0] indicating the time steps
+                   at which the vector field is evaluated. If None, defaults to
+                   [0.0, 0.1, ..., 1.0].
             show: If True, display the plot.
-            save: If True, save the figure to disk.
+            save: If True, save each figure to disk.
         """
         if global_cond.dim() == 1: # shape = (cond_dim,)
             global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
@@ -194,6 +198,10 @@ class FlowMatchingVisualizer:
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
         
+        # Default time_grid is list [0.1, 0.2, ..., 1.0]
+        if time_grid is None:
+            time_grid = list(np.linspace(0, 1, 11))
+
         # Clamp values to [-3, +3]
         min_lim = np.minimum(min_action, -3.0)
         max_lim = np.maximum(max_action,  3.0)
@@ -212,32 +220,37 @@ class FlowMatchingVisualizer:
         positions = np.stack([x_grid.reshape(-1), y_grid.reshape(-1)], axis=-1)
         positions = torch.from_numpy(positions).unsqueeze(1).to(device=device, dtype=dtype)
 
-        # Build a time and condition vector tensor whose batch size is the number of grid points
+        # Build a condition vector tensor whose batch size is the number of grid points
         num_grid_points = positions.shape[0]
-        time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
         global_cond_batch = global_cond.repeat(num_grid_points, 1)
 
-        # Compute velocity at grid points as given by flow matching velocity model
-        with torch.no_grad():
-            velocities = self.velocity_model(positions, time_batch, global_cond_batch)
+        
+        for time in time_grid:
+            time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
+            # Compute velocity at grid points and current time as given by flow matching velocity model
+            with torch.no_grad():
+                velocities = self.velocity_model(positions, time_batch, global_cond_batch)
 
-        fig = self._create_vector_field_plot(
-            x_positions=x_grid.reshape(-1),
-            y_positions=y_grid.reshape(-1),
-            x_velocities=velocities[:, 0, 0].cpu().numpy(),
-            y_velocities=velocities[:, 0, 1].cpu().numpy(),
-            x_lim=(x_min, x_max),
-            y_lim=(y_min, y_max),
-            time=time,
-        )
+            fig = self._create_vector_field_plot(
+                x_positions=x_grid.reshape(-1),
+                y_positions=y_grid.reshape(-1),
+                x_velocities=velocities[:, 0, 0].cpu().numpy(),
+                y_velocities=velocities[:, 0, 1].cpu().numpy(),
+                x_lim=(x_min, x_max),
+                y_lim=(y_min, y_max),
+                time=time,
+            )
 
-        # Show plot if requested
-        if show:
-            plt.show(block=True)
+            if show:
+                plt.show(block=True)
+            if save:
+                self._save_figure(fig, "vector_field", time=time)
 
-        # Save plot if requested
-        if save:
-            self._save_figure(fig, "vector_field")
+        if create_gif:
+            self._create_flows_gif(
+                images_dir=self.output_dir,
+                vis_type="vector_field",
+            )
 
     def _create_flow_plot(
         self,
@@ -245,10 +258,10 @@ class FlowMatchingVisualizer:
         velocity_vectors: Tensor,
         time_grid: Tensor,
         num_paths: int,
-        x_lim: tuple,
-        y_lim: tuple,
+        x_lim: Tuple[float, float],
+        y_lim: Tuple[float, float],
         action_step: int,
-        action_dims: list | tuple = (0, 1),
+        action_dims: Sequence[int] = (0, 1),
     ) -> plt.Figure:
         """
         Draw a quiver plot for the flow of a single action step.
@@ -300,8 +313,8 @@ class FlowMatchingVisualizer:
         y_positions: np.array,
         x_velocities: np.array,
         y_velocities: np.array,
-        x_lim: tuple,
-        y_lim: tuple,
+        x_lim: Tuple[float, float],
+        y_lim: Tuple[float, float],
         time: float,
     ) -> plt.Figure:
         """
@@ -347,11 +360,16 @@ class FlowMatchingVisualizer:
         self,
         fig: plt.Figure,
         vis_type: str,
-        action_step: int | None =  None
+        action_step: Optional[int] =  None,
+        time: Optional[float] = None,
     ) -> None:
         """
-        Save the given figure as 'flows_action_##.png', skipping if it already exists.
+        Save the given figure to a visualization directory based on the visualization type.
         """
+        if vis_type == "flows" and action_step is None:
+            raise ValueError("`action_step` must be provided when visualization type is 'flows'.")
+        if vis_type == "vector_field" and time is None:
+            raise ValueError("`time` must be provided when visualization type is 'vector_field'.")
         # Create a new run folder if needed
         if self.output_dir is None:
             vis_dir = Path("outputs/visualizations/")
@@ -367,7 +385,7 @@ class FlowMatchingVisualizer:
         if vis_type == "flows":
             filename = f"flows_action_{action_step+1:02d}.png"
         elif vis_type == "vector_field":
-            filename = f"vector_field.png"
+            filename = f"vector_field_{int(time * 10):02d}.png"
         else:
             raise ValueError(
                 f"Invalid vis_type '{vis_type}'. Expected 'flows' or 'vector_field'."
@@ -382,23 +400,28 @@ class FlowMatchingVisualizer:
     def _create_flows_gif(
         self,
         images_dir: Path,
-        action_steps: list | int,
-        gif_name: str = "flows_animation.gif",
+        vis_type: str,
         duration: float = 0.2,
     ):
         """
-        Create an animated GIF from a sequence of saved flow plot images.
+        Create an animated GIF from a sequence of saved flow
+        or vector field plot images.
         """
         # Build the list of filenames in the right order
-        filepaths = [
-            images_dir / f"flows_action_{(step+1):02d}.png"
-            for step in action_steps
-        ]
+        filepaths = sorted([fp for fp in images_dir.iterdir() if fp.suffix.lower() == ".png"])
 
         # Read each frame
         frames = [imageio.imread(str(fp)) for fp in filepaths]
 
         # Write out the GIF
+        if vis_type == "flows":
+            gif_name = "flow_animation"
+        elif vis_type == "vector_field":
+            gif_name = "vector_field_animation.png"
+        else:
+            raise ValueError(
+                f"Invalid vis_type '{vis_type}'. Expected 'flows' or 'vector_field'."
+            )
         gif_path = images_dir / gif_name
         imageio.mimsave(str(gif_path), frames, duration=duration)
         print(f"Saved GIF to {gif_path}")

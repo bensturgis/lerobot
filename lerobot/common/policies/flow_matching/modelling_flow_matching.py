@@ -163,7 +163,7 @@ class FlowMatchingModel(nn.Module):
 
     # ========= inference  ============
     def conditional_sample(
-        self, batch_size: int, global_cond: Tensor | None = None, generator: torch.Generator | None = None
+        self, batch_size: int, global_cond: Tensor, generator: torch.Generator | None = None
     ) -> Tensor:
         device = get_device_from_parameters(self)
         dtype = get_dtype_from_parameters(self)
@@ -597,7 +597,7 @@ class FlowMatchingConditionalUnet1d(nn.Module):
         """
         Args:
             x: (B, T, input_dim) tensor for input to the Unet.
-            timestep: (B,) tensor of (timestep_we_are_denoising_from - 1).
+            timestep: (B,) tensor of flow matching ODE timesteps.
             global_cond: (B, global_cond_dim)
             output: (B, T, input_dim)
         Returns:
