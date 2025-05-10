@@ -123,7 +123,8 @@ class ODESolver():
         rtol: Optional[float],
         time_grid: Tensor = torch.tensor([1.0, 0.0]),
         return_intermediates: bool = False,
-        exact_divergence: bool = False,
+        exact_divergence: bool = True,
+        num_hutchinson_samples: Optional[int] = 3,
     ) -> Union[Tuple[Tensor, Tensor], Tuple[Sequence[Tensor], Tensor]]:
         """
         Compute log-likelihood log(p_1(x_1)) given a sample x_1 from the target distribution p_1.
@@ -150,6 +151,9 @@ class ODESolver():
             return_intermediates: If True then return intermediate evaluation points according to time_grid.
             exact_divergence: Whether to compute the exact divergence or estimate it using the Hutchinson
                 trace estimator.
+            num_hutchinson_samples: Number of Hutchinson samples (Rademacher vectors) to use when estimating
+                the divergence. Higher values reduce variance but increase computation. Ignored if
+                `exact_divergence=True`.
 
         Returns:
             - Either the final state x_0 when `return_intermediates` = False or all
@@ -158,7 +162,10 @@ class ODESolver():
         """
         if time_grid[0] != 1.0 and time_grid[-1] == 0.0:
             raise ValueError(f"Time grid must start at 1.0 and end at 0.0. Got {time_grid}.")
-        
+
+        if not exact_divergence and num_hutchinson_samples is None:
+            raise ValueError("`num_hutchinson_samples` must be specified when `exact_divergence` is False.")
+
         # Ensure all tensors are on the same device
         global_cond = global_cond.to(x_1.device)
         time_grid = time_grid.to(x_1.device)
@@ -173,10 +180,15 @@ class ODESolver():
             rtol=rtol,
         )
 
-        # Sample a fixed Rademacher noise vector for which E[zz^T] = I for the Hutchinson
-        # divergence estimator
+        # Sample `num_hutchinson_samples` fixed Rademacher noise vector for which E[zz^T] = I
+        # for the Hutchinson divergence estimator
         if not exact_divergence:
-            z = (torch.randn_like(x_1, device=x_1.device) < 0) * 2.0 - 1.0
+            z_samples = torch.randint(
+                0, 2,
+                (num_hutchinson_samples, *x_1.shape),   # (m, B, ...)
+                device=x_1.device,
+                dtype=x_1.dtype,
+            ) * 2 - 1
 
         def ode_func(t: Tensor, x: Tensor) -> Tensor:
             """
@@ -212,7 +224,7 @@ class ODESolver():
 
             Returns:
                 Velocity d/dt φ_t(x) with the same shape as `states[0]` and scalar divergence term d/dt f(t).
-            """
+            """           
             # Current state φ_t(x) along the flow trajectory from t=1 to t=0 
             x_t = states[0]
             with torch.set_grad_enabled(True):
@@ -236,23 +248,29 @@ class ODESolver():
                             retain_graph=True,
                         )[0][idx]
                 else:
-                    # Compute Hutchinson divergence estimator E[z^T D_x(v_t(x_t)) z]
-                    # Dot product v_t · z for each batch element
-                    v_t_dot_z = torch.einsum(
-                        "ij,ij->i", v_t.flatten(start_dim=1), z.flatten(start_dim=1)
-                    )
-                    # Gradient of v_t · z w.r.t. x_t
-                    grad_v_t_dot_z = torch.autograd.grad(
-                        outputs=v_t_dot_z,
-                        inputs=x_t,
-                        grad_outputs=torch.ones_like(v_t_dot_z).detach(),
-                    )[0]
-                    # Final divergence estimate: zᵀ ∇_x (v_t · z)
-                    div = torch.einsum(
-                        "ij,ij->i",
-                        grad_v_t_dot_z.flatten(start_dim=1),
-                        z.flatten(start_dim=1),
-                    )
+                    # Compute Hutchinson divergence estimator z^T D_x(v_t(x_t)) z by averaging
+                    # over `num_hutchinson_samples` samples z
+                    div = torch.zeros(x_t.shape[0], device=x_t.device)
+                    for z in z_samples:                        
+                        # Dot product v_t · z for each batch element
+                        v_t_dot_z = torch.einsum(
+                            "ij,ij->i", v_t.flatten(start_dim=1), z.flatten(start_dim=1)
+                        )
+                        # Gradient of v_t · z w.r.t. x_t
+                        grad_v_t_dot_z = torch.autograd.grad(
+                            outputs=v_t_dot_z,
+                            inputs=x_t,
+                            grad_outputs=torch.ones_like(v_t_dot_z).detach(),
+                            retain_graph=True,
+                        )[0]
+                        # Single-probe divergence estimate: zᵀ ∇_x (v_t · z)
+                        div += torch.einsum(
+                            "ij,ij->i",
+                            grad_v_t_dot_z.flatten(start_dim=1),
+                            z.flatten(start_dim=1),
+                        )
+
+                    div *= (1.0 / num_hutchinson_samples)
 
             return v_t, div
 
@@ -277,7 +295,7 @@ class ODESolver():
         # Compute log-probability of target sample using log-probability of initial noise
         # sample and change-of-variables correction
         log_p_1_x_1 = log_p_0(x_0) + log_prob_diff[-1]
-        
+
         return (trajectory, log_p_1_x_1) if return_intermediates else (trajectory[-1], log_p_1_x_1)
 
 
