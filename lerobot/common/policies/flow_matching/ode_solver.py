@@ -68,7 +68,7 @@ class ODESolver():
             evaluation points specified in time_grid.
         """
         if time_grid[0] != 0.0 and time_grid[-1] == 1.0:
-            raise ValueError(f"Time grid must start at 0.0 and end at 0.0. Got {time_grid}.")
+            raise ValueError(f"Time grid must start at 0.0 and end at 1.0. Got {time_grid}.")
         
         # Ensure all tensors are on the same device
         time_grid = time_grid.to(x_0.device)
@@ -76,7 +76,7 @@ class ODESolver():
         
         # Validate input shapes and solver parameters and build keyword arguments for odeint method
         ode_kwargs = self._validate_and_configure_solver(
-            x=x_0,
+            x_init=x_0,
             global_cond=global_cond,
             method=method,
             step_size=step_size,
@@ -84,7 +84,7 @@ class ODESolver():
             rtol=rtol,
         )
 
-        def ode_func(t: Tensor, x: Tensor) -> Tensor:
+        def velocity_field(t: Tensor, x: Tensor) -> Tensor:
             """
             Helper function defining the right-hand side of the flow matching ODE
             d/dt φ_t(x) = v_t(φ_t(x), global_cond). `global_cond` is captured from the
@@ -102,7 +102,7 @@ class ODESolver():
         with torch.set_grad_enabled(enable_grad):
             # Approximate ODE solution with numerical ODE solver
             trajetory = odeint(
-                ode_func,
+                velocity_field,
                 x_0,
                 time_grid,
                 method=method,
@@ -110,31 +110,41 @@ class ODESolver():
             )
 
         return trajetory if return_intermediates else trajetory[-1]
-        
 
-    def compute_log_likelihood(
+    def sample_with_log_likelihood(
         self,
-        x_1: Tensor,
+        x_init: Tensor,
+        time_grid: Tensor,
         global_cond: Tensor,
         log_p_0: Callable[[Tensor], Tensor],
         method: str,
         step_size: Optional[float],
         atol: Optional[float],
         rtol: Optional[float],
-        time_grid: Tensor = torch.tensor([1.0, 0.0]),
         return_intermediates: bool = False,
         exact_divergence: bool = True,
         num_hutchinson_samples: Optional[int] = 3,
+        generator: Optional[torch.Generator] = None,
     ) -> Union[Tuple[Tensor, Tensor], Tuple[Sequence[Tensor], Tensor]]:
         """
-        Compute log-likelihood log(p_1(x_1)) given a sample x_1 from the target distribution p_1.
+        Integrate the combined flow matching ODE in either direction and return both the terminal
+        sample and the log-likelihood log(p_1(x_1)) of the target sample x_1.
 
-        Works similarly to sample, but solves the ODE in reverse to compute the log-likelihood. The
-        velocity model must be differentiable with respect to x_1. The function assumes log_p_0 is the
-        log-probability of the source distribution p_0 at time t = 0.
+        This method supports both:
+        - Forward integration from x_0 ~ p_0 using an increasing `time_grid` (0.0 to 1.0),
+        which produces a target sample x_1 and computes log(p_1(x_1)).
+        - Reverse integration from x_1 ~ p_1 using a decreasing `time_grid` (1.0 to 0.0),
+        which reconstructs the corresponding x_0 ~ p_0 and computes log(p_1(x_1)).
+
+        The integration direction is automatically inferred from the ordering of `time_grid`.
 
         Args:
-            x_1: Sample from target distribution p_1, i.e. x_1 ~ p_1. Shape: [batch_size, ...].
+            x_init: Initial state. Shape: [batch_size, ...].
+                - If time_grid[0] = 0.0, sample from the source distribution, i.e. `x_init` ~ p_0. 
+                - If time_grid[0] = 1.0, sample from the target distribution, i.e. `x_init` ~ p_1.
+            time_grid: Times at which ODE is evluated. Integration runs from time_grid[0] to time_grid[-1].
+                Use [0.0, ..., 1.0] for forward integration (starting from a source sample),
+                or [1.0, ..., 0.0] for reverse integration (starting from a target sample).
             log_p_0: Log-probability function of the source distribution p_0.
             global_cond: Global conditioning vector, encoding the robot's state and its visual
                 observations. Shape: [batch_size, cond_dim].
@@ -146,33 +156,35 @@ class ODESolver():
                 for adaptive solvers.
             atol, rtol: Absolute/relative error tolerances for accepting an adaptive solver step.
                 Ignored for fixed-step solvers.
-            time_grid: Times at which ODE is evluated. Integration runs from time_grid[0] to time_grid[-1].
-                Must start at 1.0 and end at 0.0 for valid log-likelihood computation.
             return_intermediates: If True then return intermediate evaluation points according to time_grid.
             exact_divergence: Whether to compute the exact divergence or estimate it using the Hutchinson
                 trace estimator.
-            num_hutchinson_samples: Number of Hutchinson samples (Rademacher vectors) to use when estimating
-                the divergence. Higher values reduce variance but increase computation. Ignored if
-                `exact_divergence=True`.
+            num_hutchinson_samples: Number of Hutchinson samples to use when estimating the divergence. Higher
+                values reduce variance but increase computation. Ignored if `exact_divergence=True`.
+            generator : Pass a pre-seeded generator for reproducible results.
 
         Returns:
-            - Either the final state x_0 when `return_intermediates` = False or all
-              evaluation points x_t specified in time_grid when `return_intermediates` = True
+            - Either the terminal state (x_0 in forward and x_1 in backward direction) when
+              `return_intermediates` = False or all evaluation points x_t specified in time_grid
+              when `return_intermediates` = True
             - The estimated log-likelihood log(p_1(x_1)).
         """
-        if time_grid[0] != 1.0 and time_grid[-1] == 0.0:
-            raise ValueError(f"Time grid must start at 1.0 and end at 0.0. Got {time_grid}.")
-
+        if not (
+            (time_grid[0] == 0.0 and time_grid[-1] == 1.0) or
+            (time_grid[0] == 1.0 and time_grid[-1] == 0.0)
+        ):
+            raise ValueError(f"Time grid must go from 0.0 to 1.0 or from 1.0 to 0.0. Got {time_grid}.")
+        
         if not exact_divergence and num_hutchinson_samples is None:
             raise ValueError("`num_hutchinson_samples` must be specified when `exact_divergence` is False.")
 
         # Ensure all tensors are on the same device
-        global_cond = global_cond.to(x_1.device)
-        time_grid = time_grid.to(x_1.device)
+        global_cond = global_cond.to(x_init.device)
+        time_grid = time_grid.to(x_init.device)
         
         # Validate input shapes and solver parameters and build keyword arguments for odeint method
         ode_kwargs = self._validate_and_configure_solver(
-            x=x_1,
+            x_init=x_init,
             global_cond=global_cond,
             method=method,
             step_size=step_size,
@@ -185,28 +197,28 @@ class ODESolver():
         if not exact_divergence:
             z_samples = torch.randint(
                 0, 2,
-                (num_hutchinson_samples, *x_1.shape),   # (m, B, ...)
-                device=x_1.device,
-                dtype=x_1.dtype,
+                (num_hutchinson_samples, *x_init.shape),
+                device=x_init.device,
+                dtype=x_init.dtype,
+                generator=generator,
             ) * 2 - 1
 
-        def ode_func(t: Tensor, x: Tensor) -> Tensor:
+        def velocity_field(t: Tensor, x: Tensor) -> Tensor:
             """
             Helper function defining the right-hand side of the flow matching ODE
-            d/dt φ_t(x) = v_t(φ_t(x), global_cond). For the log-likelihood computation
-            the ODE is solved in reverse from t = 1 to t = 0. `global_cond` is captured
+            d/dt φ_t(x) = v_t(φ_t(x), global_cond). `global_cond` is captured
             from the outer scope. 
             
             Args:
                 t: Current scalar time of the ODE integration.
-                x: Current state x_t along the flow trajectory. Shape like `x_1`.
+                x: Current state x_t along the flow trajectory. Shape like `x_init`.
             
             Returns:
                 Velocity v_t(φ_t(x), global_cond) with the same shape as `x`.
             """
             return self.velocity_model(x, t.expand(x.shape[0]), global_cond)
 
-        def dynamics_func(t: Tensor, states: Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
+        def combined_dynamics(t: Tensor, states: Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
             """
             Helper function defining the right-hand side of the combined ODE to compute the
             flow trajectory as well as the log-likelihood of a target sample x_1 with
@@ -214,7 +226,7 @@ class ODESolver():
             and
                 d/dt f(t) = div(v_t(φ_t(x), global_cond)) (exact divergence computation) or
                 d/dt f(t) = z^T D_{x_t} v_t(x_t, global_cond) z (Hutchinson divergence estimator)
-            For the log-likelihood computation the ODE is solved in reverse from t = 1 to t = 0.
+            For the log-likelihood computation the ODE is solved in forward or reverse direction.
             `global_cond` is captured from the outer scope. 
 
             Args:
@@ -225,12 +237,12 @@ class ODESolver():
             Returns:
                 Velocity d/dt φ_t(x) with the same shape as `states[0]` and scalar divergence term d/dt f(t).
             """           
-            # Current state φ_t(x) along the flow trajectory from t=1 to t=0 
+            # Current state φ_t(x) along the flow trajectory
             x_t = states[0]
             with torch.set_grad_enabled(True):
                 x_t.requires_grad_()
                 # Compute velocity v_t(φ_t(x), global_cond)
-                v_t = ode_func(t, x_t)
+                v_t = velocity_field(t, x_t)
 
                 # Compute or estimate divergence div(v_t(φ_t(x), global_cond))
                 if exact_divergence:
@@ -276,32 +288,38 @@ class ODESolver():
 
         # Set initial state of the reverse-time combined ODE for initial noise sample
         # and log-likelihood computation
-        initial_state = (x_1, torch.zeros(x_1.shape[0], device=x_1.device))
+        initial_state = (x_init, torch.zeros(x_init.shape[0], device=x_init.device))
 
         with torch.no_grad():
-            # Solve the ODE backwards in time to obtain x_0 and log-probability difference
-            # log(p_1(x_1)) - log(p_0(x_0))
+            # Solve the combined flow matching ODE to obtain a terminal state (x_1 for
+            # forward direction and x_0 for reverse direction) and log-probability difference
+            # of log(p_1(x_1)) and log(p_0(x_0))
             trajectory, log_prob_diff = odeint(
-                dynamics_func,
+                combined_dynamics,
                 initial_state,
                 time_grid,
                 method=method,
                 **ode_kwargs,
             )
 
-        # Extract initial noise sample from reverse flow trajectory
-        x_0 = trajectory[-1]
-        
-        # Compute log-probability of target sample using log-probability of initial noise
-        # sample and change-of-variables correction
-        log_p_1_x_1 = log_p_0(x_0) + log_prob_diff[-1]
+        if time_grid[-1] == 0:
+            # Extract initial noise sample from reverse flow trajectory
+            x_0 = trajectory[-1]
+            
+            # Compute log-probability of target sample using log-probability of initial noise
+            # sample and change-of-variables correction
+            log_p_1_x_1 = log_p_0(x_0) + log_prob_diff[-1]
+        elif time_grid[-1] == 1:           
+            # Compute log-probability of target sample using log-probability of initial noise
+            # sample and change-of-variables correction
+            log_p_1_x_1 = log_p_0(x_init) - log_prob_diff[-1]
 
         return (trajectory, log_p_1_x_1) if return_intermediates else (trajectory[-1], log_p_1_x_1)
 
 
     def _validate_and_configure_solver(
         self,
-        x: Tensor,
+        x_init: Tensor,
         global_cond: Tensor,
         method: str,
         step_size: Optional[float],
@@ -319,10 +337,10 @@ class ODESolver():
                 f"got tensor with shape {tuple(global_cond.shape)}."
             )
 
-        if global_cond.shape[0] != x.shape[0]:
+        if global_cond.shape[0] != x_init.shape[0]:
             raise ValueError(
                 "`x_0` and `global_cond` must have same batch size:"
-                f"`x_0` has {x.shape[0]} but global_cond has {global_cond.shape[0]}."
+                f"`x_0` has {x_init.shape[0]} but global_cond has {global_cond.shape[0]}."
             )
         
         # Check ODE solver parameters

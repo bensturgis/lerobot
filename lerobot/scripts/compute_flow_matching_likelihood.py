@@ -6,7 +6,7 @@ Examples:
     - Estimate the log-likelihood computation of target sample x_1 for a flow
     matching policy trained on the Push-T dataset:
     ```
-    local$ python lerobot/scripts/test_flow_matching_likelihood_computation.py \
+    local$ python lerobot/scripts/compute_flow_matching_likelihood.py \
         -r lerobot/pusht \
         -p outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
     ```
@@ -20,10 +20,11 @@ from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.datasets.utils import cycle
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
+from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
 
-def test_log_likelihood_computation(
+def compute_log_likelihood(
     ds_repo_id: str,
     pretrained_flow_matching_path: str,
 ):
@@ -31,12 +32,15 @@ def test_log_likelihood_computation(
     flow_matching_policy = FlowMatchingPolicy.from_pretrained(pretrained_flow_matching_path)
     flow_matching_model = flow_matching_policy.flow_matching
 
+    device = get_device_from_parameters(flow_matching_model)
+    dtype = get_dtype_from_parameters(flow_matching_model)
+
     train_cfg = TrainPipelineConfig(
         dataset=DatasetConfig(repo_id=ds_repo_id, episodes=[0]),
         policy=flow_matching_policy.config,
     )
     dataset = make_dataset(train_cfg)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     batch_size = 1
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -69,19 +73,19 @@ def test_log_likelihood_computation(
     seed = 42
     generator = torch.Generator(device=device).manual_seed(seed)
 
-    sample = flow_matching_model.conditional_sample(
-        batch_size=batch_size,
-        global_cond=global_cond,
+    # Sample noise prior.
+    horizon = flow_matching_policy.config.horizon
+    action_dim = flow_matching_policy.config.action_feature.shape[0]
+    noise_sample = torch.randn(
+        size=(batch_size, horizon, action_dim),
+        dtype=dtype,
+        device=device,
         generator=generator,
     )
 
-    print(f"Sample x_1: {sample}")
-
-    ode_solver = ODESolver(velocity_model=flow_matching_model.unet)
+    print(f"Noise sample x_0: {noise_sample}")
 
     # Noise distribution is an isotropic gaussian
-    horizon = flow_matching_policy.config.horizon
-    action_dim = flow_matching_policy.config.action_feature.shape[0]
     gaussian_log_density = Independent(
         Normal(
             loc = torch.zeros(horizon, action_dim, device=device),
@@ -90,24 +94,44 @@ def test_log_likelihood_computation(
         reinterpreted_batch_ndims=2
     ).log_prob
 
+    ode_solver = ODESolver(velocity_model=flow_matching_model.unet)
+    
     exact_divergence = False
-    x_0, log_p_1_x_1 = ode_solver.compute_log_likelihood(
-        x_1=sample,
+    x_1, log_p_1_x_1_forward = ode_solver.sample_with_log_likelihood(
+        x_init=noise_sample,
+        time_grid=torch.tensor([0.0, 1.0]),
         global_cond=global_cond,
-        log_p_0=gaussian_log_density,
-        step_size=flow_matching_policy.config.ode_step_size,
+        log_p_0 = gaussian_log_density,
         method=flow_matching_policy.config.ode_solver_method,
+        step_size=flow_matching_policy.config.ode_step_size,
         atol=flow_matching_policy.config.atol,
         rtol=flow_matching_policy.config.rtol,
-        exact_divergence=exact_divergence
+        exact_divergence=exact_divergence,
+        generator=generator,
     )
 
     print("-------------------------------")
     print("Exact Divergence") if exact_divergence else print("Hutchinson")
     print("-------------------------------")
+
+    print(f"Sample x_1: {x_1}")
+    print(f"Forward log-likelihood of x_1: {log_p_1_x_1_forward}")
+
+    x_0, log_p_1_x_1_reverse = ode_solver.sample_with_log_likelihood(
+        x_init=x_1,
+        time_grid=torch.tensor([1.0, 0.0]),
+        global_cond=global_cond,
+        log_p_0=gaussian_log_density,
+        method=flow_matching_policy.config.ode_solver_method,
+        step_size=flow_matching_policy.config.ode_step_size,
+        atol=flow_matching_policy.config.atol,
+        rtol=flow_matching_policy.config.rtol,
+        exact_divergence=exact_divergence,
+        generator=generator,
+    )
         
     print(f"Reconstructed x_0: {x_0}")
-    print(f"Log-likelihood of x_1: {log_p_1_x_1}")
+    print(f"Log-likelihood of x_1: {log_p_1_x_1_reverse}")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -127,7 +151,7 @@ def main():
     )
 
     args = parser.parse_args()
-    test_log_likelihood_computation(
+    compute_log_likelihood(
         args.repo_id,
         args.pretrained_fm_path,
     )
