@@ -17,7 +17,7 @@ import torch
 
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.datasets.utils import cycle
-from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintyEstimator
+from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallExpansion
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
@@ -40,7 +40,7 @@ def estimate_flow_matching_uncertainty(
         dataset,
         num_workers=0,
         batch_size=1,
-        shuffle=True,
+        shuffle=False,
         pin_memory=device != "cpu",
         drop_last=True,
     )
@@ -63,12 +63,24 @@ def estimate_flow_matching_uncertainty(
     # Encode image features and concatenate them all together along with the state vector.
     global_cond = flow_matching_model._prepare_global_conditioning(batch).squeeze(0)  # (B, global_cond_dim)
 
-    fm_uncertainty_estimator = FlowMatchingUncertaintyEstimator(
+    # Create a noise generator with a fixed seed for reproducibility
+    seed = 42
+    generator = torch.Generator(device=device).manual_seed(seed)
+
+    fm_uncertainty_estimator = EpsilonBallExpansion(
         config=flow_matching_policy.config,
         velocity_model=flow_matching_model.unet,
+        num_action_seq_samples=3,
+        num_eps_ball_samples=100,
+        generator=generator,
     )
 
-    fm_uncertainty_estimator.epsilon_ball_expansion(global_cond=global_cond)
+    action_seqs, uncertainty_scores = fm_uncertainty_estimator.conditional_sample_with_uncertainty(global_cond=global_cond)
+    
+    print("Sampled action sequences:")
+    print(action_seqs)
+    print("Uncertainty scores:")
+    print(uncertainty_scores)
 
 def main():
     parser = argparse.ArgumentParser()
