@@ -1,15 +1,24 @@
 #!/usr/bin/env python
 """
-Estimate predictive uncertainty of a trained flow matching model for a given
-conditioning feature vector.
+Sample action sequences and estimate their uncertainties for a given
+conditioning feature vector using a trained flow matching policy.
 
 Examples:
-    - Estimate the predictive uncertainty of a flow matching policy trained
-    on the Push-T dataset using the epsilon-ball expansion method:
+    - Sample action sequences and estimate their uncertainties using the epsilon-ball
+    expansion method, given a flow matching policy trained on the Push-T dataset :
     ```
     local$ python lerobot/scripts/estimate_flow_matching_uncertainty.py \
         -r lerobot/pusht \
-        -p outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
+        -p outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
+        -m epsilon_ball
+
+    - Sample action sequences and estimate their uncertainty using the their negative
+    log-likelihoods, given a flow matching policy trained on the Push-T dataset.
+    ```
+    local$ python lerobot/scripts/estimate_flow_matching_uncertainty.py \
+        -r lerobot/pusht \
+        -p outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
+        -m action_seq_likelihood
     ```
 """
 import argparse
@@ -17,7 +26,7 @@ import torch
 
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.datasets.utils import cycle
-from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallExpansion
+from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallExpansion, ActionSequenceLikelihood
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
@@ -25,6 +34,7 @@ from lerobot.configs.train import TrainPipelineConfig
 def estimate_flow_matching_uncertainty(
     ds_repo_id: str,
     pretrained_flow_matching_path: str,
+    method: str,
 ):
     # Initialize flow matching visualizer using pretrained flow matching policy.
     flow_matching_policy = FlowMatchingPolicy.from_pretrained(pretrained_flow_matching_path)
@@ -67,15 +77,25 @@ def estimate_flow_matching_uncertainty(
     seed = 42
     generator = torch.Generator(device=device).manual_seed(seed)
 
-    fm_uncertainty_estimator = EpsilonBallExpansion(
-        config=flow_matching_policy.config,
-        velocity_model=flow_matching_model.unet,
-        num_action_seq_samples=3,
-        num_eps_ball_samples=100,
-        generator=generator,
-    )
+    num_action_seq_samples = 3
+    if method == "epsilon_ball":
+        fm_uncertainty_sampler = EpsilonBallExpansion(
+            config=flow_matching_policy.config,
+            velocity_model=flow_matching_model.unet,
+            num_action_seq_samples=num_action_seq_samples,
+            num_eps_ball_samples=100,
+            generator=generator,
+        )
+    elif method == "action_seq_likelihood":
+        fm_uncertainty_sampler = ActionSequenceLikelihood(
+            config=flow_matching_policy.config,
+            velocity_model=flow_matching_model.unet,
+            num_action_seq_samples=num_action_seq_samples,
 
-    action_seqs, uncertainty_scores = fm_uncertainty_estimator.conditional_sample_with_uncertainty(global_cond=global_cond)
+            generator=generator,
+        )
+
+    action_seqs, uncertainty_scores = fm_uncertainty_sampler.conditional_sample_with_uncertainty(global_cond=global_cond)
     
     print("Sampled action sequences:")
     print(action_seqs)
@@ -96,13 +116,22 @@ def main():
         "-p", "--pretrained-fm-path",
         type=str,
         required=True,
-        help="Path to a pretrained flow‐matching policy checkpoint file.",
+        help="Path to a pretrained flow matching policy checkpoint file.",
+    )
+
+    parser.add_argument(
+        "-m", "--method",
+        type=str,
+        required=True,
+        choices=["epsilon_ball", "action_seq_likelihood"],
+        help="Method to estimate uncertainty."
     )
 
     args = parser.parse_args()
     estimate_flow_matching_uncertainty(
         args.repo_id,
         args.pretrained_fm_path,
+        args.method,
     )
 
 if __name__ == "__main__":

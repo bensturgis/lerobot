@@ -99,7 +99,7 @@ def compute_log_likelihood(
     exact_divergence = False
     x_1, log_p_1_x_1_forward = ode_solver.sample_with_log_likelihood(
         x_init=noise_sample,
-        time_grid=torch.tensor([0.0, 1.0]),
+        time_grid=torch.tensor([0.0, 1.0], device=device, dtype=dtype),
         global_cond=global_cond,
         log_p_0 = gaussian_log_density,
         method=flow_matching_policy.config.ode_solver_method,
@@ -119,7 +119,7 @@ def compute_log_likelihood(
 
     x_0, log_p_1_x_1_reverse = ode_solver.sample_with_log_likelihood(
         x_init=x_1,
-        time_grid=torch.tensor([1.0, 0.0]),
+        time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
         global_cond=global_cond,
         log_p_0=gaussian_log_density,
         method=flow_matching_policy.config.ode_solver_method,

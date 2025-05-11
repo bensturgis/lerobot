@@ -2,6 +2,7 @@ import torch
 
 from abc import ABC, abstractmethod
 from torch import nn, Tensor
+from torch.distributions import Independent, Normal
 from typing import Optional, Tuple
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
@@ -29,6 +30,9 @@ class FlowMatchingUncertaintySampler(ABC):
         """
         self.config = config
         self.velocity_model = velocity_model
+        self.device = get_device_from_parameters(self.velocity_model)
+        self.dtype = get_dtype_from_parameters(self.velocity_model)
+        self.ode_solver = ODESolver(self.velocity_model)
         self.num_action_seq_samples = num_action_seq_samples
         self.generator = generator
 
@@ -51,6 +55,106 @@ class FlowMatchingUncertaintySampler(ABC):
         """
         pass
 
+
+class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
+    """
+    Samples multiple action sequences x_1 and use their negative log-likelihoods
+    -log(p_1(x_1)) under the flow matching mode as an uncertainty score.
+    Smaller likelihood values p_1(x_1) correspond to a more uniform target
+    distribution p_1(x_1) and therefore imply a greater uncertainty.
+    """
+    def __init__(
+        self,
+        config: FlowMatchingConfig,
+        velocity_model: nn.Module,
+        num_action_seq_samples: int,
+        exact_divergence: bool = False,
+        generator: Optional[torch.Generator] = None,
+    ):
+        """
+        Args:
+            exact_divergence: Whether to compute the exact divergence or estimate it
+                using the Hutchinson trace estimator when computing the log-likelihoods
+                log(p_1(x_1)) for the action sequnce samples x_1.
+        """
+        super().__init__(
+            config=config,
+            velocity_model=velocity_model,
+            num_action_seq_samples=num_action_seq_samples,
+            generator=generator,
+        )
+        self.exact_divergence = exact_divergence
+    
+    def conditional_sample_with_uncertainty(
+        self,
+        global_cond: Tensor,
+    ) -> Tuple[Tensor, Tensor]:
+        """
+        Samples `num_action_seq_samples` many action sequences x_1 and computes their
+        log-likelihoods log(p_1(x_1)) via solving the combined flow matching ODE in
+        forward direction. Then uses negative log-liklihoods -log(p_1(x_1)) as uncertainty
+        scores such that a lower likelihood implies a larger uncertainty. 
+
+        Args:
+            global_cond: Single conditioning feature vector for the velocity
+                model. Shape: [cond_dim,] or [1, cond_dim].
+
+        Returns:
+            - Action sequences samples. Shape: [num_action_seq_samples, horizon, action_dim].
+            - Uncertainty scores given by negative log-likelihood of the action sequnece
+              samples. Shape: [num_action_seq_samples,]
+        """
+        if global_cond.dim() == 1: # shape = (cond_dim,)
+            global_cond = global_cond.unsqueeze(0)                                   # (1, cond_dim)
+            global_cond = global_cond.repeat(self.num_action_seq_samples, 1)
+        elif global_cond.dim() == 2 and global_cond.size(0) == 1: # shape = (1, cond_dim)
+            global_cond = global_cond.repeat(self.num_action_seq_samples, 1)
+        else:
+            raise ValueError(
+                f"Expected global_cond to contain exactly one feature vector "
+                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
+            )
+        
+        horizon = self.config.horizon
+        action_dim = self.config.action_feature.shape[0]
+
+        # Sample noise priors.
+        noise_sample = torch.randn(
+            size=(self.num_action_seq_samples, horizon, action_dim),
+            dtype=self.dtype,
+            device=self.device,
+            generator=self.generator,
+        )
+
+        # Noise distribution is an isotropic Gaussian.
+        gaussian_log_density = Independent(
+            Normal(
+                loc = torch.zeros(horizon, action_dim, device=self.device),
+                scale = torch.ones(horizon, action_dim, device=self.device),
+            ),
+            reinterpreted_batch_ndims=2
+        ).log_prob
+        
+        # Solve combined flow matching ODE in forward direction to sample
+        # action sequences x_1 and compute their log-likelihoods log(p_1(x_1)).
+        action_seqs, log_probs = self.ode_solver.sample_with_log_likelihood(
+            x_init=noise_sample,
+            time_grid=torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype),
+            global_cond=global_cond,
+            log_p_0 = gaussian_log_density,
+            method=self.config.ode_solver_method,
+            step_size=self.config.ode_step_size,
+            atol=self.config.atol,
+            rtol=self.config.rtol,
+            exact_divergence=self.exact_divergence,
+            generator=self.generator,
+        )
+
+        # Uncertainty score is given by -log(p_1(x_1))
+        uncertainty_scores = -log_probs
+
+        return action_seqs, uncertainty_scores
+
     
 class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
     """
@@ -66,6 +170,12 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
         num_eps_ball_samples: int = 1000,
         generator: Optional[torch.Generator] = None,
     ):
+        """
+        Args:
+            epsilon: Radius of the input noise ball.
+            num_eps_ball_samples: Number of samples to draw from epsilon-ball around initial
+                noise samples.
+        """
         super().__init__(
             config=config,
             velocity_model=velocity_model,
@@ -92,9 +202,6 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
         Args:
             global_cond: Single conditioning feature vector for the velocity
                 model. Shape: [cond_dim,] or [1, cond_dim].
-            epsilon: Radius of the input noise ball.
-            num_eps_ball_samples: Number of samples to draw from epsilon-ball around initial
-                         noise samples.
 
         Returns:
             - Action sequences samples. Shape: [num_action_seq_samples, horizon, action_dim].
@@ -110,9 +217,6 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
                 f"Expected global_cond to contain exactly one feature vector "
                 f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
             )
-
-        device = get_device_from_parameters(self.velocity_model)
-        dtype = get_dtype_from_parameters(self.velocity_model)
         
         horizon = self.config.horizon
         action_dim = self.config.action_feature.shape[0]
@@ -120,8 +224,8 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
         # Sample noise priors.
         noise_samples = torch.randn(
             size=(self.num_action_seq_samples, horizon, action_dim),
-            dtype=dtype,
-            device=device,
+            dtype=self.dtype,
+            device=self.device,
             generator=self.generator,
         )
 
@@ -129,10 +233,11 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
         action_sequences = torch.zeros_like(noise_samples)
         expansion_factors = torch.zeros(
             size=(self.num_action_seq_samples,),
-            dtype=dtype,
-            device=device,
+            dtype=self.dtype,
+            device=self.device,
         )
         
+        # TODO: Remove for loop and parallelize code
         # Generate an action sequence and uncertainty score for each of the `num_action_seq_samples`
         # noise samples.
         for action_seq_idx, noise_sample in enumerate(noise_samples):
@@ -141,8 +246,8 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
                 self.num_eps_ball_samples,
                 horizon,
                 action_dim,
-                device=device,
-                dtype=dtype,
+                device=self.device,
+                dtype=self.dtype,
                 generator=self.generator,
             )
             
@@ -153,8 +258,8 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
             # Sample random radii so the points fill the ball uniformly.
             radii = torch.rand(
                 self.num_eps_ball_samples,
-                device=device,
-                dtype=dtype,
+                device=self.device,
+                dtype=self.dtype,
                 generator=self.generator,
             ) ** (1.0/(horizon*action_dim))
             radii = radii.view(self.num_eps_ball_samples, 1, 1) * self.epsilon                         # (N,1,1)
@@ -167,8 +272,7 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
 
             # Based on the center noise sample of the epsilon-ball use the velocity model
             # and an ODE solver to predict an action sequence sample from the target distribution.
-            ode_solver = ODESolver(self.velocity_model)
-            reference_action_sequence = ode_solver.sample(
+            reference_action_sequence = self.ode_solver.sample(
                 x_0=noise_sample.unsqueeze(0),
                 global_cond=global_cond,
                 step_size=self.config.ode_step_size,
@@ -179,7 +283,7 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
             action_sequences[action_seq_idx] = reference_action_sequence
 
             # Solve flow matching ODE for samples in epsilon-ball around the initial noise sample.
-            perturbed_action_sequences = ode_solver.sample(
+            perturbed_action_sequences = self.ode_solver.sample(
                 x_0=epsilon_samples,
                 global_cond=global_cond.repeat(self.num_eps_ball_samples, 1),
                 step_size=self.config.ode_step_size,
