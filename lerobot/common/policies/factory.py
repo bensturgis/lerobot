@@ -25,6 +25,7 @@ from lerobot.common.envs.utils import env_to_policy_features
 from lerobot.common.policies.act.configuration_act import ACTConfig
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintySampler
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.common.policies.pretrained import PreTrainedPolicy
@@ -106,6 +107,25 @@ def make_rgb_encoder(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
         return VQBeTRgbEncoder(cfg)
     else:
         raise ValueError(f"Policy type '{policy_type}' does not have a RGB encoder.")
+
+
+def make_flow_matching_uncertainty_sampler(
+    cfg: FlowMatchingConfig,
+    velocity_model: nn.Module,
+    **kwargs,
+) -> FlowMatchingUncertaintySampler:
+    if cfg.uncertainty_sampler == "composed_action_seq_likelihood":
+        from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedActionSequenceLikelihood
+
+        return ComposedActionSequenceLikelihood(cfg, velocity_model, **kwargs)
+    elif cfg.uncertainty_sampler == "action_seq_likelihood":
+        from lerobot.common.policies.flow_matching.estimate_uncertainty import ActionSequenceLikelihood
+
+        return ActionSequenceLikelihood(cfg, velocity_model, **kwargs)
+    elif cfg.uncertainty_sampler == "epsilon_ball_expansion":
+        from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallExpansion
+
+        return EpsilonBallExpansion(cfg, velocity_model, **kwargs)
 
 
 def make_policy(

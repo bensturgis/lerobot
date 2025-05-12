@@ -93,7 +93,12 @@ class FlowMatchingConfig(PreTrainedConfig):
     ode_solver_method: str = "dopri5"
     atol: float = 1e-5
     rtol: float = 1e-5
-    
+
+    # Sampler with uncertainty.
+    sample_with_uncertainty: bool = True
+    uncertainty_sampler: str = "composed_action_seq_likelihood"
+    num_candidate_actions: int = 3
+
     # Loss computation
     do_mask_loss_for_padding: bool = False
 

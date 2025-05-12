@@ -159,7 +159,7 @@ def rollout(
         # TODO: works with SyncVectorEnv but not AsyncVectorEnv
         observation = add_envs_task(env, observation)
 
-        with torch.inference_mode():
+        with torch.no_grad():
             action = policy.select_action(observation)
 
         # Convert to CPU / numpy.

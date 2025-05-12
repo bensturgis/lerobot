@@ -290,17 +290,16 @@ class ODESolver():
         # and log-likelihood computation
         initial_state = (x_init, torch.zeros(x_init.shape[0], device=x_init.device))
 
-        with torch.no_grad():
-            # Solve the combined flow matching ODE to obtain a terminal state (x_1 for
-            # forward direction and x_0 for reverse direction) and log-probability difference
-            # of log(p_1(x_1)) and log(p_0(x_0))
-            trajectory, log_prob_diff = odeint(
-                combined_dynamics,
-                initial_state,
-                time_grid,
-                method=method,
-                **ode_kwargs,
-            )
+        # Solve the combined flow matching ODE to obtain a terminal state (x_1 for
+        # forward direction and x_0 for reverse direction) and log-probability difference
+        # of log(p_1(x_1)) and log(p_0(x_0))
+        trajectory, log_prob_diff = odeint(
+            combined_dynamics,
+            initial_state,
+            time_grid,
+            method=method,
+            **ode_kwargs,
+        )
 
         if time_grid[-1] == 0:
             # Extract initial noise sample from reverse flow trajectory

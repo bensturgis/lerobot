@@ -3,6 +3,7 @@
 """Flow Matching Policy as per "Flow Matching for Generative Modelling"."""
 
 import math
+import random
 from collections import deque
 
 import einops
@@ -13,6 +14,7 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 
 from lerobot.common.constants import FINAL_FEATURE_MAP_MODULE, OBS_ENV, OBS_ROBOT
+from lerobot.common.policies.factory import make_flow_matching_uncertainty_sampler
 from lerobot.common.policies.flow_matching.conditional_probability_path import OTCondProbPath
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
@@ -88,7 +90,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         underlying flow matching model. Here's how it works:
           - `n_obs_steps` steps worth of observations are cached (for the first steps, the observation is
             copied `n_obs_steps` times to fill the cache).
-          - The diffusion model generates `horizon` steps worth of actions.
+          - The flow matching model generates `horizon` steps worth of actions.
           - `n_action_steps` worth of actions are actually kept for execution, starting from the current step.
         Schematically this looks like:
             ----------------------------------------------------------------------------------------------
@@ -160,6 +162,13 @@ class FlowMatchingModel(nn.Module):
             global_cond_dim += self.config.env_state_feature.shape[0]
 
         self.unet = FlowMatchingConditionalUnet1d(config, global_cond_dim=global_cond_dim * config.n_obs_steps)
+
+        if self.config.sample_with_uncertainty:
+            self.uncertainty_sampler = make_flow_matching_uncertainty_sampler(
+                cfg=self.config,
+                velocity_model=self.unet,
+                num_action_seq_samples=self.config.num_candidate_actions,
+            )
 
     # ========= inference  ============
     def conditional_sample(
@@ -244,8 +253,29 @@ class FlowMatchingModel(nn.Module):
         # Encode image features and concatenate them all together along with the state vector.
         global_cond = self._prepare_global_conditioning(batch)  # (B, global_cond_dim)
 
-        # run sampling
-        actions = self.conditional_sample(batch_size, global_cond=global_cond)
+        # Run sampling.
+        if not self.training and self.config.sample_with_uncertainty:
+            if batch_size != 1:
+                raise ValueError(
+                    f"Sampling with uncertainty requires batch size of 1, but got {batch_size}."
+                )
+            
+            # Sample action sequence candidates and compute their uncertainty scores.
+            action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
+                global_cond=global_cond
+            )
+
+            print(f"Uncertainty score: {uncertainties}")
+
+            # Pick one action sequence at random
+            rand_idx = random.randrange(self.uncertainty_sampler.num_action_seq_samples)
+            actions = action_candidates[rand_idx : rand_idx+1]
+
+            if self.config.uncertainty_sampler == "composed_action_seq_likelihood":
+                self.uncertainty_sampler.prev_global_cond = global_cond
+                self.uncertainty_sampler.prev_action_sequence = actions
+        else:
+            actions = self.conditional_sample(batch_size, global_cond=global_cond)
 
         # Extract `n_action_steps` steps worth of actions (from the current observation).
         start = n_obs_steps - 1
@@ -512,10 +542,7 @@ class FlowMatchingConv1dBlock(nn.Module):
 
 
 class FlowMatchingConditionalUnet1d(nn.Module):
-    """A 1D convolutional UNet with FiLM modulation for conditioning.
-
-    Note: this removes local conditioning as compared to the original diffusion policy code.
-    """
+    """A 1D convolutional UNet with FiLM modulation for conditioning."""
 
     def __init__(self, config: FlowMatchingConfig, global_cond_dim: int):
         super().__init__()
