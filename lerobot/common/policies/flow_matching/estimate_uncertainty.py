@@ -56,6 +56,15 @@ class FlowMatchingUncertaintySampler(ABC):
         pass
 
 class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
+    """
+    Samples action sequences, composes them with a previously executed sequence segment, 
+    and uses their negative log-likelihoods under the flow matching model 
+    as uncertainty scores.
+
+    The key idea is that if the composed sequences have a high likelihood, then the model
+    successfully anticipated what is likely to happen next. This implies a good internal model 
+    of the environment.
+    """
     def __init__(
         self,
         config: FlowMatchingConfig,
@@ -77,6 +86,8 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             generator=generator,
         )
         self.exact_divergence = exact_divergence
+        # Store the action sequence and conditioning vector from the previous action
+        # sequence generation
         self.prev_action_sequence = None
         self.prev_global_cond = None
 
@@ -84,6 +95,21 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
         self,
         global_cond: Tensor,
     ) -> Tuple[Tensor, Tensor]:
+        """
+        Samples `num_action_seq_samples` many new action sequences and computes
+        uncertainty scores by composing them with a previous action sequence and evaluating
+        their negative log-likelihoods under the flow model.
+
+        Args:
+            global_cond: Single conditioning feature vector for the velocity
+                model. Shape: [cond_dim,] or [1, cond_dim].
+
+        Returns:
+            - Action sequence samples. Shape: [num_action_seq_samples, horizon, action_dim].
+            - Uncertainty scores given by negative log-likelihood of composed trajectories.
+              Shape: [num_action_seq_samples,]
+        """
+        # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
         if self.prev_global_cond is not None:
             self.prev_global_cond = self._prepare_conditioning(self.prev_global_cond)
@@ -91,7 +117,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
 
-        # Sample noise priors.
+        # Sample noise priors
         noise_samples = torch.randn(
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=dtype,
@@ -99,7 +125,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             generator=self.generator,
         )
 
-        # Noise distribution is an isotropic Gaussian.
+        # Noise distribution is an isotropic Gaussian
         gaussian_log_density = Independent(
             Normal(
                 loc = torch.zeros(self.horizon, self.action_dim, device=device),
@@ -108,8 +134,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             reinterpreted_batch_ndims=2
         ).log_prob
 
-        # Sample new action sequences by solving the flow matching ODE in
-        # forward direction
+        # Solve ODE forward from noise to sample action sequences
         ode_solver = ODESolver(self.velocity_model)
         new_action_seqs = ode_solver.sample(
             x_0=noise_samples,
@@ -120,6 +145,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             rtol=self.config.rtol,
         )
 
+        # If no previous trajectory is stored, return placeholder uncertainties
         if self.prev_action_sequence is None:
             uncertainty_scores = torch.full(
                 (self.num_action_seq_samples,),
@@ -129,15 +155,21 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             )
             return new_action_seqs, uncertainty_scores
 
+        # Indices where to split and recompose the trajectory
         prev_action_seq_end = self.config.n_obs_steps - 1 + self.config.n_action_steps
         new_action_seqs_start = self.config.n_obs_steps - 1
-        new_action_seqs_end = new_action_seqs_start + (self.horizon - prev_action_seq_end) # 1 + (16 - 9) = 8
+        new_action_seqs_end = new_action_seqs_start + (self.horizon - prev_action_seq_end)
+        
+        # Repeat previous prefix to match batch dimension
         prev_action_sequence_duplicated = self.prev_action_sequence.expand(self.num_action_seq_samples, -1, -1)
+        
+        # Compose full action sequences from stored prefix and newly sampled action sequences
         composed_action_seqs = torch.cat([
             prev_action_sequence_duplicated[:, :prev_action_seq_end, :],
             new_action_seqs[:, new_action_seqs_start:new_action_seqs_end, :]
         ], dim=1)    
 
+        # Compute log-likelihood of composed action sequences
         _, log_probs = ode_solver.sample_with_log_likelihood(
             x_init=composed_action_seqs,
             time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
@@ -151,7 +183,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             generator=self.generator,
         )
 
-        # Uncertainty score is given by -log(p_1(x_1))
+        # Use negative log-likelihood as uncertainty score
         uncertainty_scores = -log_probs
 
         return new_action_seqs, uncertainty_scores
