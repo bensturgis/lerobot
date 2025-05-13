@@ -18,6 +18,7 @@ import importlib
 import gymnasium as gym
 
 from lerobot.common.envs.configs import AlohaEnv, EnvConfig, PushtEnv, XarmEnv
+from lerobot.common.envs.wrappers import PerturbationWrapper
 
 
 def make_env_config(env_type: str, **kwargs) -> EnvConfig:
@@ -60,10 +61,16 @@ def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> g
 
     gym_handle = f"{package_name}/{cfg.task}"
 
+    def make_single_env():
+        env = gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs)
+        if cfg.perturbate:
+            env = PerturbationWrapper(env)             # you can expose min/max frac via cfg if desired
+        return env
+    
     # batched version of the env that returns an observation of shape (b, c)
     env_cls = gym.vector.AsyncVectorEnv if use_async_envs else gym.vector.SyncVectorEnv
     env = env_cls(
-        [lambda: gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs) for _ in range(n_envs)]
+        [make_single_env for _ in range(n_envs)]
     )
 
     return env

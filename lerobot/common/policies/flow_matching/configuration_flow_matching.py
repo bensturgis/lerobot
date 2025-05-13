@@ -96,8 +96,11 @@ class FlowMatchingConfig(PreTrainedConfig):
 
     # Sampler with uncertainty.
     sample_with_uncertainty: bool = True
-    uncertainty_sampler: str = "composed_action_seq_likelihood"
-    num_candidate_actions: int = 3
+    # Available methods for uncertainty sampling: "epsilon_ball_expansion",
+    # "action_seq_likelihood", "composed_action_seq_likelihood"
+    uncertainty_sampler: str = "epsilon_ball_expansion"
+    num_candidate_actions: int = 1
+    num_eps_ball_samples: int = 100
 
     # Loss computation
     do_mask_loss_for_padding: bool = False
