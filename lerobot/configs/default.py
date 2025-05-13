@@ -58,7 +58,8 @@ class EvalConfig:
     batch_size: int = 50
     # `use_async_envs` specifies whether to use asynchronous environments (multiprocessing).
     use_async_envs: bool = False
-
+    # `show` enables live visualization of the first environment during evaluation
+    show: bool = False
     def __post_init__(self):
         if self.batch_size > self.n_episodes:
             raise ValueError(

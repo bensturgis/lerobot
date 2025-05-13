@@ -60,6 +60,7 @@ from typing import Callable
 import einops
 import gymnasium as gym
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 from termcolor import colored
 from torch import Tensor, nn
@@ -223,6 +224,7 @@ def eval_policy(
     n_episodes: int,
     max_episodes_rendered: int = 0,
     videos_dir: Path | None = None,
+    live_vis: bool = False,
     return_episode_data: bool = False,
     start_seed: int | None = None,
 ) -> dict:
@@ -233,6 +235,7 @@ def eval_policy(
         n_episodes: The number of episodes to evaluate.
         max_episodes_rendered: Maximum number of episodes to render into videos.
         videos_dir: Where to save rendered videos.
+        live_vis: If True, visualize the first environment live during evaluation.
         return_episode_data: Whether to return episode data for online training. Incorporates the data into
             the "episodes" key of the returned dictionary.
         start_seed: The first seed to use for the first individual rollout. For all subsequent rollouts the
@@ -263,6 +266,12 @@ def eval_policy(
     threads = []  # for video saving threads
     n_episodes_rendered = 0  # for saving the correct number of videos
 
+    # Setup for live visualization of first environment
+    if live_vis:
+        plt.ion()
+        render_fig, render_ax = plt.subplots(num="Live Evaluation Visualization")
+        render_ax.axis("off")
+
     # Callback for visualization.
     def render_frame(env: gym.vector.VectorEnv):
         # noqa: B023
@@ -274,6 +283,18 @@ def eval_policy(
         elif isinstance(env, gym.vector.AsyncVectorEnv):
             # Here we must render all frames and discard any we don't need.
             ep_frames.append(np.stack(env.call("render")[:n_to_render_now]))
+
+        # Live visualization of first environment
+        if live_vis:
+            first_env_frame = env.envs[0].render()
+            if not hasattr(render_ax, "_img"):
+                render_ax._img = render_ax.imshow(first_env_frame)
+            else:
+                render_ax._img.set_data(first_env_frame)
+
+            render_fig.canvas.draw_idle()
+            render_fig.canvas.flush_events()
+            plt.pause(0.001)
 
     if max_episodes_rendered > 0:
         video_paths: list[str] = []
@@ -488,6 +509,7 @@ def eval_main(cfg: EvalPipelineConfig):
             cfg.eval.n_episodes,
             max_episodes_rendered=10,
             videos_dir=Path(cfg.output_dir) / "videos",
+            live_vis=cfg.eval.show,
             start_seed=cfg.seed,
         )
     print(info["aggregated"])

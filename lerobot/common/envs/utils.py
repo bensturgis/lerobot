@@ -101,9 +101,17 @@ def check_env_attributes_and_types(env: gym.vector.VectorEnv) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("once", UserWarning)  # Apply filter only in this function
 
-        if not (hasattr(env.envs[0], "task_description") and hasattr(env.envs[0], "task")):
+        if hasattr(env, "unwrapped"):
+            base_env = env.unwrapped
+        elif hasattr(env, "envs") and hasattr(env.envs[0], "unwrapped"):
+            base_env = env.envs[0].unwrapped
+        else:
+            base_env = env
+
+        if not (hasattr(base_env, "task_description") and hasattr(base_env, "task")):
             warnings.warn(
-                "The environment does not have 'task_description' and 'task'. Some policies require these features.",
+                "The environment does not have 'task_description' and/or 'task'. "
+                "Some policies require these features.",
                 UserWarning,
                 stacklevel=2,
             )
