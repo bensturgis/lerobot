@@ -112,20 +112,19 @@ def make_rgb_encoder(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
 def make_flow_matching_uncertainty_sampler(
     cfg: FlowMatchingConfig,
     velocity_model: nn.Module,
-    **kwargs,
 ) -> FlowMatchingUncertaintySampler:
     if cfg.uncertainty_sampler == "composed_action_seq_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedActionSequenceLikelihood
 
-        return ComposedActionSequenceLikelihood(cfg, velocity_model, **kwargs)
+        return ComposedActionSequenceLikelihood(cfg, cfg.action_seq_likelihood, velocity_model,)
     elif cfg.uncertainty_sampler == "action_seq_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ActionSequenceLikelihood
 
-        return ActionSequenceLikelihood(cfg, velocity_model, **kwargs)
+        return ActionSequenceLikelihood(cfg, cfg.action_seq_likelihood, velocity_model)
     elif cfg.uncertainty_sampler == "epsilon_ball_expansion":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallExpansion
 
-        return EpsilonBallExpansion(cfg, velocity_model, **kwargs)
+        return EpsilonBallExpansion(cfg, cfg.epsilon_ball_expansion, velocity_model)
 
 
 def make_policy(

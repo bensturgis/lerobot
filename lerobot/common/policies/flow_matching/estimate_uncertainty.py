@@ -5,7 +5,12 @@ from torch import nn, Tensor
 from torch.distributions import Independent, Normal
 from typing import Optional, Tuple
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.configuration_flow_matching import (
+    FlowMatchingConfig,
+    ComposedActionSeqLikConfig,
+    ActionSeqLikConfig,
+    EpsilonBallConfig,
+)
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
@@ -17,24 +22,24 @@ class FlowMatchingUncertaintySampler(ABC):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        flow_matching_cfg: FlowMatchingConfig,
         velocity_model: nn.Module,
         num_action_seq_samples: int,
         generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
-            config: Configuration object for Flow Matching settings.
+            flow_matching_cfg: Shared configuration object for Flow Matching settings.
             velocity_model: The learned flow matching velocity model.
             num_action_seq_samples: How many action sequences and corresponding
                 uncertainty scores to sample.
         """
-        self.config = config
+        self.flow_matching_cfg = flow_matching_cfg
         self.velocity_model = velocity_model
         self.num_action_seq_samples = num_action_seq_samples
         self.generator = generator
-        self.horizon = self.config.horizon
-        self.action_dim = self.config.action_feature.shape[0]
+        self.horizon = self.flow_matching_cfg.horizon
+        self.action_dim = self.flow_matching_cfg.action_feature.shape[0]
 
     @abstractmethod
     def conditional_sample_with_uncertainty(
@@ -67,25 +72,22 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        flow_matching_cfg: FlowMatchingConfig,
+        cfg: ComposedActionSeqLikConfig,
         velocity_model: nn.Module,
-        num_action_seq_samples: int = 1,
-        exact_divergence: bool = False,
         generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
-            exact_divergence: Whether to compute the exact divergence or estimate it
-                using the Hutchinson trace estimator when computing the log-likelihood
-                for an action sequence sample.
+            cfg: Sampler-specific settings.
         """
         super().__init__(
-            config=config,
+            flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
-            num_action_seq_samples=num_action_seq_samples,
+            num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
-        self.exact_divergence = exact_divergence
+        self.exact_divergence = cfg.exact_divergence
         # Store the action sequence and conditioning vector from the previous action
         # sequence generation
         self.prev_action_sequence = None
@@ -139,10 +141,10 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
         new_action_seqs = ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
-            step_size=self.config.ode_step_size,
-            method=self.config.ode_solver_method,
-            atol=self.config.atol,
-            rtol=self.config.rtol,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
         )
 
         # If no previous trajectory is stored, return placeholder uncertainties
@@ -156,8 +158,8 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             return new_action_seqs, uncertainty_scores
 
         # Indices where to split and recompose the trajectory
-        prev_action_seq_end = self.config.n_obs_steps - 1 + self.config.n_action_steps
-        new_action_seqs_start = self.config.n_obs_steps - 1
+        prev_action_seq_end = self.flow_matching_cfg.n_obs_steps - 1 + self.flow_matching_cfg.n_action_steps
+        new_action_seqs_start = self.flow_matching_cfg.n_obs_steps - 1
         new_action_seqs_end = new_action_seqs_start + (self.horizon - prev_action_seq_end)
         
         # Repeat previous prefix to match batch dimension
@@ -175,10 +177,10 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
             global_cond=self.prev_global_cond,
             log_p_0 = gaussian_log_density,
-            method=self.config.ode_solver_method,
-            step_size=self.config.ode_step_size,
-            atol=self.config.atol,
-            rtol=self.config.rtol,
+            method=self.flow_matching_cfg.ode_solver_method,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
             exact_divergence=self.exact_divergence,
             generator=self.generator,
         )
@@ -212,25 +214,22 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        flow_matching_cfg: FlowMatchingConfig,
+        cfg: ActionSeqLikConfig,
         velocity_model: nn.Module,
-        num_action_seq_samples: int = 1,
-        exact_divergence: bool = False,
         generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
-            exact_divergence: Whether to compute the exact divergence or estimate it
-                using the Hutchinson trace estimator when computing the log-likelihoods
-                log(p_1(x_1)) for the action sequnce samples x_1.
+            cfg: Sampler-specific settings.
         """
         super().__init__(
-            config=config,
+            config=flow_matching_cfg,
             velocity_model=velocity_model,
-            num_action_seq_samples=num_action_seq_samples,
+            num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
-        self.exact_divergence = exact_divergence
+        self.exact_divergence = cfg.exact_divergence
     
     def conditional_sample_with_uncertainty(
         self,
@@ -292,10 +291,10 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             time_grid=torch.tensor([0.0, 1.0], device=device, dtype=dtype),
             global_cond=global_cond,
             log_p_0 = gaussian_log_density,
-            method=self.config.ode_solver_method,
-            step_size=self.config.ode_step_size,
-            atol=self.config.atol,
-            rtol=self.config.rtol,
+            method=self.flow_matching_cfg.ode_solver_method,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
             exact_divergence=self.exact_divergence,
             generator=self.generator,
         )
@@ -313,27 +312,23 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        flow_matching_cfg: FlowMatchingConfig,
+        cfg: EpsilonBallConfig,
         velocity_model: nn.Module,
-        num_action_seq_samples: int = 1,
-        epsilon: float = 1e-3,
-        num_eps_ball_samples: int = 1000,
         generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
-            epsilon: Radius of the input noise ball.
-            num_eps_ball_samples: Number of samples to draw from epsilon-ball around initial
-                noise samples.
+            cfg: Sampler-specific settings.
         """
         super().__init__(
-            config=config,
+            flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
-            num_action_seq_samples=num_action_seq_samples,
+            num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
-        self.epsilon = epsilon
-        self.num_eps_ball_samples = num_eps_ball_samples
+        self.epsilon = cfg.epsilon
+        self.num_eps_ball_samples = cfg.num_eps_ball_samples
     
     def conditional_sample_with_uncertainty(
         self,
@@ -426,10 +421,10 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
             reference_action_sequence = ode_solver.sample(
                 x_0=noise_sample.unsqueeze(0),
                 global_cond=global_cond,
-                step_size=self.config.ode_step_size,
-                method=self.config.ode_solver_method,
-                atol=self.config.atol,
-                rtol=self.config.rtol,
+                step_size=self.flow_matching_cfg.ode_step_size,
+                method=self.flow_matching_cfg.ode_solver_method,
+                atol=self.flow_matching_cfg.atol,
+                rtol=self.flow_matching_cfg.rtol,
             )
             action_sequences[action_seq_idx] = reference_action_sequence
 
@@ -437,10 +432,10 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
             perturbed_action_sequences = ode_solver.sample(
                 x_0=epsilon_samples,
                 global_cond=global_cond.repeat(self.num_eps_ball_samples, 1),
-                step_size=self.config.ode_step_size,
-                method=self.config.ode_solver_method,
-                atol=self.config.atol,
-                rtol=self.config.rtol,
+                step_size=self.flow_matching_cfg.ode_step_size,
+                method=self.flow_matching_cfg.ode_solver_method,
+                atol=self.flow_matching_cfg.atol,
+                rtol=self.flow_matching_cfg.rtol,
             )
 
             # Compute average distance in action space.

@@ -1,10 +1,37 @@
 #!/usr/bin/env python
 from dataclasses import dataclass, field
+from typing import Literal
 
 from lerobot.common.optim.optimizers import AdamConfig
 from lerobot.common.optim.schedulers import DiffuserSchedulerConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import NormalizationMode
+
+# Sub-configs for each uncertainty sampler.
+@dataclass
+class ComposedActionSeqLikConfig:
+    # Number of candidate action sequences to sample .
+    num_action_seq_samples: int = 1
+    # Whether to compute the exact divergence or use the Hutchinson trace estimator
+    # when computing the log-likelihood for an action sequence sample.
+    exact_divergence: bool = False
+
+@dataclass
+class ActionSeqLikConfig:
+    # Number of candidate action sequences to sample.
+    num_action_seq_samples: int = 1
+    # Whether to compute the exact divergence or use the Hutchinson trace estimator
+    # when computing the log-likelihood for an action sequence sample.
+    exact_divergence: bool = False
+
+@dataclass
+class EpsilonBallConfig:
+    # Number of candidate action sequences to sample.
+    num_action_seq_samples: int = 1
+    # Radius of the input noise ball.
+    epsilon: float = 1e-3
+    # Number of samples to draw from epsilon-ball around initial noise samples.
+    num_eps_ball_samples: int = 100
 
 
 @PreTrainedConfig.register_subclass("flow_matching")
@@ -94,13 +121,17 @@ class FlowMatchingConfig(PreTrainedConfig):
     atol: float = 1e-5
     rtol: float = 1e-5
 
-    # Sampler with uncertainty.
+    # Uncertainty sampling.
     sample_with_uncertainty: bool = True
-    # Available methods for uncertainty sampling: "epsilon_ball_expansion",
-    # "action_seq_likelihood", "composed_action_seq_likelihood"
-    uncertainty_sampler: str = "epsilon_ball_expansion"
-    num_candidate_actions: int = 1
-    num_eps_ball_samples: int = 100
+    uncertainty_sampler: Literal[
+        "composed_action_seq_likelihood",
+        "action_seq_likelihood",
+        "epsilon_ball_expansion",
+    ] = "composed_action_seq_likelihood"
+    # per-sampler sub-configs:
+    composed_action_seq_likelihood: ComposedActionSeqLikConfig = field(default_factory=ComposedActionSeqLikConfig)
+    action_seq_likelihood: ActionSeqLikConfig = field(default_factory=ActionSeqLikConfig)
+    epsilon_ball_expansion: EpsilonBallConfig = field(default_factory=EpsilonBallConfig)
 
     # Loss computation
     do_mask_loss_for_padding: bool = False
