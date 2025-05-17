@@ -15,6 +15,8 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal, Optional, Sequence
 
 from lerobot.common import (
     policies,  # noqa: F401
@@ -58,8 +60,6 @@ class EvalConfig:
     batch_size: int = 50
     # `use_async_envs` specifies whether to use asynchronous environments (multiprocessing).
     use_async_envs: bool = False
-    # `show` enables live visualization of the first environment during evaluation
-    show: bool = False
     def __post_init__(self):
         if self.batch_size > self.n_episodes:
             raise ValueError(
@@ -70,3 +70,30 @@ class EvalConfig:
                 f"to increase the number of episodes to match the batch size (e.g. `eval.n_episodes={self.batch_size}`), "
                 f"or lower the batch size (e.g. `eval.batch_size={self.n_episodes}`)."
             )
+
+@dataclass
+class VisConfig:
+    """Options that control what we draw and how we save/show it."""
+    # "flows": flow matching trajectories
+    # "vector_field": 2-D velocity field
+    vis_type: Literal["flows", "vector_field"] = "flows"
+
+    # If set, start drawing only after this environment step
+    start_step: Optional[int] = None
+
+    # Hard cap on how many env steps to visualise
+    max_steps: Optional[int] = None
+
+    # Names of the action dimensions to visualize
+    action_dim_names: Optional[Sequence[str]] = field(default_factory=lambda: ["x", "y"])
+
+    # Parameters for flows visualization
+    action_dims: Sequence[int] = (0,1)
+    action_steps: Optional[list[int]] = None
+    num_paths: int = 300
+
+    # Parameters for vector field visualization
+    min_action: Sequence[float] = (-1.0, -1.0)
+    max_action: Sequence[float] = (1.0, 1.0)
+    grid_size: int = 50
+    time_grid: Optional[list[float]] = None

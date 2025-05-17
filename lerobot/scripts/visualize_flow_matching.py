@@ -1,135 +1,83 @@
 #!/usr/bin/env python
-"""
-Visualize flows produced by a trained flow matching policy to generate actions.
-
-Examples:
-    - Visualize the flow field of a policy trained on the Push-T dataset:
-    ```
-    local$ python lerobot/scripts/visualize_flow_matching.py \
-        -t flows \
-        -r lerobot/pusht \
-        -p outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
-    ```
-
-    - Visualize vector field for a policy trained on Push-T dataset with a horizon of 1:
-    local$ python lerobot/scripts/visualize_flow_matching.py \
-        -t vector_field \
-        -r lerobot/pusht \
-        -p outputs/train/flow_matching_pusht_single_action/checkpoints/last/pretrained_model
-"""
-
-import argparse
-import numpy as np
+import logging
+import time
 import torch
+from tqdm import trange
 
-from lerobot.common.datasets.factory import make_dataset
-from lerobot.common.datasets.utils import cycle
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
-from lerobot.common.policies.flow_matching.visualization_utils import FlowMatchingVisualizer
-from lerobot.configs.default import DatasetConfig
-from lerobot.configs.train import TrainPipelineConfig
+from lerobot.configs import parser
+from lerobot.configs.visualize import VisualizePipelineConfig
+from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizer
+from lerobot.common.envs.factory import make_env
+from lerobot.common.envs.utils import preprocess_observation
+from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 
-
-def visualize_flow_matching(
-    vis_type: str,
-    ds_repo_id: str,
-    pretrained_flow_matching_path: str
-):
-    # Initialize flow matching visualizer using pretrained flow matching policy.
-    flow_matching_policy = FlowMatchingPolicy.from_pretrained(pretrained_flow_matching_path)
-    flow_matching_model = flow_matching_policy.flow_matching
-
-    train_cfg = TrainPipelineConfig(
-        dataset=DatasetConfig(repo_id=ds_repo_id, episodes=[0]),
-        policy=flow_matching_policy.config,
-    )
-    dataset = make_dataset(train_cfg)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        num_workers=0,
-        batch_size=1,
-        shuffle=True,
-        pin_memory=device != "cpu",
-        drop_last=True,
-    )
-    dl_iter = cycle(dataloader)
-    batch = next(dl_iter)
-
-    for key in batch:
-        if isinstance(batch[key], torch.Tensor):
-            batch[key] = batch[key].to(device, non_blocking=True)
-
-    batch = flow_matching_policy.normalize_inputs(batch)
-    if flow_matching_policy.config.image_features:
-        batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
-        batch["observation.images"] = torch.stack(
-            [batch[key] for key in flow_matching_policy.config.image_features], dim=-4
+@parser.wrap()
+def main(cfg: VisualizePipelineConfig): 
+    logging.info("Loading policy")
+    if cfg.policy.type != "flow_matching":
+        raise ValueError(
+            f"visualize_flow_matching.py only supports Flow Matching policies, "
+            f"but got policy type '{cfg.policy.type}'."
         )
-        if flow_matching_policy.config.n_obs_steps == 1:
-            batch["observation.images"] = batch["observation.images"].unsqueeze(1)
+    device = get_safe_torch_device(cfg.policy.device, log=True)
+    policy = make_policy(cfg.policy, env_cfg=cfg.env).to(device)
+    policy.eval()
 
-    # Encode image features and concatenate them all together along with the state vector.
-    global_cond = flow_matching_model._prepare_global_conditioning(batch).squeeze(0)  # (B, global_cond_dim)
+    logging.info("Creating environment")
+    env = make_env(cfg.env, n_envs=1, use_async_envs=False)   # visualise first env only
+    observation, _ = env.reset(seed=cfg.seed)
+    start_time = time.time()
 
-    flow_matching_visualizer = FlowMatchingVisualizer(
-        config=flow_matching_policy.config,
-        velocity_model=flow_matching_model.unet,
-        action_dim_names=["Position x", "Position y"]
+    # Prepare visualiser
+    vis = make_flow_matching_visualizer(
+        vis_cfg=cfg.vis,
+        model_cfg=policy.config,
+        velocity_model=policy.flow_matching.unet,
+        output_root=cfg.output_dir,
     )
 
-    if vis_type == "flows":
-        # Visualize flow matching paths.
-        flow_matching_visualizer.visualize_flows(global_cond=global_cond)
-    elif vis_type == "vector_field":
-        # min_action = dataset.stats["action"]["min"]
-        # max_action = dataset.stats["action"]["max"]
+    # Roll through one episode
+    max_episode_steps = env.call("spec")[0].max_episode_steps
+    max_vis_steps = (max_episode_steps if cfg.vis.max_steps is None
+                     else min(max_episode_steps, cfg.vis.max_steps))
 
-        min_action = np.array([-1, -1])
-        max_action = np.array([1, 1])
+    prog = trange(max_vis_steps, desc="Roll-out for visualisation")
+    for step_idx in prog:
+        # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
+        observation = preprocess_observation(observation)
+        observation = {
+            key: observation[key].to(device, non_blocking=device.type == "cuda") for key in observation
+        }
+        
+        # Decide whether a new sequence will be generated
+        new_action_gen = len(policy._queues["action"]) == 0
+        
+        with torch.no_grad():
+            action = policy.select_action(observation)
 
-        # Visualize vector field.
-        flow_matching_visualizer.visualize_vector_field(
-            global_cond=global_cond,
-            min_action=min_action,
-            max_action=max_action,
-        )
+        if new_action_gen and (cfg.vis.start_step is None or step_idx >= cfg.vis.start_step):
+            # Stack the history of observations
+            batch = {
+                k: torch.stack(list(policy._queues[k]), dim=1)
+                for k in policy._queues
+                if k != "action"
+            }
 
-def main():
-    parser = argparse.ArgumentParser()
+            # build global-conditioning with the policy’s helper
+            global_cond = policy.flow_matching._prepare_global_conditioning(batch)
 
-    parser.add_argument(
-        "-t", "--vis-type",
-        type=str,
-        required=True,
-        choices=["flows", "vector_field"],
-        help=(
-            "Type of visualization to generate:\n"
-            "flows: per-step flow matching visualizations.\n"
-            "vector_field: overall 2D action vector field (requires action_dim=2 and horizon=1)."
-        ),
-    )
+            vis.visualize(global_cond=global_cond)            
 
-    parser.add_argument(
-        "-r", "--repo-id",
-        type=str,
-        required=True,
-        help="Name of hugging face repository containing a LeRobotDataset dataset (e.g. `lerobot/pusht`).",
-    )
+        observation, _, terminated, truncated, _ = env.step(action.cpu().numpy())
 
-    parser.add_argument(
-        "-p", "--pretrained-fm-path",
-        type=str,
-        required=True,
-        help="Path to a pretrained flow‐matching policy checkpoint file.",
-    )
+        # stop early if env terminates
+        done |= (terminated | truncated)            # element-wise OR
+        if done.all():                              # every env finished
+            break
 
-    args = parser.parse_args()
-    visualize_flow_matching(
-        args.vis_type,
-        args.repo_id,
-        args.pretrained_fm_path,
-    )
+    logging.info(f"Finished in {time.time() - start_time:.1f}s")
+
 
 if __name__ == "__main__":
+    init_logging()
     main()

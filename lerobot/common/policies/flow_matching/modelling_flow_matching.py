@@ -5,6 +5,7 @@
 import math
 import random
 from collections import deque
+from tqdm import tqdm
 
 import einops
 import numpy as np
@@ -166,8 +167,7 @@ class FlowMatchingModel(nn.Module):
         if self.config.sample_with_uncertainty:
             self.uncertainty_sampler = make_flow_matching_uncertainty_sampler(
                 cfg=self.config,
-                velocity_model=self.unet,
-                num_action_seq_samples=self.config.num_candidate_actions,
+                velocity_model=self.unet
             )
 
     # ========= inference  ============
@@ -265,7 +265,7 @@ class FlowMatchingModel(nn.Module):
                 global_cond=global_cond
             )
 
-            print(f"Uncertainty score: {uncertainties}")
+            tqdm.write(f"Uncertainty score: {uncertainties}")
 
             # Pick one action sequence at random
             rand_idx = random.randrange(self.uncertainty_sampler.num_action_seq_samples)

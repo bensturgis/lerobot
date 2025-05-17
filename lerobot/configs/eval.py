@@ -32,6 +32,8 @@ class EvalPipelineConfig:
     eval: EvalConfig = field(default_factory=EvalConfig)
     policy: PreTrainedConfig | None = None
     output_dir: Path | None = None
+    # `show` enables live visualization of the first environment during evaluation
+    show: bool = False
     job_name: str | None = None
     seed: int | None = 1000
 
