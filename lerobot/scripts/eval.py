@@ -57,10 +57,10 @@ from pathlib import Path
 from pprint import pformat
 from typing import Callable
 
+import cv2
 import einops
 import gymnasium as gym
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 from termcolor import colored
 from torch import Tensor, nn
@@ -72,6 +72,7 @@ from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.io_utils import write_video
+from lerobot.common.utils.live_window import LiveWindow
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import (
     get_safe_torch_device,
@@ -268,9 +269,7 @@ def eval_policy(
 
     # Setup for live visualization of first environment
     if live_vis:
-        plt.ion()
-        render_fig, render_ax = plt.subplots(num="Live Evaluation Visualization")
-        render_ax.axis("off")
+        live_view = LiveWindow("Live Evaluation Visualization")
 
     # Callback for visualization.
     def render_frame(env: gym.vector.VectorEnv):
@@ -286,15 +285,8 @@ def eval_policy(
 
         # Live visualization of first environment
         if live_vis:
-            first_env_frame = env.envs[0].render()
-            if not hasattr(render_ax, "_img"):
-                render_ax._img = render_ax.imshow(first_env_frame)
-            else:
-                render_ax._img.set_data(first_env_frame)
-
-            render_fig.canvas.draw_idle()
-            render_fig.canvas.flush_events()
-            plt.pause(0.001)
+            rgb = env.envs[0].render()
+            live_view.enqueue_frame(rgb[..., ::-1])
 
     if max_episodes_rendered > 0:
         video_paths: list[str] = []
@@ -390,6 +382,10 @@ def eval_policy(
         progbar.set_postfix(
             {"running_success_rate": f"{np.mean(all_successes[:n_episodes]).item() * 100:.1f}%"}
         )
+
+    # Close the live visualization
+    if live_vis:
+        live_view.close()
 
     # Wait till all video rendering threads are done.
     for thread in threads:
@@ -490,6 +486,8 @@ def eval_main(cfg: EvalPipelineConfig):
     set_seed(cfg.seed)
 
     logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
+
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
     logging.info("Making environment.")
     env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
