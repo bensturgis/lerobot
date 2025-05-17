@@ -112,4 +112,7 @@ class PerturbationWrapper(gym.Wrapper):
                 UserWarning,
                 stacklevel=2,
             )
+        else:
+            frame = self._apply_patch(frame.copy())
+
         return frame
