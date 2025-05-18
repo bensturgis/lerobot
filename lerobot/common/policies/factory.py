@@ -18,7 +18,7 @@ import logging
 
 from pathlib import Path
 from torch import nn
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.common.datasets.utils import dataset_to_policy_features
@@ -30,6 +30,7 @@ from lerobot.common.policies.flow_matching.configuration_flow_matching import Fl
 from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintySampler
 from lerobot.common.policies.flow_matching.visualizer import (
     FlowMatchingVisualizer,
+    ActionSeqVisualizer,
     FlowVisualizer,
     VectorFieldVisualizer,
 )
@@ -135,15 +136,16 @@ def make_flow_matching_uncertainty_sampler(
         return EpsilonBallExpansion(cfg, cfg.epsilon_ball_expansion, velocity_model)
 
 
-def make_flow_matching_visualizer(
+def make_flow_matching_visualizers(
     vis_cfg: VisConfig,
     model_cfg: FlowMatchingConfig,
     velocity_model: nn.Module,
     output_root: Optional[Union[str, Path]] = None,
-) -> FlowMatchingVisualizer:
+    unnormalize_outputs: Optional[nn.Module] = None,
+) -> Sequence[FlowMatchingVisualizer]:
     """
     Factory that picks and constructs the right flow matching visualizer
-    subclass based on vis_cfg.vis_type.
+    subclasses based on vis_cfg.vis_types.
     """
     common_kwargs = dict(
         config = model_cfg,
@@ -156,23 +158,45 @@ def make_flow_matching_visualizer(
         verbose = False,
     )
 
-    if vis_cfg.vis_type == "flows":
-        return FlowVisualizer(
-            **common_kwargs,
-            action_dims  = vis_cfg.action_dims,
-            action_steps = vis_cfg.action_steps,
-            num_paths    = vis_cfg.num_paths,
-        )
-    elif vis_cfg.vis_type == "vector_field":
-        return VectorFieldVisualizer(
-            **common_kwargs,
-            min_action = vis_cfg.min_action,
-            max_action = vis_cfg.max_action,
-            grid_size  = vis_cfg.grid_size,
-            time_grid  = vis_cfg.time_grid,
-        )
-    else:
-        raise ValueError(f"Unknown visualization type {vis_cfg.vis_type}.")
+    visualizers = []
+    for vis_type in vis_cfg.vis_types:
+        if vis_type == "flows":
+            visualizers.append(
+                FlowVisualizer(
+                    **common_kwargs,
+                    action_dims = vis_cfg.action_dims,
+                    action_steps = vis_cfg.action_steps,
+                    num_paths = vis_cfg.num_paths,
+                )
+            )
+        elif vis_type == "vector_field":
+            visualizers.append(
+                VectorFieldVisualizer(
+                    **common_kwargs,
+                    min_action = vis_cfg.min_action,
+                    max_action = vis_cfg.max_action,
+                    grid_size = vis_cfg.grid_size,
+                    time_grid = vis_cfg.time_grid,
+                )
+            )
+        elif vis_type == "action_seq":
+            if unnormalize_outputs is None:
+                raise ValueError(
+                    "Require `unnormalize_outputs` module to create ActionSeqVisualizer "
+                    "to map normalized actions back to the original scale."
+                )
+            
+            visualizers.append(
+                ActionSeqVisualizer(
+                    **common_kwargs,
+                    unnormalize_outputs=unnormalize_outputs,
+                    num_action_seq=vis_cfg.num_action_seq,
+                )
+            ) 
+        else:
+            raise ValueError(f"Unknown visualization type {vis_type}.")
+        
+    return visualizers
 
 
 def make_policy(

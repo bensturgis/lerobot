@@ -1,4 +1,5 @@
 import imageio
+from matplotlib.collections import LineCollection
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -48,32 +49,35 @@ class FlowMatchingVisualizer(ABC):
         self.verbose = verbose
 
     @abstractmethod
-    def visualize(self, global_cond: Tensor):
+    def visualize(self, global_cond: Tensor, **kwargs):
         """
         Run the visualization using the provided conditioning vector.
 
         Args:
             global_cond: Single conditioning feature vector for the velocity model.
             Shape [cond_dim,] or [1, cond_dim].
+            **kwargs: Visualiser-specific keyword arguments.
         """
         pass
 
     def _update_run_dir(self) -> Path:
         """
-        Create a new, empty run-numbered folder and return its path.
+        Create a new, empty folder and return its path.
         """
         if self.output_root is None:
             self.output_root = Path("outputs/visualizations/")
         
         vis_type_dir = self.output_root / self.vis_type
         vis_type_dir.mkdir(parents=True, exist_ok=True)
-        run_idx = 1
-        while (vis_type_dir / f"{run_idx:04d}").exists():
-            run_idx += 1
-        run_dir = vis_type_dir / f"{run_idx:04d}"
-        run_dir.mkdir()
-
-        return run_dir
+        if self.vis_type == "action_seq":
+            return vis_type_dir
+        else:
+            run_idx = 1
+            while (vis_type_dir / f"{run_idx:04d}").exists():
+                run_idx += 1
+            run_dir = vis_type_dir / f"{run_idx:04d}"
+            run_dir.mkdir()
+            return run_dir
     
     def _save_figure(
         self,
@@ -94,6 +98,11 @@ class FlowMatchingVisualizer(ABC):
             filename = f"flows_action_{action_step+1:02d}.png"
         elif self.vis_type == "vector_field":
             filename = f"vector_field_{int(time * 10):02d}.png"
+        elif self.vis_type == "action_seq":
+            action_seq_idx = 1
+            while (self.run_dir / f"action_seqs_{action_seq_idx:04d}.png").exists():
+                action_seq_idx += 1
+            filename = f"action_seqs_{action_seq_idx:04d}"
         else:
             raise ValueError(
                 f"Invalid vis_type '{self.vis_type}'. Expected 'flows' or 'vector_field'."
@@ -107,7 +116,7 @@ class FlowMatchingVisualizer(ABC):
             if self.verbose:
                 print(f"Saved figure to {filepath}.")
 
-    def _create_flows_gif(self, duration: float = 0.2):
+    def _create_gif(self, duration: float = 0.2):
         """
         Create an animated GIF from a sequence of saved flow
         or vector field plot images.
@@ -135,6 +144,168 @@ class FlowMatchingVisualizer(ABC):
             imageio.mimsave(str(gif_path), frames, duration=duration)
             if self.verbose:
                 print(f"Saved GIF to {gif_path}")
+
+
+# TODO: Add action sequence visualization to live stream and video of policy rollout
+class ActionSeqVisualizer(FlowMatchingVisualizer):
+    """
+    Visualizer for plotting a batch of action sequences onto the current observation frame.
+    """
+    def __init__(
+        self,
+        config: FlowMatchingConfig,
+        velocity_model: nn.Module,
+        unnormalize_outputs: nn.Module,
+        num_action_seq: int,
+        action_dim_names: Optional[Sequence[str]],
+        output_root: Optional[Union[Path, str]],
+        show: bool = False,
+        save: bool = True,
+        create_gif: bool = False,
+        verbose: bool = False,
+    ):
+        """
+        Args:
+            unnormalize_outputs: Module to map model outputs from normalized space
+                back to original action coordinates.
+            num_action_seq: Number of action sequences to plot.
+        """
+        super().__init__(
+            config=config,
+            velocity_model=velocity_model,
+            action_dim_names=action_dim_names,
+            show=show,
+            save=save,
+            output_root=output_root,
+            create_gif=create_gif,
+            verbose=verbose,
+        )
+        if self.config.action_feature.shape[0] != 2:
+            raise ValueError(
+                "The action sequence visualisation requires action_dim = 2, "
+                f"but got action_dim = {self.config.action_feature.shape[0]}."
+            )
+        self.num_action_seq = num_action_seq
+        self.unnormalize_outputs = unnormalize_outputs
+        self.vis_type = "action_seq"
+        self.run_dir = self._update_run_dir()
+        
+    def visualize(self, global_cond: Tensor, **kwargs):
+        """
+        Visualize a batch of action sequences onto the current frame.
+
+        Args:
+            global_cond: Single conditioning feature vector for the velocity model.
+                Shape: [cond_dim,] or [1, cond_dim].
+            **kwargs: Must contain argument `frame` which is the current RGB video
+                frame to draw on. Shape: [H, W, 3].
+        """
+        if "frame" not in kwargs:
+            raise ValueError(
+                "ActionSeqVisualizer expects the keyword argument 'frame' (RGB image), "
+                "but it was not provided."
+            )
+        frame: np.ndarray = kwargs["frame"]
+        
+        if global_cond.dim() == 1: # shape = (cond_dim,)
+            global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
+        elif global_cond.dim() == 2 and global_cond.size(0) == 1: # shape = (1, cond_dim)
+            pass
+        else:
+            raise ValueError(
+                f"Expected global_cond to contain exactly one feature vector "
+                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
+            )
+
+        device = get_device_from_parameters(self.velocity_model)
+        dtype = get_dtype_from_parameters(self.velocity_model)
+        
+        # Initialize ODE solver
+        ode_solver = ODESolver(self.velocity_model)
+        
+        # Sample noise from prior
+        noise_sample = torch.randn(
+            size=(self.num_action_seq, self.config.horizon, self.config.action_feature.shape[0]),
+            dtype=dtype,
+            device=device,
+        )
+
+        # Sample a bathc of action sequences
+        actions = ode_solver.sample(
+            x_0=noise_sample,
+            global_cond=global_cond.repeat(self.num_action_seq, 1),
+            step_size=self.config.ode_step_size,
+            method=self.config.ode_solver_method,
+            atol=self.config.atol,
+            rtol=self.config.rtol,
+        )
+
+        # Convert the model-predicted actions from the network’s normalised space
+        # back into PushT world coordinates
+        actions = self.unnormalize_outputs({"action": actions})["action"]
+
+        fig = self._create_action_seq_image(frame=frame, actions=actions.cpu())
+
+        if self.show:
+            plt.show(block=True)
+        if self.save:
+            self._save_figure(fig)
+
+        plt.close(fig)
+
+    def _create_action_seq_image(self, frame: np.ndarray, actions: Tensor) -> plt.Figure:
+        """
+        Render action trajectories on top of a Gym environment frame.
+        """
+        was_interactive = plt.isinteractive()
+        plt.ioff()
+
+        # Flip the image vertically to convert from image to world coords
+        frame = np.flipud(frame)
+
+        # Create a square figure that maps world coords [0,512] to the image axes
+        fig, ax = plt.subplots(figsize=(3, 3), dpi=300)
+        ax.imshow(frame, extent=[0, 512, 0, 512])
+        ax.set_xlim(0, 512)
+        ax.set_ylim(0, 512)
+        ax.set_aspect("equal")
+        ax.axis("off")
+    
+        # Prepare a colormap over the trajectory length
+        norm = plt.Normalize(0, self.config.horizon - 1)
+        cmap = plt.get_cmap("turbo")
+    
+        # Draw each action sequence as a colourful line strip
+        for action_seq in actions:
+            segments = [
+                [tuple(action_seq[i]), tuple(action_seq[i+1])]
+                for i in range(self.config.horizon - 1)
+            ]
+            lc = LineCollection(
+                segments,
+                cmap=cmap,
+                norm=norm,
+                linewidths=2,
+                linestyles='solid',
+            )
+            # Assign each segment its action step index as the “value”
+            # for the colour mapping
+            lc.set_array(np.arange(self.config.horizon - 1))
+            ax.add_collection(lc)
+
+            # Mark the final action target with a filled circle
+            ax.scatter(
+                action_seq[-1, 0], action_seq[-1, 1],
+                c=[cmap(1.0)], s=30, edgecolors='k',
+                linewidths=0.5, zorder=3,
+            )
+
+        plt.tight_layout(pad=0)
+
+        if was_interactive:
+            plt.ion()
+
+        return fig
 
 
 class FlowVisualizer(FlowMatchingVisualizer):
@@ -188,7 +359,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
     # TODO:
     # - Add option to visualize 3D flows
-    def visualize(self, global_cond: Tensor):
+    def visualize(self, global_cond: Tensor, **kwargs):
         """
         Visualize flow trajectories for specified action steps and dimensions.
 
@@ -284,7 +455,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             plt.close(fig)
 
         if self.create_gif:
-            self._create_flows_gif()
+            self._create_gif()
 
     def _create_flow_plot(
         self,
@@ -404,7 +575,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             self.time_grid = time_grid
         self.vis_type = "vector_field"
     
-    def visualize(self, global_cond: Tensor):
+    def visualize(self, global_cond: Tensor, **kwargs):
         """
         Visualize the 2D action vector field produced by a flow matching policy at a given time.
 
@@ -474,7 +645,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             plt.close(fig)
 
         if self.create_gif:
-            self._create_flows_gif()
+            self._create_gif()
     
     def _create_vector_field_plot(
         self,

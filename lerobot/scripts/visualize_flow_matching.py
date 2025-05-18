@@ -8,7 +8,7 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.visualize import VisualizePipelineConfig
-from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizer
+from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizers
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.utils.io_utils import write_video
@@ -32,27 +32,30 @@ def main(cfg: VisualizePipelineConfig):
     observation, _ = env.reset(seed=cfg.seed)
     
     # Callback for visualization.
-    def render_frame(env: gym.Env):
-        video_frames.append(env.render())
+    def render_frame(env: gym.Env) -> np.ndarray:
+        rgb_frame = env.render()
+        video_frames.append(rgb_frame)
 
         # Live visualization
         if cfg.show:
-            rgb = env.render()
-            live_view.enqueue_frame(rgb[..., ::-1])
+            live_view.enqueue_frame(rgb_frame[..., ::-1])
+        
+        return rgb_frame
 
     # Cache frames for creating video
     video_frames: list[np.ndarray] = []
     # Setup for live visualization
     if cfg.show:
         live_view = LiveWindow("Live Visualization")
-    render_frame(env)
+    cur_frame = render_frame(env)
 
-    # Prepare visualiser
-    visualizer = make_flow_matching_visualizer(
+    # Prepare visualisers
+    visualizers = make_flow_matching_visualizers(
         vis_cfg=cfg.vis,
         model_cfg=policy.config,
         velocity_model=policy.flow_matching.unet,
         output_root=cfg.output_dir,
+        unnormalize_outputs=policy.unnormalize_outputs,
     )
 
     # Roll through one episode
@@ -90,11 +93,12 @@ def main(cfg: VisualizePipelineConfig):
             # build global-conditioning with the policy's helper
             global_cond = policy.flow_matching._prepare_global_conditioning(batch)
 
-            visualizer.visualize(global_cond=global_cond)            
+            for visualizer in visualizers:
+                visualizer.visualize(global_cond=global_cond, frame=cur_frame.copy())                
 
         # Apply the next action
         observation, _, terminated, truncated, _ = env.step(action[0].cpu().numpy())
-        render_frame(env)
+        cur_frame = render_frame(env)
 
         # Stop early if environment terminates
         done = terminated or truncated

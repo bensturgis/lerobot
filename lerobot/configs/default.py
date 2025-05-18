@@ -16,7 +16,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional, Sequence
+from typing import List, Literal, Optional, Sequence
 
 from lerobot.common import (
     policies,  # noqa: F401
@@ -74,9 +74,10 @@ class EvalConfig:
 @dataclass
 class VisConfig:
     """Options that control what we draw and how we save/show it."""
-    # "flows": flow matching trajectories
-    # "vector_field": 2-D velocity field
-    vis_type: Literal["flows", "vector_field"] = "flows"
+    # Which visualizers to run (you can pick one or more)
+    vis_types: List[Literal["flows", "vector_field", "action_seq"]] = field(
+        default_factory=lambda: ["action_seq", "flows"]
+    )
 
     # If set, start drawing only after this environment step
     start_step: Optional[int] = None
@@ -86,6 +87,9 @@ class VisConfig:
 
     # Names of the action dimensions to visualize
     action_dim_names: Optional[Sequence[str]] = field(default_factory=lambda: ["x", "y"])
+
+    # Parameters for action sequence visualization
+    num_action_seq: int = 30
 
     # Parameters for flows visualization
     action_dims: Sequence[int] = (0,1)
