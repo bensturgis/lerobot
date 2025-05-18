@@ -35,13 +35,22 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, Ten
     Returns:
         Dictionary of observation batches with keys renamed to LeRobot format and values as tensors.
     """
-    # map to expected inputs for the policy
-    return_observations = {}
+    def ensure_batch(x: np.ndarray) -> np.ndarray:
+        # If it's a single-env image (H,W,C) or state vector (D,), turn it into (1,H,W,C) or (1,D)
+        if x.ndim == 3 or x.ndim == 1:
+            return x[None]
+        return x
+
+    return_observations: dict[str, Tensor] = {}
+
     if "pixels" in observations:
         if isinstance(observations["pixels"], dict):
-            imgs = {f"observation.images.{key}": img for key, img in observations["pixels"].items()}
+            imgs = {
+                f"observation.images.{key}": ensure_batch(img)
+                for key, img in observations["pixels"].items()
+            }
         else:
-            imgs = {"observation.image": observations["pixels"]}
+            imgs = {"observation.image": ensure_batch(observations["pixels"])}
 
         for imgkey, img in imgs.items():
             # TODO(aliberts, rcadene): use transforms.ToTensor()?
@@ -62,13 +71,17 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, Ten
             return_observations[imgkey] = img
 
     if "environment_state" in observations:
+        env_state = ensure_batch(observations["environment_state"])
         return_observations["observation.environment_state"] = torch.from_numpy(
-            observations["environment_state"]
+            env_state
         ).float()
 
     # TODO(rcadene): enable pixels only baseline with `obs_type="pixels"` in environment by removing
     # requirement for "agent_pos"
-    return_observations["observation.state"] = torch.from_numpy(observations["agent_pos"]).float()
+    agent_pos = observations["agent_pos"]
+    agent_pos = ensure_batch(agent_pos)
+    return_observations["observation.state"] = torch.from_numpy(agent_pos).float()
+
     return return_observations
 
 

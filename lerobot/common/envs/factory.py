@@ -31,6 +31,21 @@ def make_env_config(env_type: str, **kwargs) -> EnvConfig:
     else:
         raise ValueError(f"Policy type '{env_type}' is not available.")
 
+def make_single_env(cfg: EnvConfig):
+    package_name = f"gym_{cfg.type}"
+    
+    try:
+        importlib.import_module(package_name)
+    except ModuleNotFoundError as e:
+        print(f"{package_name} is not installed. Please install it with `pip install 'lerobot[{cfg.type}]'`")
+        raise e
+    
+    gym_handle = f"{package_name}/{cfg.task}"
+    
+    env = gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs)
+    if cfg.perturbate:
+        env = PerturbationWrapper(env)             # you can expose min/max frac via cfg if desired
+    return env
 
 def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the config.
@@ -58,19 +73,11 @@ def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> g
     except ModuleNotFoundError as e:
         print(f"{package_name} is not installed. Please install it with `pip install 'lerobot[{cfg.type}]'`")
         raise e
-
-    gym_handle = f"{package_name}/{cfg.task}"
-
-    def make_single_env():
-        env = gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs)
-        if cfg.perturbate:
-            env = PerturbationWrapper(env)             # you can expose min/max frac via cfg if desired
-        return env
     
     # batched version of the env that returns an observation of shape (b, c)
     env_cls = gym.vector.AsyncVectorEnv if use_async_envs else gym.vector.SyncVectorEnv
     env = env_cls(
-        [make_single_env for _ in range(n_envs)]
+        [lambda cfg=cfg: make_single_env(cfg) for _ in range(n_envs)]
     )
 
     return env

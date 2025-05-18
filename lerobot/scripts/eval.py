@@ -57,7 +57,6 @@ from pathlib import Path
 from pprint import pformat
 from typing import Callable
 
-import cv2
 import einops
 import gymnasium as gym
 import numpy as np

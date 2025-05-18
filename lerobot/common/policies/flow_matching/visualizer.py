@@ -58,7 +58,7 @@ class FlowMatchingVisualizer(ABC):
         """
         pass
 
-    def _init_run_dir(self) -> Path:
+    def _update_run_dir(self) -> Path:
         """
         Create a new, empty run-numbered folder and return its path.
         """
@@ -185,7 +185,6 @@ class FlowVisualizer(FlowMatchingVisualizer):
             self.action_steps = action_steps
         self.num_paths = num_paths
         self.vis_type = "flows"
-        self.run_dir = self._init_run_dir()
 
     # TODO:
     # - Add option to visualize 3D flows
@@ -206,6 +205,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 f"Expected global_cond to contain exactly one feature vector "
                 f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
             )
+
+        self.run_dir = self._update_run_dir()
 
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
@@ -325,7 +326,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Colorbar and title
         cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
         cbar.ax.set_ylabel('Time', fontsize=12)
-        ax.set_title(f"Flow of Action Step {action_step} (Horizon: {self.config.horizon})",
+        ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.config.horizon})",
                      fontsize=16)
 
         # Axis labels
@@ -402,7 +403,6 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         else:
             self.time_grid = time_grid
         self.vis_type = "vector_field"
-        self.run_dir = self._init_run_dir()
     
     def visualize(self, global_cond: Tensor):
         """
@@ -424,6 +424,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
+
+        self.run_dir = self._update_run_dir()
 
         # Clamp values to [-3, +3]
         min_lim = np.minimum(self.min_action, -3.0)
