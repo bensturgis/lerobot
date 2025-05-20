@@ -506,7 +506,7 @@ def eval_main(cfg: EvalPipelineConfig):
             cfg.eval.n_episodes,
             max_episodes_rendered=10,
             videos_dir=Path(cfg.output_dir) / "videos",
-            live_vis=cfg.eval.show,
+            live_vis=cfg.show,
             start_seed=cfg.seed,
         )
     print(info["aggregated"])

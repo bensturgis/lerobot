@@ -177,6 +177,7 @@ class Normalize(nn.Module):
                 # normalize to [0,1]
                 batch[key] = (batch[key] - min) / (max - min + 1e-8)
                 # normalize to [-1, 1]
+                # batch[key] = batch[key] * 20 - 10
                 batch[key] = batch[key] * 2 - 1
             else:
                 raise ValueError(norm_mode)
@@ -247,6 +248,7 @@ class Unnormalize(nn.Module):
                 max = buffer["max"]
                 assert not torch.isinf(min).any(), _no_stats_error_str("min")
                 assert not torch.isinf(max).any(), _no_stats_error_str("max")
+                # batch[key] = (batch[key] + 10) / 20
                 batch[key] = (batch[key] + 1) / 2
                 batch[key] = batch[key] * (max - min) + min
             else:

@@ -15,7 +15,6 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Literal, Optional, Sequence
 
 from lerobot.common import (
@@ -94,7 +93,7 @@ class VisConfig:
     # Parameters for flows visualization
     action_dims: Sequence[int] = (0,1)
     action_steps: Optional[list[int]] = None
-    num_paths: int = 300
+    num_paths: int = 50
 
     # Parameters for vector field visualization
     min_action: Sequence[float] = (-1.0, -1.0)

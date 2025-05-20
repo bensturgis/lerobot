@@ -76,7 +76,7 @@ class FlowMatchingVisualizer(ABC):
             while (vis_type_dir / f"{run_idx:04d}").exists():
                 run_idx += 1
             run_dir = vis_type_dir / f"{run_idx:04d}"
-            run_dir.mkdir()
+            run_dir.mkdir(parents=True, exist_ok=True)
             return run_dir
     
     def _save_figure(
@@ -393,7 +393,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         )
         
         # Create time grid
-        time_grid = torch.arange(0.0, 1.0, 0.1, device=device)
+        time_grid = torch.arange(0.0, 1.0, 0.05, device=device)
 
         # Sample paths from the ODE
         paths = ode_solver.sample(

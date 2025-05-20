@@ -125,7 +125,7 @@ def make_flow_matching_uncertainty_sampler(
     if cfg.uncertainty_sampler == "composed_action_seq_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedActionSequenceLikelihood
 
-        return ComposedActionSequenceLikelihood(cfg, cfg.action_seq_likelihood, velocity_model,)
+        return ComposedActionSequenceLikelihood(cfg, cfg.action_seq_likelihood, velocity_model)
     elif cfg.uncertainty_sampler == "action_seq_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ActionSequenceLikelihood
 
@@ -134,6 +134,8 @@ def make_flow_matching_uncertainty_sampler(
         from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallExpansion
 
         return EpsilonBallExpansion(cfg, cfg.epsilon_ball_expansion, velocity_model)
+    else:
+            raise ValueError(f"Unknown uncertainty sampler {cfg.uncertainty_sampler}.")
 
 
 def make_flow_matching_visualizers(

@@ -92,6 +92,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
         # sequence generation
         self.prev_action_sequence = None
         self.prev_global_cond = None
+        self.method_name = "composed_action_seq_likelihood"
 
     def conditional_sample_with_uncertainty(
         self,
@@ -224,12 +225,13 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             cfg: Sampler-specific settings.
         """
         super().__init__(
-            config=flow_matching_cfg,
+            flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
         self.exact_divergence = cfg.exact_divergence
+        self.method_name = "action_seq_likelihood"
     
     def conditional_sample_with_uncertainty(
         self,
@@ -263,8 +265,6 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
 
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
-
-        self.gaussian_log_density = self.gaussian_log_density.to(device)
 
         # Sample noise priors.
         noise_sample = torch.randn(
@@ -329,6 +329,7 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
         )
         self.epsilon = cfg.epsilon
         self.num_eps_ball_samples = cfg.num_eps_ball_samples
+        self.method_name = "epsilon_ball_expansion"
     
     def conditional_sample_with_uncertainty(
         self,
