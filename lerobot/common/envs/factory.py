@@ -43,8 +43,13 @@ def make_single_env(cfg: EnvConfig):
     gym_handle = f"{package_name}/{cfg.task}"
     
     env = gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs)
-    if cfg.perturbate:
-        env = PerturbationWrapper(env)             # you can expose min/max frac via cfg if desired
+    if cfg.perturbation.enable:
+        env = PerturbationWrapper(
+            env,
+            static=cfg.perturbation.static,
+            min_patch_frac=cfg.perturbation.min_frac,
+            max_patch_frac=cfg.perturbation.max_frac,
+        )
     return env
 
 def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> gym.vector.VectorEnv | None:

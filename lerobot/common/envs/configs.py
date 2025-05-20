@@ -20,6 +20,12 @@ import draccus
 from lerobot.common.constants import ACTION, OBS_ENV, OBS_IMAGE, OBS_IMAGES, OBS_ROBOT
 from lerobot.configs.types import FeatureType, PolicyFeature
 
+@dataclass
+class PerturbationConfig:
+    enable: bool    = False
+    static: bool    = True
+    min_frac: float = 0.1
+    max_frac: float = 0.2
 
 @dataclass
 class EnvConfig(draccus.ChoiceRegistry, abc.ABC):
@@ -27,7 +33,7 @@ class EnvConfig(draccus.ChoiceRegistry, abc.ABC):
     fps: int = 30
     features: dict[str, PolicyFeature] = field(default_factory=dict)
     features_map: dict[str, str] = field(default_factory=dict)
-    perturbate: bool = False
+    perturbation: PerturbationConfig = PerturbationConfig()
 
     @property
     def type(self) -> str:
