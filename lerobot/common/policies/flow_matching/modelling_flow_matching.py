@@ -265,7 +265,7 @@ class FlowMatchingModel(nn.Module):
                 global_cond=global_cond
             )
 
-            tqdm.write(f"Uncertainty score: {uncertainties}")
+            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty scores: {uncertainties}")
 
             # Pick one action sequence at random
             rand_idx = random.randrange(self.uncertainty_sampler.num_action_seq_samples)

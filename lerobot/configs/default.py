@@ -15,13 +15,14 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional, Sequence
+from typing import Optional, Sequence
 
 from lerobot.common import (
     policies,  # noqa: F401
 )
 from lerobot.common.datasets.transforms import ImageTransformsConfig
 from lerobot.common.datasets.video_utils import get_safe_default_codec
+from lerobot.common.envs.configs import PerturbationConfig
 
 
 @dataclass
@@ -71,10 +72,61 @@ class EvalConfig:
             )
 
 @dataclass
+class EvalUncertEstConfig:
+    n_episodes: int = 20
+    # Which uncertainty estimation methods to evaluate
+    uncert_est_methods: list[str] = field(
+        default_factory=lambda: [
+            "composed_action_seq_likelihood",
+            "action_seq_likelihood",
+            "epsilon_ball_expansion"
+        ]
+    )
+
+    perturb_types: list[str] = field(
+        default_factory=lambda: ["static", "dynamic"]
+    )
+
+    @property
+    def perturbation_configs(self) -> dict[str, PerturbationConfig]:
+        default_perturb_cfg = PerturbationConfig()
+        perturbation_configs = {}
+        for t in self.perturb_types:
+            perturbation_configs[t] = PerturbationConfig(
+                enable = True,
+                static = (t == "static"),
+                min_frac = default_perturb_cfg.min_frac,
+                max_frac = default_perturb_cfg.max_frac,
+            )
+        return perturbation_configs
+    
+    def validate(self):
+        allowed_methods = {
+            "composed_action_seq_likelihood",
+            "action_seq_likelihood",
+            "epsilon_ball_expansion",
+        }
+        # check every method the user passed
+        for m in self.uncert_est_methods:
+            if m not in allowed_methods:
+                raise ValueError(
+                    f"Unknown uncertainty‐estimation method '{m}'. "
+                    f"Allowed: {sorted(allowed_methods)}"
+                )
+
+        allowed_perturbs = {"clean", "static", "dynamic"}
+        for p in self.perturb_types:
+            if p not in allowed_perturbs:
+                raise ValueError(
+                    f"Unknown perturbation type '{p}'. "
+                    f"Allowed: {sorted(allowed_perturbs)}"
+                )
+
+@dataclass
 class VisConfig:
     """Options that control what we draw and how we save/show it."""
     # Which visualizers to run (you can pick one or more)
-    vis_types: List[Literal["flows", "vector_field", "action_seq"]] = field(
+    vis_types: list[str] = field(
         default_factory=lambda: ["action_seq", "flows"]
     )
 

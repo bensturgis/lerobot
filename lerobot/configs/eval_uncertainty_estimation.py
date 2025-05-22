@@ -3,23 +3,19 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs, policies
+from lerobot.common import envs
 from lerobot.configs import parser
-from lerobot.configs.default import VisConfig
+from lerobot.configs.default import EvalUncertEstConfig
 from lerobot.configs.policies import PreTrainedConfig
 
-
 @dataclass
-class VisualizePipelineConfig:
+class EvalUncertaintyEstimationPipelineConfig:
     env: envs.EnvConfig
+    eval_uncert_est: EvalUncertEstConfig = field(default_factory=EvalUncertEstConfig)
     policy: PreTrainedConfig | None = None
-    vis: VisConfig = field(default_factory=VisConfig)
-
-    seed: int | None = 42
+    
     job_name: str | None = None
     output_dir: Path | None = None
-    # `show` enables live visualization of the first environment during evaluation
-    show: bool = False
 
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
@@ -41,20 +37,10 @@ class VisualizePipelineConfig:
 
         if not self.output_dir:
             now = dt.datetime.now()
-            vis_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
-            self.output_dir = Path("outputs/visualizations") / vis_dir
+            eval_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
+            self.output_dir = Path("outputs/eval_uncertainty_estimation") / eval_dir
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:
         """This enables the parser to load config from the policy using `--policy.path=local/dir`"""
         return ["policy"]
-
-    def validate(self):
-        # vis_types check
-        allowed_vis = {"flows", "vector_field", "action_seq"}
-        for v in self.vis_types:
-            if v not in allowed_vis:
-                raise ValueError(
-                    f"Unknown visualization type '{v}'. "
-                    f"Allowed: {sorted(allowed_vis)}"
-                )

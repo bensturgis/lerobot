@@ -40,6 +40,9 @@ class FlowMatchingUncertaintySampler(ABC):
         self.generator = generator
         self.horizon = self.flow_matching_cfg.horizon
         self.action_dim = self.flow_matching_cfg.action_feature.shape[0]
+        # Store latest sampled action sequences and their uncertainty scores for logging
+        self.latest_action_candidates = None
+        self.latest_uncertainties = None
 
     @abstractmethod
     def conditional_sample_with_uncertainty(
@@ -147,6 +150,8 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
         )
+        # Store sampled action sequences for logging
+        self.latest_action_candidates = new_action_seqs
 
         # If no previous trajectory is stored, return placeholder uncertainties
         if self.prev_action_sequence is None:
@@ -156,6 +161,9 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
                 dtype=dtype,
                 device=device
             )
+            # Store computed uncertainty scores for logging
+            self.latest_uncertainties = uncertainty_scores
+
             return new_action_seqs, uncertainty_scores
 
         # Indices where to split and recompose the trajectory
@@ -188,6 +196,9 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
 
         # Use negative log-likelihood as uncertainty score
         uncertainty_scores = -log_probs
+
+        # Store computed uncertainty scores for logging
+        self.latest_uncertainties = uncertainty_scores
 
         return new_action_seqs, uncertainty_scores
     
@@ -301,6 +312,10 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
 
         # Uncertainty score is given by -log(p_1(x_1))
         uncertainty_scores = -log_probs
+
+        # Store sampled action sequences and uncertainty scores for logging
+        self.latest_action_candidates = action_seqs
+        self.latest_uncertainties = uncertainty_scores
 
         return action_seqs, uncertainty_scores
 
@@ -448,6 +463,10 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
             expansion_factor = avg_action_sequence_dist / avg_noise_dist
 
             expansion_factors[action_seq_idx] = expansion_factor
+
+            # Store sampled action sequences and uncertainty scores for logging
+            self.latest_action_candidates = action_sequences
+            self.latest_uncertainties = expansion_factors
             
         return action_sequences, expansion_factors
         
