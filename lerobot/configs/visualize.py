@@ -21,6 +21,10 @@ class VisualizePipelineConfig:
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
 
+    # Optional custom start state for PushT-v0: 
+    # [agent_x, agent_y, block_x, block_y, block_theta]
+    start_state: list[float] | None = None
+
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
         policy_path = parser.get_path_arg("policy")

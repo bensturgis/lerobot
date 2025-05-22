@@ -1,4 +1,22 @@
 #!/usr/bin/env python
+"""
+Visualize different aspects of a Flow Matching policy rollout such as 
+flow trajectories, vector fields, and generated action sequence batches.
+
+Usage example:
+
+Stream the policy rollout live and create flow trajectory and generated action sequence
+batch visualizations.
+
+```
+python lerobot/scripts/visualize_flow_matching.py \
+    --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
+    --policy.device=cuda \
+    --env.type=pusht \
+    --vis.vis_types='["flows", "action_seq"]'
+    --show=true
+``` 
+"""
 import gymnasium as gym
 import logging
 import numpy as np
@@ -29,7 +47,12 @@ def main(cfg: VisualizePipelineConfig):
 
     logging.info("Creating environment")
     env = make_single_env(cfg.env)
-    observation, _ = env.reset(seed=cfg.seed)
+    
+    if cfg.start_state is not None and cfg.env.type == "pusht":
+        logging.info(f"Resetting to provided start_state {cfg.start_state}")
+        observation, _ = env.reset(options={"reset_to_state": cfg.start_state})
+    else:
+        observation, _ = env.reset()
     
     # Callback for visualization.
     def render_frame(env: gym.Env) -> np.ndarray:
