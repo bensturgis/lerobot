@@ -18,7 +18,6 @@ python lerobot/scripts/eval_uncertainty_estimation.py \
     --eval_uncert_est.n_episodes=10 \
     --eval_uncert_est.uncert_est_methods='["action_seq_likelihood", "composed_action_seq_likelihood"]'
 ```
-
 """
 import logging
 import time
@@ -94,7 +93,7 @@ def plot_all_uncertainties(
             action_seq_indices,
             uncertainties,
             color=clean_uncert_color,
-            alpha=0.5, 
+            alpha=0.3, 
             label="clean" if episode == 0 else None
         )
 
@@ -106,7 +105,7 @@ def plot_all_uncertainties(
             action_seq_indices,
             uncertainties, 
             color=perturb_uncert_color,
-            alpha=0.5, 
+            alpha=0.3, 
             label=perturb_type if episode == 0 else None
         )
 
@@ -143,7 +142,7 @@ def plot_all_uncertainties(
         np.arange(max_episode_len),
         clean_uncerts_mean - clean_uncerts_std,
         clean_uncerts_mean + clean_uncerts_std,
-        alpha=0.2
+        alpha=0.5
     )
     plt.plot(
         np.arange(max_episode_len),
@@ -154,7 +153,7 @@ def plot_all_uncertainties(
         np.arange(max_episode_len),
         perturb_uncerts_mean - perturb_uncerts_std,
         perturb_uncerts_mean + perturb_uncerts_std,
-        alpha=0.2
+        alpha=0.5
     )
 
     plt.xlabel("Action-Sequence Index")
