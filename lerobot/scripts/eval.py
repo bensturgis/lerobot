@@ -489,7 +489,12 @@ def eval_main(cfg: EvalPipelineConfig):
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
     logging.info("Making environment.")
-    env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
+    env = make_env(
+        cfg.env,
+        n_envs=cfg.eval.batch_size,
+        use_async_envs=cfg.eval.use_async_envs,
+        crop_shape=cfg.policy.crop_shape
+    )
 
     logging.info("Making policy.")
 

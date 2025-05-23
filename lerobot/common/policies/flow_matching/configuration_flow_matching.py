@@ -61,7 +61,7 @@ class FlowMatchingConfig(PreTrainedConfig):
         n_action_steps: The number of action steps to run in the environment for one invocation of the policy.
             See `FlowMatchingPolicy.select_action` for more details.
         vision_backbone: Name of the torchvision backbone to use for encoding images. Whenever you add a
-            new backbone here, you must register its final feature‐map module name in FINAL_FEATURE_MAP_NODE
+            new backbone here, you must register its final feature-map module name in FINAL_FEATURE_MAP_NODE
             constant.
         crop_shape: (H, W) shape to crop images to as a preprocessing step for the vision backbone. Must fit
             within the image size. If None, no cropping is done.

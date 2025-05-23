@@ -46,7 +46,7 @@ def main(cfg: VisualizePipelineConfig):
     policy.eval()
 
     logging.info("Creating environment")
-    env = make_single_env(cfg.env)
+    env = make_single_env(cfg.env, cfg.policy.crop_shape)
     
     if cfg.start_state is not None and cfg.env.type == "pusht":
         logging.info(f"Resetting to provided start_state {cfg.start_state}")

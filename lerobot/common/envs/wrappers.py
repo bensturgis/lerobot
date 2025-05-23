@@ -16,6 +16,7 @@ class PerturbationWrapper(gym.Wrapper):
         static: bool,
         min_patch_frac: float,
         max_patch_frac: float,
+        crop_shape: Optional[Tuple[int, int]]=None
     ):
         """
         Args:
@@ -34,6 +35,7 @@ class PerturbationWrapper(gym.Wrapper):
         self.static = static
         self.min_patch_frac = min_patch_frac
         self.max_patch_frac = max_patch_frac
+        self.crop_shape = crop_shape
 
         # Normalised rectangle coordinates: (top_frac, left_frac, height_frac, width_frac) from [0, 1]
         self.patch_frac: Optional[Tuple[float, float, float, float]] = None
@@ -68,7 +70,7 @@ class PerturbationWrapper(gym.Wrapper):
             # Initialize the patch region using the first image
             self._reset_patch_fraction(img)
 
-        height, width = img.shape[:2]
+        height, width = img.shape[:2] if self.crop_shape is None else self.crop_shape
         top_frac, left_frac, patch_height_frac, patch_width_frac = self.patch_frac
         
         patch_top    = int(round(top_frac  * height))
