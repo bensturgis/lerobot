@@ -109,16 +109,21 @@ class WandBLogger:
         self._wandb.log_artifact(artifact)
 
     def log_dict(self, d: dict, step: int, mode: str = "train"):
-        if mode not in {"train", "eval"}:
+        if mode not in {"train", "eval", "val"}:
             raise ValueError(mode)
 
+        to_log = {}
         for k, v in d.items():
             if not isinstance(v, (int, float, str)):
                 logging.warning(
                     f'WandB logging of key "{k}" was ignored as its type is not handled by this wrapper.'
                 )
                 continue
-            self._wandb.log({f"{mode}/{k}": v}, step=step)
+            to_log[f"{mode}/{k}"] = v
+
+        if to_log:
+            # single call per batch
+            self._wandb.log(to_log, step=step)
 
     def log_video(self, video_path: str, step: int, mode: str = "train"):
         if mode not in {"train", "eval"}:

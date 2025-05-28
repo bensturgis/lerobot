@@ -243,7 +243,7 @@ def train(cfg: TrainPipelineConfig):
             drop_last=False,
         )
     if cfg.val_freq is None:
-        val_freq = 5 * math.ceil(len(train_dataset) / cfg.batch_size)
+        val_freq = 3 * math.ceil(len(train_dataset) / cfg.batch_size)
     else:
         val_freq = cfg.val_freq
 
@@ -305,7 +305,7 @@ def train(cfg: TrainPipelineConfig):
                 )
                 logging.info(f"step {step}: Validation loss: {val_loss:.3f}")
                 if wandb_logger:
-                    wandb_logger.log_dict({"val/loss": val_loss}, step, mode="val")
+                    wandb_logger.log_dict({"loss": val_loss}, step, mode="val")
 
         if is_log_step:
             logging.info(train_tracker)
