@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+import math
 import time
 from contextlib import nullcontext
 from pprint import pformat
@@ -24,7 +25,7 @@ from termcolor import colored
 from torch.amp import GradScaler
 from torch.optim import Optimizer
 
-from lerobot.common.datasets.factory import make_dataset
+from lerobot.common.datasets.factory import make_dataset, make_train_val_split
 from lerobot.common.datasets.sampler import EpisodeAwareSampler
 from lerobot.common.datasets.utils import cycle
 from lerobot.common.envs.factory import make_env
@@ -51,6 +52,44 @@ from lerobot.common.utils.wandb_utils import WandBLogger
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.scripts.eval import eval_policy
+
+
+@torch.no_grad()
+def compute_val_loss(
+    policy: PreTrainedPolicy,
+    val_loader: torch.utils.data.DataLoader,
+    device: torch.device,
+    use_amp: bool = False,
+) -> float:
+    """
+    Iterate once over val_loader and return the mean validation loss.
+
+    Args:
+        policy: The policy to evaluate.
+        val_loader: Dataloader that yields validation batches.
+        device: Target device.
+        use_amp: Enable AMP evaluation if the model was trained with AMP.
+
+    Returns:
+        Mean loss across the entire validation set.
+    """
+    loss_meter = AverageMeter("val_loss", fmt=":.3f")
+    policy.eval()
+
+    with torch.autocast(device_type=device.type) if use_amp else nullcontext():
+        for batch in val_loader:
+            # Move all tensors in the batch to the correct device
+            for key, value in batch.items():
+                if isinstance(value, torch.Tensor):
+                    batch[key] = value.to(device, non_blocking=True)
+
+            loss, _ = policy.forward(batch)
+            batch_size = batch[next(iter(batch))].size(0)
+            loss_meter.update(loss.item(), n=batch_size)
+
+    # Restore the training mode
+    policy.train()
+    return loss_meter.avg
 
 
 def update_policy(
@@ -125,7 +164,15 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    dataset = make_dataset(cfg)
+    full_dataset = make_dataset(cfg)
+    if cfg.enable_val_loss:
+        train_val_split = make_train_val_split(full_dataset, cfg)
+        train_dataset, val_dataset = train_val_split.train_dataset, train_val_split.val_dataset
+        train_ep_ids = train_val_split.train_ep_ids
+    else:
+        train_dataset = full_dataset
+        val_dataset = None
+        train_ep_ids = None
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -138,7 +185,7 @@ def train(cfg: TrainPipelineConfig):
     logging.info("Creating policy")
     policy = make_policy(
         cfg=cfg.policy,
-        ds_meta=dataset.meta,
+        ds_meta=full_dataset.meta,
     )
 
     logging.info("Creating optimizer and scheduler")
@@ -157,8 +204,8 @@ def train(cfg: TrainPipelineConfig):
     if cfg.env is not None:
         logging.info(f"{cfg.env.task=}")
     logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
-    logging.info(f"{dataset.num_frames=} ({format_big_number(dataset.num_frames)})")
-    logging.info(f"{dataset.num_episodes=}")
+    logging.info(f"{full_dataset.num_frames=} ({format_big_number(full_dataset.num_frames)})")
+    logging.info(f"{full_dataset.num_episodes=}")
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
@@ -166,7 +213,8 @@ def train(cfg: TrainPipelineConfig):
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
         sampler = EpisodeAwareSampler(
-            dataset.episode_data_index,
+            full_dataset.episode_data_index,
+            episode_indices_to_use=train_ep_ids,
             drop_n_last_frames=cfg.policy.drop_n_last_frames,
             shuffle=True,
         )
@@ -174,8 +222,8 @@ def train(cfg: TrainPipelineConfig):
         shuffle = True
         sampler = None
 
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
         num_workers=cfg.num_workers,
         batch_size=cfg.batch_size,
         shuffle=shuffle,
@@ -183,7 +231,21 @@ def train(cfg: TrainPipelineConfig):
         pin_memory=device.type != "cpu",
         drop_last=False,
     )
-    dl_iter = cycle(dataloader)
+    dl_iter = cycle(train_loader)
+
+    if cfg.enable_val_loss:
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            num_workers=cfg.num_workers,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            pin_memory=device.type != "cpu",
+            drop_last=False,
+        )
+    if cfg.val_freq is None:
+        val_freq = 5 * math.ceil(len(train_dataset) / cfg.batch_size)
+    else:
+        val_freq = cfg.val_freq
 
     policy.train()
 
@@ -196,7 +258,11 @@ def train(cfg: TrainPipelineConfig):
     }
 
     train_tracker = MetricsTracker(
-        cfg.batch_size, dataset.num_frames, dataset.num_episodes, train_metrics, initial_step=step
+        batch_size   = cfg.batch_size,
+        num_frames   = len(train_dataset) if cfg.enable_val_loss else train_dataset.num_frames,
+        num_episodes = len(train_ep_ids) if cfg.enable_val_loss else train_dataset.num_episodes,
+        metrics      = train_metrics,
+        initial_step = step,
     )
 
     logging.info("Start offline training on a fixed dataset")
@@ -224,9 +290,22 @@ def train(cfg: TrainPipelineConfig):
         # increment `step` here.
         step += 1
         train_tracker.step()
+        is_val_step = step > 0 and step % val_freq == 0
         is_log_step = cfg.log_freq > 0 and step % cfg.log_freq == 0
         is_saving_step = step % cfg.save_freq == 0 or step == cfg.steps
         is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
+
+        if cfg.enable_val_loss and is_val_step:
+            if is_val_step:
+                val_loss = compute_val_loss(
+                    policy=policy,
+                    val_loader=val_loader,
+                    device=device,
+                    use_amp=cfg.policy.use_amp
+                )
+                logging.info(f"step {step}: Validation loss: {val_loss:.3f}")
+                if wandb_logger:
+                    wandb_logger.log_dict({"val/loss": val_loss}, step, mode="val")
 
         if is_log_step:
             logging.info(train_tracker)
@@ -267,7 +346,11 @@ def train(cfg: TrainPipelineConfig):
                 "eval_s": AverageMeter("eval_s", ":.3f"),
             }
             eval_tracker = MetricsTracker(
-                cfg.batch_size, dataset.num_frames, dataset.num_episodes, eval_metrics, initial_step=step
+                cfg.eval.batch_size,
+                cfg.eval.n_episodes,
+                cfg.eval.n_episodes,
+                eval_metrics,
+                initial_step=step
             )
             eval_tracker.eval_s = eval_info["aggregated"].pop("eval_s")
             eval_tracker.avg_sum_reward = eval_info["aggregated"].pop("avg_sum_reward")
