@@ -58,12 +58,13 @@ class TrainPipelineConfig(HubMixin):
     save_checkpoint: bool = True
     # Checkpoint is saved every `save_freq` training iterations and after the last training step.
     save_freq: int = 20_000
-    val_freq: Optional[int] = None
     # Whether to automatically split the dataset into train/validation subsets by episode and compute
     # a validation loss.
-    enable_val_loss: bool = True
+    enable_val_loss: bool = False
     # Fraction of episodes to reserve for validation when splitting the dataset.
     val_ratio: float = 0.1
+    # Validation loss is computed every `val_freq` training iterations.
+    val_freq: Optional[int] = None
     use_policy_training_preset: bool = True
     optimizer: OptimizerConfig | None = None
     scheduler: LRSchedulerConfig | None = None

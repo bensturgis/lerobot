@@ -457,7 +457,7 @@ class FlowMatchingRgbEncoder(nn.Module):
                 final_feature_map_module_found = True
                 break
         if not final_feature_map_module_found:
-            raise RuntimeError(f"Final feature‐map module “{final_feature_map_module}” not found in {config.vision_backbone}")
+            raise RuntimeError(f"Final feature-map module “{final_feature_map_module}” not found in {config.vision_backbone}")
         
         if config.use_group_norm:
             if config.pretrained_backbone_weights:

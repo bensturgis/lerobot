@@ -296,16 +296,15 @@ def train(cfg: TrainPipelineConfig):
         is_eval_step = cfg.eval_freq > 0 and step % cfg.eval_freq == 0
 
         if cfg.enable_val_loss and is_val_step:
-            if is_val_step:
-                val_loss = compute_val_loss(
-                    policy=policy,
-                    val_loader=val_loader,
-                    device=device,
-                    use_amp=cfg.policy.use_amp
-                )
-                logging.info(f"step {step}: Validation loss: {val_loss:.3f}")
-                if wandb_logger:
-                    wandb_logger.log_dict({"loss": val_loss}, step, mode="val")
+            val_loss = compute_val_loss(
+                policy=policy,
+                val_loader=val_loader,
+                device=device,
+                use_amp=cfg.policy.use_amp
+            )
+            logging.info(f"step {step}: Validation loss: {val_loss:.3f}")
+            if wandb_logger:
+                wandb_logger.log_dict({"loss": val_loss}, step, mode="val")
 
         if is_log_step:
             logging.info(train_tracker)
