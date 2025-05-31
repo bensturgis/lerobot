@@ -31,10 +31,14 @@ from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.live_window import LiveWindow
+from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 
 @parser.wrap()
 def main(cfg: VisualizePipelineConfig): 
+    # Set global seed
+    set_seed(cfg.seed)
+    
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":
         raise ValueError(
@@ -46,13 +50,14 @@ def main(cfg: VisualizePipelineConfig):
     policy.eval()
 
     logging.info("Creating environment")
-    env = make_single_env(cfg.env, cfg.policy.crop_shape)
+    env = make_single_env(cfg.env)
     
+    reset_kwargs: dict = {}
     if cfg.start_state is not None and cfg.env.type == "pusht":
         logging.info(f"Resetting to provided start_state {cfg.start_state}")
-        observation, _ = env.reset(options={"reset_to_state": cfg.start_state})
-    else:
-        observation, _ = env.reset()
+        reset_kwargs["options"] = {"reset_to_state": cfg.start_state}
+
+    observation, _ = env.reset(seed=cfg.seed, **reset_kwargs)
     
     # Callback for visualization.
     def render_frame(env: gym.Env) -> np.ndarray:
