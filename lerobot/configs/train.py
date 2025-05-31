@@ -60,7 +60,7 @@ class TrainPipelineConfig(HubMixin):
     save_freq: int = 20_000
     # Whether to automatically split the dataset into train/validation subsets by episode and compute
     # a validation loss.
-    enable_val_loss: bool = False
+    enable_val_loss: bool = True
     # Fraction of episodes to reserve for validation when splitting the dataset.
     val_ratio: float = 0.1
     # Validation loss is computed every `val_freq` training iterations.
