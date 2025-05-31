@@ -16,7 +16,6 @@ class PerturbationWrapper(gym.Wrapper):
         static: bool,
         min_patch_frac: float,
         max_patch_frac: float,
-        crop_shape: Optional[Tuple[int, int]]=None
     ):
         """
         Args:
@@ -35,18 +34,14 @@ class PerturbationWrapper(gym.Wrapper):
         self.static = static
         self.min_patch_frac = min_patch_frac
         self.max_patch_frac = max_patch_frac
-        self.crop_shape = crop_shape
 
         # Normalised rectangle coordinates: (top_frac, left_frac, height_frac, width_frac) from [0, 1]
         self.patch_frac: Optional[Tuple[float, float, float, float]] = None
 
-    def _reset_patch_fraction(self, img: np.ndarray):
+    def _reset_patch_fraction(self):
         """
         Randomly select a rectangular region within the image to blackout and store its
         normalized coordinates and size in `self.patch_frac`.
-
-        Args:
-            img: Sample image of shape (H, W, C) used to determine the patch region.
         """
         patch_height_frac = random.uniform(self.min_patch_frac, self.max_patch_frac)
         patch_width_frac = random.uniform(self.min_patch_frac, self.max_patch_frac)
@@ -68,15 +63,15 @@ class PerturbationWrapper(gym.Wrapper):
         """
         if self.patch_frac is None or not self.static:
             # Initialize the patch region using the first image
-            self._reset_patch_fraction(img)
+            self._reset_patch_fraction()
 
-        height, width = img.shape[:2] if self.crop_shape is None else self.crop_shape
+        height, width = img.shape[:2]
         top_frac, left_frac, patch_height_frac, patch_width_frac = self.patch_frac
         
-        patch_top    = int(round(top_frac  * height))
-        patch_left   = int(round(left_frac * width))
+        patch_top = int(round(top_frac * height))
+        patch_left = int(round(left_frac * width))
         patch_height = int(round(patch_height_frac * height))
-        patch_width  = int(round(patch_width_frac * width))
+        patch_width = int(round(patch_width_frac * width))
         
         img = img.copy()
         img[patch_top : patch_top + patch_height, patch_left : patch_left + patch_width] = 0

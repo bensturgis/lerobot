@@ -34,7 +34,6 @@ def make_env_config(env_type: str, **kwargs) -> EnvConfig:
 
 def make_single_env(
     cfg: EnvConfig,
-    crop_shape: Optional[Tuple[int, int]] = None
 ) -> gym.Env:
     package_name = f"gym_{cfg.type}"
     
@@ -53,7 +52,6 @@ def make_single_env(
             static=cfg.perturbation.static,
             min_patch_frac=cfg.perturbation.min_frac,
             max_patch_frac=cfg.perturbation.max_frac,
-            crop_shape=crop_shape,
         )
     return env
 
@@ -61,7 +59,6 @@ def make_env(
     cfg: EnvConfig,
     n_envs: int = 1,
     use_async_envs: bool = False,
-    crop_shape: Optional[Tuple[int, int]] = None
 ) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the config.
 
@@ -92,7 +89,7 @@ def make_env(
     # batched version of the env that returns an observation of shape (b, c)
     env_cls = gym.vector.AsyncVectorEnv if use_async_envs else gym.vector.SyncVectorEnv
     env = env_cls(
-        [lambda cfg=cfg: make_single_env(cfg, crop_shape) for _ in range(n_envs)]
+        [lambda cfg=cfg: make_single_env(cfg) for _ in range(n_envs)]
     )
 
     return env

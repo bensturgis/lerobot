@@ -250,7 +250,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             
             logging.info(f"Creating clean environment.")
             cfg.env.perturbation.enable = False
-            clean_env = make_single_env(cfg.env, cfg.policy.crop_shape)
+            clean_env = make_single_env(cfg.env)
             clean_ep_info = rollout(clean_env, policy)
             
             all_uncertanties[uncert_est_method]["clean"].append(clean_ep_info["ep_uncertainties"])
@@ -265,7 +265,6 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 logging.info(f"Creating environment with {perturb_type} perturbation.")
                 perturb_env = make_single_env(
                     replace(cfg.env, perturbation=perturb_cfg),
-                    cfg.policy.crop_shape
                 )
                 perturb_ep_info = rollout(perturb_env, policy)
                 
