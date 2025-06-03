@@ -1,5 +1,6 @@
 import imageio
 from matplotlib.collections import LineCollection
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -317,6 +318,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         config: FlowMatchingConfig,
         velocity_model: nn.Module,
         action_dims: Sequence[int],
+        axis_limits: Optional[Sequence[Tuple[float, float]]],
         action_steps: Optional[Union[Sequence[int], int]],
         num_paths: int,
         action_dim_names: Optional[Sequence[str]],
@@ -342,13 +344,26 @@ class FlowVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        if not isinstance(action_dims, (list, tuple)) or len(action_dims) != 2:
+        if not isinstance(action_dims, (list, tuple)) or not (2 <= len(action_dims) <= 3):
             raise ValueError(
-                "'action_dims' must be a list or tuple of exactly two elements, "
+                "'action_dims' must be a list or tuple of length 2 or 3, "
                 f"but got {action_dims}"
             )
 
+        if axis_limits is not None and len(action_dims) != len(axis_limits):
+            raise ValueError(
+                f"'axis_limits' length ({len(axis_limits)}) must match 'action_dims' length "
+                f"({len(action_dims)})."
+            )
+        
+        if action_dim_names is not None and len(action_dims) != len(action_dim_names):
+            raise ValueError(
+                f"'action_dim_names' length ({len(action_dim_names)}) must match 'action_dims' length "
+                f"({len(action_dims)})."
+            )
+
         self.action_dims = action_dims
+        self.axis_limits = axis_limits
         # Visualize all action steps by default
         if action_steps is None:
             self.action_steps = list(range(self.config.horizon))
@@ -357,8 +372,6 @@ class FlowVisualizer(FlowMatchingVisualizer):
         self.num_paths = num_paths
         self.vis_type = "flows"
 
-    # TODO:
-    # - Add option to visualize 3D flows
     def visualize(self, global_cond: Tensor, **kwargs):
         """
         Visualize flow trajectories for specified action steps and dimensions.
@@ -424,29 +437,39 @@ class FlowVisualizer(FlowMatchingVisualizer):
         velocity_vectors = vector_field[..., self.action_dims]
         
         # Compute global axis limits to create plots of equal size
-        x_positions, y_positions = positions[:, :, self.action_steps, 0], positions[:, :, self.action_steps, 1]
-        x_min, x_max = x_positions.min().cpu(), x_positions.max().cpu()
-        y_min, y_max = y_positions.min().cpu(), y_positions.max().cpu()
-        margin_x = 0.05 * (x_max - x_min)
-        margin_y = 0.05 * (y_max - y_min)
-        x_lim = (x_min - margin_x, x_max + margin_x)
-        y_lim = (y_min - margin_y, y_max + margin_y)
+        if self.axis_limits is None:
+            self.axis_limits = []
+            for i in range(len(self.action_dims)):
+                coords = positions[..., i]           # (num_paths, t, steps)
+                coord_min, coord_max = coords.min().cpu(), coords.max().cpu()
+                margin = 0.05 * (coord_max - coord_min)
+                self.axis_limits.append((coord_min - margin, coord_max + margin))
 
-        # Create a separate figure for each action steo
+        # Create a separate figure for each action step
         for action_step in self.action_steps:
             positions_single_action = positions[:, :, action_step, :]
             velocity_vectors_single_action = velocity_vectors[:, :, action_step, :]
 
-            fig = self._create_flow_plot(
-                positions_single_action, velocity_vectors_single_action,
-                time_grid, self.num_paths,
-                x_lim, y_lim,
-                action_step, self.action_dims
-            )
+            if len(self.action_dims) == 2:
+                fig = self._plot_flows_2d(
+                    positions=positions_single_action,
+                    velocity_vectors=velocity_vectors_single_action,
+                    time_grid=time_grid,
+                    num_paths=self.num_paths,
+                    action_step=action_step,
+                )
+            else:
+                fig = self._plot_flows_3d(
+                    positions=positions_single_action,
+                    velocity_vectors=velocity_vectors_single_action,
+                    time_grid=time_grid,
+                    num_paths=self.num_paths,
+                    action_step=action_step,
+                )
 
             # Show plot if requested
             if self.show:
-                fig.show(block=True)
+                plt.show(block=True)
 
             # Save plot if requested
             if self.save:
@@ -457,19 +480,94 @@ class FlowVisualizer(FlowMatchingVisualizer):
         if self.create_gif:
             self._create_gif()
 
-    def _create_flow_plot(
+    def _plot_flows_3d(
         self,
         positions: Tensor,
         velocity_vectors: Tensor,
         time_grid: Tensor,
         num_paths: int,
-        x_lim: Tuple[float, float],
-        y_lim: Tuple[float, float],
         action_step: int,
-        action_dims: Sequence[int] = (0, 1),
+    ):
+        """
+        Draw a 3D quiver plot for the flow of a single action step.
+        """
+        was_interactive = plt.isinteractive()
+        plt.ioff()
+
+        # Extract x-, y- and z-coordinates and velocities
+        x, y, z = [positions[..., i].flatten().cpu() for i in range(3)]
+        u, v, w = [velocity_vectors[..., i].flatten().cpu() for i in range(3)]
+        
+        # Color arrows by time
+        times_grid = time_grid.repeat(num_paths).cpu().numpy()
+        times_min, times_max = times_grid.min(), times_grid.max()
+        time_norm = (times_grid - times_min) / (times_max - times_min)
+        cmap = cm.get_cmap('viridis')
+        colors = cmap(time_norm)
+
+        # Scale original vectors by normalised time                                        # overall scale
+        length_scale = 0.1
+        u_scaled = u * time_norm
+        v_scaled = v * time_norm
+        w_scaled = w * time_norm
+
+        # Create quiver plot
+        fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': '3d'})
+        fig.canvas.manager.set_window_title("Visualization of Flows")
+        quiv = ax.quiver(
+            x, y, z,
+            u_scaled, v_scaled, w_scaled, 
+            length=length_scale,
+            linewidth=1.5,
+            arrow_length_ratio=0.25,
+            normalize=False,
+            color=colors
+        )
+
+        # Set consistent axis limits so the plots of all action steps have same size
+        ax.set_xlim(*self.axis_limits[0])
+        ax.set_ylim(*self.axis_limits[1])
+        ax.set_zlim(*self.axis_limits[2])
+        ax.set_aspect('equal')
+
+        # Colorbar and title
+        cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
+        cbar.ax.set_ylabel('Time', fontsize=12)
+        ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.config.horizon})",
+                     fontsize=16)
+
+        # Axis labels
+        if self.action_dim_names:
+            x_label = self.action_dim_names[self.action_dims[0]]
+            y_label = self.action_dim_names[self.action_dims[1]]
+            z_label = self.action_dim_names[self.action_dims[2]]
+        else:
+            x_label = f"Action dimension {self.action_dims[0]}"
+            y_label = f"Action dimension {self.action_dims[1]}"
+            z_label = f"Action dimension {self.action_dims[2]}"
+        ax.set_xlabel(x_label, fontsize=14)
+        ax.set_ylabel(y_label, fontsize=14)
+        ax.set_zlabel(z_label, fontsize=14)
+
+        ax.tick_params(axis='both', labelsize=12)
+        ax.grid(True)
+        plt.tight_layout()
+
+        if was_interactive:
+            plt.ion()
+
+        return fig
+    
+    def _plot_flows_2d(
+        self,
+        positions: Tensor,
+        velocity_vectors: Tensor,
+        time_grid: Tensor,
+        num_paths: int,
+        action_step: int,
     ) -> plt.Figure:
         """
-        Draw a quiver plot for the flow of a single action step.
+        Draw a 2D quiver plot for the flow of a single action step.
         """
         was_interactive = plt.isinteractive()
         plt.ioff() 
@@ -490,8 +588,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
         )
 
         # Set consistent axis limits so the plots of all action steps have same size
-        ax.set_xlim(*x_lim)
-        ax.set_ylim(*y_lim)
+        ax.set_xlim(*self.axis_limits[0])
+        ax.set_ylim(*self.axis_limits[1])
         ax.set_aspect('equal')
 
         # Colorbar and title
@@ -502,11 +600,11 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
         # Axis labels
         if self.action_dim_names:
-            x_label = self.action_dim_names[action_dims[0]]
-            y_label = self.action_dim_names[action_dims[1]]
+            x_label = self.action_dim_names[self.action_dims[0]]
+            y_label = self.action_dim_names[self.action_dims[1]]
         else:
-            x_label = f"Action dimension {action_dims[0]}"
-            y_label = f"Action dimension {action_dims[1]}"
+            x_label = f"Action dimension {self.action_dims[0]}"
+            y_label = f"Action dimension {self.action_dims[1]}"
         ax.set_xlabel(x_label, fontsize=14)
         ax.set_ylabel(y_label, fontsize=14)
 
@@ -619,7 +717,6 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         # Build a condition vector tensor whose batch size is the number of grid points
         num_grid_points = positions.shape[0]
         global_cond_batch = global_cond.repeat(num_grid_points, 1)
-
         
         for time in self.time_grid:
             time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)

@@ -13,7 +13,7 @@ python lerobot/scripts/visualize_flow_matching.py \
     --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
     --policy.device=cuda \
     --env.type=pusht \
-    --vis.vis_types='["flows", "action_seq"]'
+    --vis.vis_types='["flows", "action_seq"]' \
     --show=true
 ``` 
 """

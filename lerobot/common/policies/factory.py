@@ -179,7 +179,7 @@ def make_flow_matching_visualizers(
         config = model_cfg,
         velocity_model = velocity_model,
         action_dim_names = vis_cfg.action_dim_names,
-        show = False,
+        show = vis_cfg.show,
         save = True,
         output_root = output_root,
         create_gif = True,
@@ -193,6 +193,7 @@ def make_flow_matching_visualizers(
                 FlowVisualizer(
                     **common_kwargs,
                     action_dims = vis_cfg.action_dims,
+                    axis_limits=vis_cfg.axis_limits,
                     action_steps = vis_cfg.action_steps,
                     num_paths = vis_cfg.num_paths,
                 )

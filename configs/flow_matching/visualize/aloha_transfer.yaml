@@ -1,0 +1,16 @@
+env:
+  type: aloha
+  task: AlohaTransferCube-v0
+
+policy:
+  type: flow_matching
+  device: cuda
+
+vis:
+  vis_types: [flows]
+  action_dims: [0,1,2]
+  action_dim_names: [x, y, z]
+  axis_limits: [[-1, 1], [-1, 1], [-1, 1]]
+  show: false
+
+# python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

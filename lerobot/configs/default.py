@@ -135,22 +135,26 @@ class VisConfig:
     # If set, start drawing only after this environment step
     start_step: Optional[int] = None
 
-    # Hard cap on how many env steps to visualise
+    # Hard cap on how many env steps to visualize
     max_steps: Optional[int] = None
 
     # Names of the action dimensions to visualize
-    action_dim_names: Optional[Sequence[str]] = field(default_factory=lambda: ["x", "y"])
+    action_dim_names: Optional[list[str]] = None
 
     # Parameters for action sequence visualization
     num_action_seq: int = 30
 
+    # Whether to display plots live
+    show: bool = False
+
     # Parameters for flows visualization
-    action_dims: Sequence[int] = (0,1)
+    action_dims: list[int] = (0,1)
+    axis_limits: Optional[list[tuple[float, float]]] = None
     action_steps: Optional[list[int]] = None
     num_paths: int = 50
 
     # Parameters for vector field visualization
-    min_action: Sequence[float] = (-1.0, -1.0)
-    max_action: Sequence[float] = (1.0, 1.0)
+    min_action: list[float] = (-1.0, -1.0)
+    max_action: list[float] = (1.0, 1.0)
     grid_size: int = 50
     time_grid: Optional[list[float]] = None
