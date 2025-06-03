@@ -243,7 +243,7 @@ def train(cfg: TrainPipelineConfig):
             drop_last=False,
         )
     if cfg.val_freq is None:
-        val_freq = 3 * math.ceil(len(train_dataset) / cfg.batch_size)
+        val_freq = math.ceil(len(train_dataset) / cfg.batch_size)
     else:
         val_freq = cfg.val_freq
 

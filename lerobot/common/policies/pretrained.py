@@ -87,6 +87,8 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         local_files_only: bool = False,
         revision: str | None = None,
         strict: bool = False,
+        scorer_pretrained_name_or_path: str | Path | None = None,
+        scorer_revision: str | None = None,
         **kwargs,
     ) -> T:
         """
@@ -105,34 +107,63 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
                 revision=revision,
                 **kwargs,
             )
-        model_id = str(pretrained_name_or_path)
         instance = cls(config, **kwargs)
-        if os.path.isdir(model_id):
-            print("Loading weights from local directory")
-            model_file = os.path.join(model_id, SAFETENSORS_SINGLE_FILE)
-            policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
-        else:
-            try:
-                model_file = hf_hub_download(
-                    repo_id=model_id,
-                    filename=SAFETENSORS_SINGLE_FILE,
-                    revision=revision,
-                    cache_dir=cache_dir,
-                    force_download=force_download,
-                    proxies=proxies,
-                    resume_download=resume_download,
-                    token=token,
-                    local_files_only=local_files_only,
-                )
-                policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
-            except HfHubHTTPError as e:
-                raise FileNotFoundError(
-                    f"{SAFETENSORS_SINGLE_FILE} not found on the HuggingFace Hub in {model_id}"
-                ) from e
 
-        policy.to(config.device)
-        policy.eval()
-        return policy
+        def _load_weights(
+            target_model: nn.Module, model_id: str | Path, revision: str | None
+        ):
+            if os.path.isdir(model_id):
+                print("Loading weights from local directory")
+                model_file = os.path.join(model_id, SAFETENSORS_SINGLE_FILE)
+                cls._load_as_safetensor(target_model, model_file, config.device, strict)
+            else:
+                try:
+                    model_file = hf_hub_download(
+                        repo_id=str(model_id),
+                        filename=SAFETENSORS_SINGLE_FILE,
+                        revision=revision,
+                        cache_dir=cache_dir,
+                        force_download=force_download,
+                        proxies=proxies,
+                        resume_download=resume_download,
+                        token=token,
+                        local_files_only=local_files_only,
+                    )
+                    cls._load_as_safetensor(target_model, model_file, config.device, strict)
+                except HfHubHTTPError as e:
+                    raise FileNotFoundError(
+                        f"{SAFETENSORS_SINGLE_FILE} not found on the HuggingFace Hub in {model_id}"
+                    ) from e
+
+        _load_weights(instance, pretrained_name_or_path, revision)
+
+        if (
+            config.type == "flow_matching" and
+            getattr(config, "sample_with_uncertainty", False)
+        ):           
+            if getattr(config, "uncertainty_sampler", None) == "cross_likelihood":
+                scorer_model_id = (
+                    scorer_pretrained_name_or_path
+                    if scorer_pretrained_name_or_path is not None
+                    else config.cross_likelihood_sampler.scorer_model_path
+                )
+                if scorer_model_id is None:
+                    raise ValueError(
+                        "Cross-likelihood uncertainty sampler requested but no scorer checkpoint provided."
+                    )
+                
+                scorer_policy = cls(config, **kwargs)
+                _load_weights(scorer_policy, scorer_model_id, scorer_revision)
+                instance.scorer.load_state_dict(scorer_policy.flow_matching.state_dict(), strict=True)
+                instance.scorer.eval()
+                for p in instance.scorer.parameters():
+                    p.requires_grad_(False)
+
+            instance._init_uncertainty_sampler()
+
+        instance.to(config.device)
+        instance.eval()
+        return instance
 
     @classmethod
     def _load_as_safetensor(cls, model: T, model_file: str, map_location: str, strict: bool) -> T:

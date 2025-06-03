@@ -7,9 +7,10 @@ from typing import Optional, Tuple
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import (
     FlowMatchingConfig,
-    ComposedActionSeqLikConfig,
-    ActionSeqLikConfig,
-    EpsilonBallConfig,
+    ComposedLikSamplerConfig,
+    CrossLikEnsembleSamplerConfig,
+    LikSamplerConfig,
+    EpsilonBallSamplerConfig,
 )
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
@@ -44,6 +45,20 @@ class FlowMatchingUncertaintySampler(ABC):
         self.latest_action_candidates = None
         self.latest_uncertainties = None
 
+    def _prepare_conditioning(self, global_cond: Tensor) -> Tensor:
+        """
+        Reshape single global conditioning vector to (num_action_seq_samples, cond_dim).
+        """
+        if global_cond.ndim == 1:
+            global_cond = global_cond.unsqueeze(0)
+        if global_cond.ndim != 2 or global_cond.size(0) != 1:
+            raise ValueError(
+                f"Expected `global_cond` to contain exactly one feature vector "
+                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
+            )
+        # repeat batch‐dim
+        return global_cond.repeat(self.num_action_seq_samples, 1)
+
     @abstractmethod
     def conditional_sample_with_uncertainty(
         self,
@@ -63,7 +78,123 @@ class FlowMatchingUncertaintySampler(ABC):
         """
         pass
 
-class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
+
+class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
+    """
+    Samples action sequences from a “sampler” flow-matching model and evaluates their
+    negative log-likelihood under a separate “scorer” flow-matching model to estimate
+    epistemic uncertainty. A lower likelihood under the scorer indicates greater
+    uncertainty about the sampled sequence.
+    """
+    def __init__(
+        self,
+        flow_matching_cfg: FlowMatchingConfig,
+        cfg: CrossLikEnsembleSamplerConfig,
+        sampler_velocity_model: nn.Module,
+        scorer_velocity_model: nn.Module,
+        generator: Optional[torch.Generator] = None,
+    ):
+        """
+        Args:
+            cfg: Sampler-specific settings.
+            sampler_velocity_model: The flow-matching network used to generate action sequences.
+            scorer_velocity_model: The flow-matching network used to compute log-likelihoods of
+                the sampled sequences.
+        """
+        super().__init__(
+            flow_matching_cfg=flow_matching_cfg,
+            velocity_model=sampler_velocity_model,
+            num_action_seq_samples=cfg.num_action_seq_samples,
+            generator=generator,
+        )
+        self.scorer_velocity_model = scorer_velocity_model
+        self.exact_divergence = cfg.exact_divergence
+        self.method_name = "cross_likelihood_ensemble"
+        
+    def conditional_sample_with_uncertainty(
+        self,
+        global_cond: Tensor,
+        scorer_global_cond: Tensor,
+    ) -> Tuple[Tensor, Tensor]:
+        """
+        Generates action sequences using the sampler model, then computes their log-likelihoods
+        under the scorer model to produce uncertainty scores.
+
+        Args:
+            global_cond: Conditioning feature vector for the sampler model.
+                Shape: [cond_dim,] or [1, cond_dim].
+            scorer_global_cond: Conditioning feature vector for the scorer model.
+                Shape: [cond_dim,] or [1, cond_dim].
+
+        Returns:
+            - sampled_action_seqs: Action sequences drawn from the sampler model.
+                Shape: [num_action_seq_samples, horizon, action_dim].
+            - uncertainty_scores: Negative log-likelihoods of the corresponding
+              action sequence under the scorer model. Shape: [num_action_seq_samples,],       
+        """
+        # Adjust shape of conditioning vectors
+        global_cond = self._prepare_conditioning(global_cond)
+        scorer_global_cond = self._prepare_conditioning(scorer_global_cond)
+
+        device = get_device_from_parameters(self.velocity_model)
+        dtype = get_dtype_from_parameters(self.velocity_model)
+
+        # Sample noise priors
+        noise_samples = torch.randn(
+            size=(self.num_action_seq_samples, self.horizon, self.action_dim),
+            dtype=dtype,
+            device=device,
+            generator=self.generator,
+        )
+
+        # Noise distribution is an isotropic Gaussian
+        gaussian_log_density = Independent(
+            Normal(
+                loc = torch.zeros(self.horizon, self.action_dim, device=device),
+                scale = torch.ones(self.horizon, self.action_dim, device=device),
+            ),
+            reinterpreted_batch_ndims=2
+        ).log_prob
+
+        # Solve ODE forward from noise to sample action sequences
+        sampling_ode_solver = ODESolver(self.velocity_model)
+        sampled_action_seqs = sampling_ode_solver.sample(
+            x_0=noise_samples,
+            global_cond=global_cond,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
+        )
+
+        # Store sampled action sequences for logging
+        self.latest_action_candidates = sampled_action_seqs
+
+        # Compute log-likelihood of sampled action sequences in scorer model        
+        scoring_ode_solver = ODESolver(self.scorer_velocity_model)
+        _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
+            x_init=sampled_action_seqs,
+            time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
+            global_cond=scorer_global_cond,
+            log_p_0 = gaussian_log_density,
+            method=self.flow_matching_cfg.ode_solver_method,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
+            exact_divergence=self.exact_divergence,
+            generator=self.generator,
+        )
+
+        # Use negative log-likelihood as uncertainty score
+        uncertainty_scores = -log_probs
+        
+        # Store uncertainty scores for logging
+        self.latest_uncertainties = uncertainty_scores
+
+        return sampled_action_seqs, uncertainty_scores
+
+
+class ComposedLikelihoodSampler(FlowMatchingUncertaintySampler):
     """
     Samples action sequences, composes them with a previously executed sequence segment, 
     and uses their negative log-likelihoods under the flow matching model 
@@ -76,7 +207,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
-        cfg: ComposedActionSeqLikConfig,
+        cfg: ComposedLikSamplerConfig,
         velocity_model: nn.Module,
         generator: Optional[torch.Generator] = None,
     ):
@@ -95,7 +226,7 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
         # sequence generation
         self.prev_action_sequence = None
         self.prev_global_cond = None
-        self.method_name = "composed_action_seq_likelihood"
+        self.method_name = "composed_likelihood"
 
     def conditional_sample_with_uncertainty(
         self,
@@ -202,22 +333,8 @@ class ComposedActionSequenceLikelihood(FlowMatchingUncertaintySampler):
 
         return new_action_seqs, uncertainty_scores
     
-    def _prepare_conditioning(self, global_cond: Tensor) -> Tensor:
-        """
-        Reshape single global conditioning vector to (num_action_seq_samples, cond_dim).
-        """
-        if global_cond.ndim == 1:
-            global_cond = global_cond.unsqueeze(0)
-        if global_cond.ndim != 2 or global_cond.size(0) != 1:
-            raise ValueError(
-                f"Expected `global_cond` to contain exactly one feature vector "
-                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
-            )
-        # repeat batch‐dim
-        return global_cond.repeat(self.num_action_seq_samples, 1)
 
-
-class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
+class LikelihoodSampler(FlowMatchingUncertaintySampler):
     """
     Samples multiple action sequences x_1 and use their negative log-likelihoods
     -log(p_1(x_1)) under the flow matching mode as an uncertainty score.
@@ -227,7 +344,7 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
-        cfg: ActionSeqLikConfig,
+        cfg: LikSamplerConfig,
         velocity_model: nn.Module,
         generator: Optional[torch.Generator] = None,
     ):
@@ -242,7 +359,7 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
             generator=generator,
         )
         self.exact_divergence = cfg.exact_divergence
-        self.method_name = "action_seq_likelihood"
+        self.method_name = "likelihood"
     
     def conditional_sample_with_uncertainty(
         self,
@@ -320,7 +437,7 @@ class ActionSequenceLikelihood(FlowMatchingUncertaintySampler):
         return action_seqs, uncertainty_scores
 
     
-class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
+class EpsilonBallSampler(FlowMatchingUncertaintySampler):
     """
     Samples action sequences and measures how an epsilon-ball around each initial noise
     sample expands through the flow.
@@ -328,7 +445,7 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
-        cfg: EpsilonBallConfig,
+        cfg: EpsilonBallSamplerConfig,
         velocity_model: nn.Module,
         generator: Optional[torch.Generator] = None,
     ):
@@ -344,7 +461,7 @@ class EpsilonBallExpansion(FlowMatchingUncertaintySampler):
         )
         self.epsilon = cfg.epsilon
         self.num_eps_ball_samples = cfg.num_eps_ball_samples
-        self.method_name = "epsilon_ball_expansion"
+        self.method_name = "epsilon_ball"
     
     def conditional_sample_with_uncertainty(
         self,

@@ -119,7 +119,7 @@ def main(cfg: VisualizePipelineConfig):
             }
 
             # build global-conditioning with the policy's helper
-            global_cond = policy.flow_matching._prepare_global_conditioning(batch)
+            global_cond = policy.flow_matching.prepare_global_conditioning(batch)
 
             for visualizer in visualizers:
                 visualizer.visualize(global_cond=global_cond, frame=cur_frame.copy())                

@@ -16,7 +16,7 @@ python lerobot/scripts/eval_uncertainty_estimation.py \
     --policy.device=cuda \
     --env.type=pusht \
     --eval_uncert_est.n_episodes=10 \
-    --eval_uncert_est.uncert_est_methods='["action_seq_likelihood", "composed_action_seq_likelihood"]'
+    --eval_uncert_est.uncert_est_methods='["likelihood", "composed_likelihood"]'
 ```
 """
 import logging
@@ -203,7 +203,7 @@ def rollout(
             action = policy.select_action(observation)
 
         if new_action_gen:
-            uncertainty = policy.flow_matching.uncertainty_sampler.latest_uncertainties.detach().cpu().mean().item()
+            uncertainty = policy.uncertainty_sampler.latest_uncertainties.detach().cpu().mean().item()
             
             ep_uncertainties.append(uncertainty)
 

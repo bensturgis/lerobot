@@ -77,9 +77,10 @@ class EvalUncertEstConfig:
     # Which uncertainty estimation methods to evaluate
     uncert_est_methods: list[str] = field(
         default_factory=lambda: [
-            "composed_action_seq_likelihood",
-            "action_seq_likelihood",
-            "epsilon_ball_expansion"
+            "composed_likelihood",
+            "cross_likelihood",
+            "likelihood",
+            "epsilon_ball",
         ]
     )
 
@@ -102,15 +103,16 @@ class EvalUncertEstConfig:
     
     def validate(self):
         allowed_methods = {
-            "composed_action_seq_likelihood",
-            "action_seq_likelihood",
-            "epsilon_ball_expansion",
+            "composed_likelihood",
+            "cross_likelihood",
+            "likelihood",
+            "epsilon_ball",
         }
         # check every method the user passed
         for m in self.uncert_est_methods:
             if m not in allowed_methods:
                 raise ValueError(
-                    f"Unknown uncertainty‐estimation method '{m}'. "
+                    f"Unknown uncertainty-estimation method '{m}'. "
                     f"Allowed: {sorted(allowed_methods)}"
                 )
 
