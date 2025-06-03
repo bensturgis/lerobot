@@ -1,0 +1,18 @@
+dataset:
+  repo_id: lerobot/pusht
+
+env:
+  type: pusht
+
+policy:
+  type: flow_matching
+  device: cuda
+
+output_dir: outputs/train/flow_matching_pusht
+batch_size: 64
+steps: 200000
+eval_freq: 20000
+save_freq: 20000
+seed: 42
+wandb:
+  enable: true

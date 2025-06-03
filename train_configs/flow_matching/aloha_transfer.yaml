@@ -1,0 +1,27 @@
+dataset:
+  repo_id: lerobot/aloha_sim_insertion_human
+
+env:
+  type: aloha
+  task: AlohaInsertion-v0
+
+policy:
+  type: flow_matching
+  device: cuda
+  horizon: 64
+  n_action_steps: 32
+  crop_shape: [456, 456]
+  pretrained_backbone_weights: ResNet18_Weights.IMAGENET1K_V1
+  use_group_norm: false
+  sample_with_uncertainty: false
+  optimizer_lr: 1e-5
+  optimizer_weight_decay: 1e-4
+
+output_dir: outputs/train/flow_matching_aloha_insertion
+batch_size: 32
+steps: 100000
+eval_freq: 5000
+save_freq: 5000
+seed: 42
+wandb:
+  enable: true
