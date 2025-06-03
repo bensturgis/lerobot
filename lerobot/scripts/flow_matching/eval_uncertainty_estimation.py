@@ -242,10 +242,13 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
     for episode in progbar:
         for uncert_est_method in cfg.eval_uncert_est.uncert_est_methods:
             logging.info("Loading policy")
-            cfg.policy.sample_with_uncertainty = True
-            cfg.policy.uncertainty_sampler = uncert_est_method
+            cfg.uncertainty_sampler.type = uncert_est_method
             device = get_safe_torch_device(cfg.policy.device, log=True)
-            policy = make_policy(cfg.policy, env_cfg=cfg.env).to(device)
+            policy = make_policy(
+                cfg.policy,
+                env_cfg=cfg.env,
+                uncertainty_sampler_cfg=cfg.uncertainty_sampler
+            ).to(device)
             policy.eval()
             
             logging.info(f"Creating clean environment.")

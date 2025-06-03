@@ -122,19 +122,6 @@ class FlowMatchingConfig(PreTrainedConfig):
                 "The horizon should be an integer multiple of the downsampling factor (which is determined "
                 f"by `len(down_dims)`). Got {self.horizon=} and {self.down_dims=}"
             )
-        
-        # Validate that the provided uncertainty sampler is one of the supported options
-        availabe_uncertainty_sampler = [
-            "composed_likelihood",
-            "cross_likelihood",
-            "likelihood",
-            "epsilon_ball",
-        ]
-        if self.uncertainty_sampler not in availabe_uncertainty_sampler:
-            raise ValueError(
-                f"`uncertainty_sampler` must be one of {availabe_uncertainty_sampler}. "
-                f"Got '{self.uncertainty_sampler}'."
-            )
 
     def get_optimizer_preset(self) -> AdamConfig:
         return AdamConfig(

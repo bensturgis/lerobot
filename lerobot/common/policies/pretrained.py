@@ -87,8 +87,6 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         local_files_only: bool = False,
         revision: str | None = None,
         strict: bool = False,
-        scorer_pretrained_name_or_path: str | Path | None = None,
-        scorer_revision: str | None = None,
         **kwargs,
     ) -> T:
         """
@@ -110,7 +108,7 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         instance = cls(config, **kwargs)
 
         def _load_weights(
-            target_model: nn.Module, model_id: str | Path, revision: str | None
+            target_model: nn.Module, model_id: str | Path, revision: str | None = None
         ):
             if os.path.isdir(model_id):
                 print("Loading weights from local directory")
@@ -137,29 +135,24 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
 
         _load_weights(instance, pretrained_name_or_path, revision)
 
+        uncertainty_sampler_config = kwargs.get("uncertainty_sampler_config")
         if (
             config.type == "flow_matching" and
-            getattr(config, "sample_with_uncertainty", False)
+            uncertainty_sampler_config is not None and
+            uncertainty_sampler_config.type == "cross_likelihood"
         ):           
-            if getattr(config, "uncertainty_sampler", None) == "cross_likelihood":
-                scorer_model_id = (
-                    scorer_pretrained_name_or_path
-                    if scorer_pretrained_name_or_path is not None
-                    else config.cross_likelihood_sampler.scorer_model_path
+            scorer_model_path = uncertainty_sampler_config.cross_likelihood_sampler.scorer_model_path
+            if scorer_model_path is None:
+                raise ValueError(
+                    "Cross-likelihood uncertainty sampler requested but no scorer checkpoint provided."
                 )
-                if scorer_model_id is None:
-                    raise ValueError(
-                        "Cross-likelihood uncertainty sampler requested but no scorer checkpoint provided."
-                    )
-                
-                scorer_policy = cls(config, **kwargs)
-                _load_weights(scorer_policy, scorer_model_id, scorer_revision)
-                instance.scorer.load_state_dict(scorer_policy.flow_matching.state_dict(), strict=True)
-                instance.scorer.eval()
-                for p in instance.scorer.parameters():
-                    p.requires_grad_(False)
-
-            instance._init_uncertainty_sampler()
+            
+            scorer_policy = cls(config)
+            _load_weights(scorer_policy, scorer_model_path)
+            instance.scorer.load_state_dict(scorer_policy.flow_matching.state_dict(), strict=True)
+            instance.scorer.eval()
+            for p in instance.scorer.parameters():
+                p.requires_grad_(False)
 
         instance.to(config.device)
         instance.eval()

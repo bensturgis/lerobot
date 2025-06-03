@@ -7,12 +7,14 @@ from lerobot.common import envs
 from lerobot.configs import parser
 from lerobot.configs.default import EvalUncertEstConfig
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
 
 @dataclass
 class EvalUncertaintyEstimationPipelineConfig:
     env: envs.EnvConfig
     eval_uncert_est: EvalUncertEstConfig = field(default_factory=EvalUncertEstConfig)
     policy: PreTrainedConfig | None = None
+    uncertainty_sampler: UncertaintySamplerConfig = field(default_factory=UncertaintySamplerConfig)
     
     job_name: str | None = None
     output_dir: Path | None = None

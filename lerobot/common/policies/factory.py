@@ -27,6 +27,7 @@ from lerobot.common.envs.utils import env_to_policy_features
 from lerobot.common.policies.act.configuration_act import ACTConfig
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
 from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintySampler
 from lerobot.common.policies.flow_matching.visualizer import (
     FlowMatchingVisualizer,
@@ -119,35 +120,48 @@ def make_rgb_encoder(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
 
 
 def make_flow_matching_uncertainty_sampler(
-    cfg: FlowMatchingConfig,
+    flow_matching_cfg: FlowMatchingConfig,
+    uncertainty_sampler_cfg: UncertaintySamplerConfig,
     velocity_model: nn.Module,
     scorer_velocity_model: Optional[nn.Module] = None,
 ) -> FlowMatchingUncertaintySampler:
-    if cfg.uncertainty_sampler == "composed_likelihood":
+    if uncertainty_sampler_cfg.type == "composed_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedLikelihoodSampler
 
-        return ComposedLikelihoodSampler(cfg, cfg.composed_likelihood_sampler, velocity_model)
-    if cfg.uncertainty_sampler == "cross_likelihood":
+        return ComposedLikelihoodSampler(
+            flow_matching_cfg=flow_matching_cfg, 
+            cfg=uncertainty_sampler_cfg.composed_likelihood_sampler,
+            velocity_model=velocity_model
+        )
+    if uncertainty_sampler_cfg.type == "cross_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossLikelihoodEnsembleSampler
 
         if scorer_velocity_model is None:
             raise ValueError("Cross-likelihood uncertainty sampler requires a scorer model.")
         return CrossLikelihoodEnsembleSampler(
-            flow_matching_cfg=cfg,
-            cfg=cfg.cross_likelihood_sampler,
+            flow_matching_cfg=flow_matching_cfg,
+            cfg=uncertainty_sampler_cfg.cross_likelihood_sampler,
             sampler_velocity_model=velocity_model,
             scorer_velocity_model=scorer_velocity_model,
         )
-    elif cfg.uncertainty_sampler == "likelihood":
+    elif uncertainty_sampler_cfg.type == "likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import LikelihoodSampler
 
-        return LikelihoodSampler(cfg, cfg.likelihood_sampler, velocity_model)
-    elif cfg.uncertainty_sampler == "epsilon_ball":
+        return LikelihoodSampler(
+            flow_matching_cfg=flow_matching_cfg,
+            cfg=uncertainty_sampler_cfg.likelihood_sampler,
+            velocity_model=velocity_model
+        )
+    elif uncertainty_sampler_cfg.type == "epsilon_ball":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallSampler
 
-        return EpsilonBallSampler(cfg, cfg.epsilon_ball_sampler, velocity_model)
+        return EpsilonBallSampler(
+            flow_matching_cfg=flow_matching_cfg,
+            cfg=uncertainty_sampler_cfg.epsilon_ball_sampler,
+            velocity_model=velocity_model
+        )
     else:
-        raise ValueError(f"Unknown uncertainty sampler {cfg.uncertainty_sampler}.")
+        raise ValueError(f"Unknown uncertainty sampler {uncertainty_sampler_cfg.type}.")
 
 
 def make_flow_matching_visualizers(
@@ -217,6 +231,7 @@ def make_policy(
     cfg: PreTrainedConfig,
     ds_meta: LeRobotDatasetMetadata | None = None,
     env_cfg: EnvConfig | None = None,
+    uncertainty_sampler_cfg: UncertaintySamplerConfig | None = None,
 ) -> PreTrainedPolicy:
     """Make an instance of a policy class.
 
@@ -273,6 +288,9 @@ def make_policy(
     cfg.input_features = {key: ft for key, ft in features.items() if key not in cfg.output_features}
     kwargs["config"] = cfg
 
+    if cfg.type == "flow_matching":
+        kwargs["uncertainty_sampler_config"] = uncertainty_sampler_cfg
+
     if cfg.pretrained_path:
         # Load a pretrained policy and override the config if needed (for example, if there are inference-time
         # hyperparameters that we want to vary).
@@ -281,6 +299,9 @@ def make_policy(
     else:
         # Make a fresh policy.
         policy = policy_cls(**kwargs)
+
+    if cfg.type == "flow_matching" and uncertainty_sampler_cfg is not None:
+        policy._init_uncertainty_sampler()
 
     policy.to(cfg.device)
     assert isinstance(policy, nn.Module)

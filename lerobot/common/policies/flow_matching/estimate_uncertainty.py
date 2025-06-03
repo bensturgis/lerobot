@@ -5,10 +5,10 @@ from torch import nn, Tensor
 from torch.distributions import Independent, Normal
 from typing import Optional, Tuple
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import (
-    FlowMatchingConfig,
+from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
     ComposedLikSamplerConfig,
-    CrossLikEnsembleSamplerConfig,
+    CrossLikSamplerConfig,
     LikSamplerConfig,
     EpsilonBallSamplerConfig,
 )
@@ -89,7 +89,7 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
-        cfg: CrossLikEnsembleSamplerConfig,
+        cfg: CrossLikSamplerConfig,
         sampler_velocity_model: nn.Module,
         scorer_velocity_model: nn.Module,
         generator: Optional[torch.Generator] = None,
