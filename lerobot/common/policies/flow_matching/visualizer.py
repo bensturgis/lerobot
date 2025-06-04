@@ -1,14 +1,17 @@
+import gymnasium as gym
 import imageio
-from matplotlib.collections import LineCollection
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from dm_control import mujoco
+from matplotlib.collections import LineCollection
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 from torch import nn, Tensor
-from typing import Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
@@ -181,11 +184,6 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        if self.config.action_feature.shape[0] != 2:
-            raise ValueError(
-                "The action sequence visualisation requires action_dim = 2, "
-                f"but got action_dim = {self.config.action_feature.shape[0]}."
-            )
         self.num_action_seq = num_action_seq
         self.unnormalize_outputs = unnormalize_outputs
         self.vis_type = "action_seq"
@@ -198,15 +196,15 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         Args:
             global_cond: Single conditioning feature vector for the velocity model.
                 Shape: [cond_dim,] or [1, cond_dim].
-            **kwargs: Must contain argument `frame` which is the current RGB video
-                frame to draw on. Shape: [H, W, 3].
+            **kwargs: Must contain argument `env` which is the Gym environment whose
+                rendered RGB frame will be drawn on.
         """
-        if "frame" not in kwargs:
+        if "env" not in kwargs:
             raise ValueError(
-                "ActionSeqVisualizer expects the keyword argument 'frame' (RGB image), "
+                "ActionSeqVisualizer expects the keyword argument 'env' (gym.Env), "
                 "but it was not provided."
             )
-        frame: np.ndarray = kwargs["frame"]
+        env: gym.Env = kwargs["env"]
         
         if global_cond.dim() == 1: # shape = (cond_dim,)
             global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
@@ -242,11 +240,20 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         )
 
         # Convert the model-predicted actions from the network’s normalised space
-        # back into PushT world coordinates
+        # back into world coordinates
         actions = self.unnormalize_outputs({"action": actions})["action"]
 
-        fig = self._create_action_seq_image(frame=frame, actions=actions.cpu())
-
+        # Plotting of action sequences depends on environment
+        if env.spec.namespace == "gym_aloha":
+            fig = self._create_aloha_action_seq_image(env=env, actions=actions.cpu())
+        elif env.spec.namespace == "gym_pusht":
+            frame = env.render()
+            fig = self._create_pusht_action_seq_image(frame=frame, actions=actions.cpu())
+        else:
+            raise ValueError(
+                f"ActionSeqVisualizer does not support environment with namespace '{env.spec.namespace}'."
+            )
+        
         if self.show:
             plt.show(block=True)
         if self.save:
@@ -254,9 +261,173 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
 
         plt.close(fig)
 
-    def _create_action_seq_image(self, frame: np.ndarray, actions: Tensor) -> plt.Figure:
+    def _project_world_point_to_pixels(
+        self,
+        model: mujoco.MjModel,
+        data: mujoco.MjData,
+        point_world: np.ndarray,
+        camera_name: str = "top",
+        img_width: int = 640,
+        img_height: int = 480
+    ):
         """
-        Render action trajectories on top of a Gym environment frame.
+        Project a single 3-D point from the world frame into pixel coordinates.
+        """
+        # Get the camera extrinsics
+        cam_id = mujoco.mj_name2id(
+            model.ptr, mujoco.mjtObj.mjOBJ_CAMERA, camera_name.encode()
+        )
+        cam_pos = data.cam_xpos[cam_id]
+        cam_mat = data.cam_xmat[cam_id].reshape(3, 3)
+
+        # Convert point from world to camera coordinates
+        p_cam = cam_mat @ (point_world - cam_pos)
+
+        # Everything in front of the camera has negative z in MuJoCo
+        if p_cam[2] >= 0:
+            raise ValueError("Point is behind the camera")
+
+        # Get the camera intrinsics
+        fovy_deg = model.cam_fovy[cam_id]
+        fovy_rad = np.deg2rad(fovy_deg)
+        f = 0.5 * img_height / np.tan(0.5 * fovy_rad)
+
+        # Get the image centre
+        cx, cy = img_width * 0.5, img_height * 0.5
+
+        # Perspective projection
+        u = ( p_cam[0] / -p_cam[2] ) * f + cx
+        v = (-p_cam[1] / -p_cam[2] ) * f + cy
+
+        return u, v
+
+    def _create_aloha_action_seq_image(self, env: gym.Env, actions: Tensor) -> plt.Figure:
+        """
+        Render action trajectories on top of a Aloha-Gym environment frame.
+        """
+        was_interactive = plt.isinteractive()
+        plt.ioff()
+        
+        # Access the underlying MuJoCo physics wrapper
+        physics = env.unwrapped._env.physics
+
+        # Save the initial MuJoCo state (qpos + qvel) so we can restore later
+        initial_state = physics.get_state()
+
+        # Render the current camera image (RGB), using the "top" camera
+        frame = env.render()
+
+        # Prepare to store 3D waypoints for each action sequence
+        all_waypoints_left:  List[List[np.ndarray]] = []
+        all_waypoints_right: List[List[np.ndarray]] = []
+
+        # For each action sequence: restore initial state, step through the env, and record fingertip midpoints
+        for seq_idx in range(actions.shape[0]):
+            # Restore the saved state before simulating this sequence
+            physics.set_state(initial_state)
+            physics.forward()
+
+            seq_waypoints_left: List[np.ndarray] = []
+            seq_waypoints_right: List[np.ndarray] = []
+            action_seq = actions[seq_idx].cpu().numpy()
+
+            for action_step in range(self.config.horizon):
+                env.step(action_seq[action_step])
+        
+                # After stepping, get fingertip positions for left arm
+                left_fingertip_left = physics.data.body("vx300s_left/left_finger_link").xpos
+                left_fingertip_right = physics.data.body("vx300s_left/right_finger_link").xpos
+                midpoint_left = 0.5 * (left_fingertip_left + left_fingertip_right)
+                seq_waypoints_left.append(np.array(midpoint_left))
+
+                # Similarly, get fingertip positions for right arm
+                right_fingertip_left = physics.data.body("vx300s_right/left_finger_link").xpos
+                right_fingertip_right = physics.data.body("vx300s_right/right_finger_link").xpos
+                midpoint_right = 0.5 * (right_fingertip_left + right_fingertip_right)
+                seq_waypoints_right.append(np.array(midpoint_right))
+                
+            all_waypoints_left.append(seq_waypoints_left)
+            all_waypoints_right.append(seq_waypoints_right)
+
+        physics.set_state(initial_state)
+        physics.forward()
+        
+        # Create a Matplotlib figure and axis with the same extents as the image
+        fig, ax = plt.subplots(figsize=(6.4, 4.8), dpi=100)
+        ax.imshow(frame)
+        ax.set_xlim(0, 640)
+        ax.set_ylim(480, 0)  # invert y-axis so that v increases downward
+        ax.set_aspect("equal")
+        ax.axis("off")
+
+        # Prepare a colormap over the trajectory length
+        norm = plt.Normalize(0, self.config.horizon - 1)
+        cmap = plt.get_cmap("turbo")
+
+        def _draw_waypoints(waypoints: List[np.ndarray]):
+            pixel_points: list[Tuple[float, float]] = []
+            for point_3d in waypoints:
+                try:
+                    u_px, v_px = self._project_world_point_to_pixels(
+                        physics.model,
+                        physics.data,
+                        point_3d,
+                        camera_name="top",
+                        img_width=640,
+                        img_height=480
+                    )
+                    pixel_points.append((u_px, v_px))
+                except ValueError:
+                    # If a waypoint is behind the camera, skip plotting it
+                    continue
+
+            if len(pixel_points) < 2:
+                # Cannot form a line segment with fewer than 2 points
+                return
+            
+            # Build line segments between consecutive projected points
+            segments = [
+                [pixel_points[i], pixel_points[i + 1]]
+                for i in range(len(pixel_points) - 1)
+            ]
+            line_collection = LineCollection(
+                segments,
+                cmap=cmap,
+                norm=norm,
+                linewidths=2,
+                linestyles="solid",
+            )
+            # Color each segment by its timestep index
+            line_collection.set_array(np.arange(self.config.horizon - 1))
+            ax.add_collection(line_collection)
+
+            # Mark the final waypoint with a filled circle
+            final_u_px, final_v_px = pixel_points[-1]
+            ax.scatter(
+                final_u_px,
+                final_v_px,
+                c=[cmap(1.0)],
+                s=30,
+                edgecolors="k",
+                linewidths=0.5,
+                zorder=3,
+            )
+
+        # For each sequence, project 3D waypoints to pixel coords and draw
+        for waypoints_left, waypoints_right in zip(all_waypoints_left, all_waypoints_right):
+            _draw_waypoints(waypoints_left)
+            _draw_waypoints(waypoints_right)           
+
+        plt.tight_layout(pad=0)
+
+        if was_interactive:
+            plt.ion()
+
+        return fig
+
+    def _create_pusht_action_seq_image(self, frame: np.ndarray, actions: Tensor) -> plt.Figure:
+        """
+        Render action trajectories on top of a Push-T Gym environment frame.
         """
         was_interactive = plt.isinteractive()
         plt.ioff()

@@ -1,0 +1,12 @@
+env:
+  type: pusht
+
+policy:
+  type: flow_matching
+  device: cuda
+
+vis:
+  vis_types: [action_seq]
+  show: false
+
+# python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

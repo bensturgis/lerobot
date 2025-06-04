@@ -75,7 +75,7 @@ def main(cfg: VisualizePipelineConfig):
     # Setup for live visualization
     if cfg.show:
         live_view = LiveWindow("Live Visualization")
-    cur_frame = render_frame(env)
+    render_frame(env)
 
     # Prepare visualisers
     visualizers = make_flow_matching_visualizers(
@@ -122,15 +122,14 @@ def main(cfg: VisualizePipelineConfig):
             global_cond = policy.flow_matching.prepare_global_conditioning(batch)
 
             for visualizer in visualizers:
-                visualizer.visualize(global_cond=global_cond, frame=cur_frame.copy())                
+                visualizer.visualize(global_cond=global_cond, env=env)                
 
         # Apply the next action
-        observation, _, terminated, truncated, _ = env.step(action[0].cpu().numpy())
-        cur_frame = render_frame(env)
+        observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())
+        render_frame(env)
 
         # Stop early if environment terminates
-        done = terminated or truncated
-        if done:
+        if terminated:
             break
 
     logging.info(f"Finished in {time.time() - start_time:.1f}s")

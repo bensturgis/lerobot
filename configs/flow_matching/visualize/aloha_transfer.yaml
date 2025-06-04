@@ -7,9 +7,9 @@ policy:
   device: cuda
 
 vis:
-  vis_types: [flows]
-  action_dims: [0,1,2]
-  action_dim_names: [x, y, z]
+  vis_types: [action_seq, flows]
+  action_dims: [7, 8, 9]
+  action_dim_names: [right_waist, right_shoulder, right_elbow] # Check actual action dim names
   axis_limits: [[-1, 1], [-1, 1], [-1, 1]]
   show: false
 
