@@ -526,12 +526,6 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 f"'axis_limits' length ({len(axis_limits)}) must match 'action_dims' length "
                 f"({len(action_dims)})."
             )
-        
-        if action_dim_names is not None and len(action_dims) != len(action_dim_names):
-            raise ValueError(
-                f"'action_dim_names' length ({len(action_dim_names)}) must match 'action_dims' length "
-                f"({len(action_dims)})."
-            )
 
         self.action_dims = action_dims
         self.axis_limits = axis_limits
@@ -716,9 +710,9 @@ class FlowVisualizer(FlowMatchingVisualizer):
             x_label = f"Action dimension {self.action_dims[0]}"
             y_label = f"Action dimension {self.action_dims[1]}"
             z_label = f"Action dimension {self.action_dims[2]}"
-        ax.set_xlabel(x_label, fontsize=14)
-        ax.set_ylabel(y_label, fontsize=14)
-        ax.set_zlabel(z_label, fontsize=14)
+        ax.set_xlabel(x_label, fontsize=14, labelpad=8)
+        ax.set_ylabel(y_label, fontsize=14, labelpad=8)
+        ax.set_zlabel(z_label, fontsize=14, labelpad=8)
 
         ax.tick_params(axis='both', labelsize=12)
         ax.grid(True)
