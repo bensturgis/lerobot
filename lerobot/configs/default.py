@@ -138,19 +138,23 @@ class VisConfig:
     # Hard cap on how many env steps to visualize
     max_steps: Optional[int] = None
 
+    # Two or three indices indicating which action dimensions to visualize
+    action_dims: list[int] = (0,1)
+
     # Names of the action dimensions to visualize
     action_dim_names: Optional[list[str]] = None
 
-    # Parameters for action sequence visualization
-    num_action_seq: int = 30
+    # Time‐step indices (horizon steps) at which to generate visualizations
+    action_steps: Optional[list[int]] = None
 
     # Whether to display plots live
     show: bool = False
 
+    # Parameters for action sequence visualization
+    num_action_seq: int = 30
+
     # Parameters for flows visualization
-    action_dims: list[int] = (0,1)
     axis_limits: Optional[list[tuple[float, float]]] = None
-    action_steps: Optional[list[int]] = None
     num_paths: int = 50
 
     # Parameters for vector field visualization

@@ -101,7 +101,7 @@ class FlowMatchingVisualizer(ABC):
         if self.vis_type == "flows":
             filename = f"flows_action_{action_step+1:02d}.png"
         elif self.vis_type == "vector_field":
-            filename = f"vector_field_{int(time * 10):02d}.png"
+            filename = f"vector_field_{int(time * 100):02d}.png"
         elif self.vis_type == "action_seq":
             action_seq_idx = 1
             while (self.run_dir / f"action_seqs_{action_seq_idx:04d}.png").exists():
@@ -229,7 +229,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             device=device,
         )
 
-        # Sample a bathc of action sequences
+        # Sample a batch of action sequences
         actions = ode_solver.sample(
             x_0=noise_sample,
             global_cond=global_cond.repeat(self.num_action_seq, 1),
@@ -791,8 +791,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         self,
         config: FlowMatchingConfig,
         velocity_model: nn.Module,
-        min_action: np.array,
-        max_action: np.array,
+        action_dims: Sequence[int],
+        action_steps: Optional[Sequence[int]],
+        min_action: np.ndarray,
+        max_action: np.ndarray,
         grid_size: int,
         time_grid: Optional[Sequence[float]],
         action_dim_names: Optional[Sequence[str]],
@@ -821,21 +823,19 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        if self.config.action_feature.shape[0] != 2 or self.config.horizon != 1:
+        if len(action_dims) != 2:
             raise ValueError(
-                "The vector-field visualisation requires action_dim = 2 and horizon = 1 "
-                f"(got action_dim = {self.config.action_feature.shape[0]}, "
-                f"horizon = {self.config.horizon})."
+                "The vector-field visualisation requires len(action_dims) = 2 "
+                f"(got action_dims = {action_dims}."
             )
 
+        self.action_dims = action_dims
+        self.action_steps = action_steps if action_steps is not None else [0]
         self.min_action = min_action
         self.max_action = max_action
         self.grid_size = grid_size
-        # Default time_grid is list [0.1, 0.2, ..., 1.0]
-        if self.time_grid is None:
-            self.time_grid = list(np.linspace(0, 1, 11))
-        else:
-            self.time_grid = time_grid
+        # Default time_grid is list [0.05, 0.1, ..., 1.0]
+        self.time_grid = list(np.linspace(0, 1, 21)) if time_grid is None else time_grid
         self.vis_type = "vector_field"
     
     def visualize(self, global_cond: Tensor, **kwargs):
@@ -856,10 +856,30 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                 f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
             )
         
+        self.run_dir = self._update_run_dir()
+        
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
 
-        self.run_dir = self._update_run_dir()
+        # Initialize ODE solver
+        ode_solver = ODESolver(self.velocity_model)
+        
+        # Sample single noise vector from prior
+        noise_sample = torch.randn(
+            size=(1, self.config.horizon, self.config.action_feature.shape[0]),
+            dtype=dtype,
+            device=device,
+        )
+
+        # Sample a single action sequence
+        actions = ode_solver.sample(
+            x_0=noise_sample,
+            global_cond=global_cond.repeat(1, 1),
+            step_size=self.config.ode_step_size,
+            method=self.config.ode_solver_method,
+            atol=self.config.atol,
+            rtol=self.config.rtol,
+        )
 
         # Clamp values to [-3, +3]
         min_lim = np.minimum(self.min_action, -3.0)
@@ -874,10 +894,12 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         y_lin = np.linspace(y_min, y_max, self.grid_size)
         x_grid, y_grid = np.meshgrid(x_lin, y_lin, indexing="xy")
         
-        # Flatten numpy grids and turn them into a (num_grid_points,1,2) torch tensor to input into
-        # the velocity model
-        positions = np.stack([x_grid.reshape(-1), y_grid.reshape(-1)], axis=-1)
-        positions = torch.from_numpy(positions).unsqueeze(1).to(device=device, dtype=dtype)
+        # Overwrite the two slice dimensions with the grid values
+        x_dim, y_dim = self.action_dims
+        action_step = self.action_steps[0]
+        positions = actions.repeat(x_grid.size, 1, 1)
+        positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
+        positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)
 
         # Build a condition vector tensor whose batch size is the number of grid points
         num_grid_points = positions.shape[0]
@@ -892,8 +914,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             fig = self._create_vector_field_plot(
                 x_positions=x_grid.reshape(-1),
                 y_positions=y_grid.reshape(-1),
-                x_velocities=velocities[:, 0, 0].cpu().numpy(),
-                y_velocities=velocities[:, 0, 1].cpu().numpy(),
+                x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
+                y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
                 x_lim=(x_min, x_max),
                 y_lim=(y_min, y_max),
                 time=time,
@@ -947,11 +969,11 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
 
         # Axis labels
         if self.action_dim_names:
-            x_label = self.action_dim_names[0]
-            y_label = self.action_dim_names[1]
+            x_label = self.action_dim_names[self.action_dims[0]]
+            y_label = self.action_dim_names[self.action_dims[1]]
         else:
-            x_label = f"Action dimension {0}"
-            y_label = f"Action dimension {1}"
+            x_label = f"Action dimension {self.action_dims[0]}"
+            y_label = f"Action dimension {self.action_dims[1]}"
         ax.set_xlabel(x_label, fontsize=14)
         ax.set_ylabel(y_label, fontsize=14)
 

@@ -202,6 +202,8 @@ def make_flow_matching_visualizers(
             visualizers.append(
                 VectorFieldVisualizer(
                     **common_kwargs,
+                    action_dims = vis_cfg.action_dims,
+                    action_steps = vis_cfg.action_steps,
                     min_action = vis_cfg.min_action,
                     max_action = vis_cfg.max_action,
                     grid_size = vis_cfg.grid_size,
