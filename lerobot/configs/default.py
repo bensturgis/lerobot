@@ -158,7 +158,7 @@ class VisConfig:
     num_paths: int = 50
 
     # Parameters for vector field visualization
-    min_action: list[float] = (-1.0, -1.0)
-    max_action: list[float] = (1.0, 1.0)
+    min_action: float = -1.0
+    max_action: float = 1.0
     grid_size: int = 50
     time_grid: Optional[list[float]] = None

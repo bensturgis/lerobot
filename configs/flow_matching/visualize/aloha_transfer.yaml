@@ -7,14 +7,19 @@ policy:
   device: cuda
 
 vis:
-  vis_types: [action_seq, flows]
+  vis_types: [vector_field]
   action_dims: [7, 8, 9]
   action_dim_names: [left_waist, left_shoulder, left_elbow,
                      left_forearm_roll, left_wrist_angle, left_wrist_rotate,
                      left_gripper, right_waist, right_shoulder, 
                      right_elbow, right_forearm_roll, right_wrist_angle,
                      right_wrist_rotate, right_gripper]
-  axis_limits: [[-1, 1], [-1, 1], [-1, 1]]
   show: false
 
+  # Parameters for flows visualization
+  axis_limits: [[-1, 1], [-1, 1], [-1, 1]]
+  
+  # Parameters for vector field visualization
+  grid_size: 20
+  
 # python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

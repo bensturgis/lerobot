@@ -3,12 +3,12 @@ import imageio
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
+import random
 import torch
 
+from abc import ABC, abstractmethod
 from dm_control import mujoco
 from matplotlib.collections import LineCollection
-
-from abc import ABC, abstractmethod
 from pathlib import Path
 from torch import nn, Tensor
 from typing import List, Optional, Sequence, Tuple, Union
@@ -515,7 +515,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        if not isinstance(action_dims, (list, tuple)) or not (2 <= len(action_dims) <= 3):
+        if not isinstance(action_dims, (list, tuple)) or len(action_dims) not in (2, 3):
             raise ValueError(
                 "'action_dims' must be a list or tuple of length 2 or 3, "
                 f"but got {action_dims}"
@@ -793,8 +793,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         velocity_model: nn.Module,
         action_dims: Sequence[int],
         action_steps: Optional[Sequence[int]],
-        min_action: np.ndarray,
-        max_action: np.ndarray,
+        min_action: float,
+        max_action: float,
         grid_size: int,
         time_grid: Optional[Sequence[float]],
         action_dim_names: Optional[Sequence[str]],
@@ -806,12 +806,16 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
     ):
         """
         Args:
-            min_action: Lower bounds for x and y (shape (2,)).
-            max_action: Upper bounds for x and y (shape (2,)).
+            action_dims: Indices of the action-vector dimensions to visualize.
+                Must be length 2 (for 2D) or 3 (for 3D).
+            action_steps: Randomly choose one of these action steps along the entire action
+                sequence horizon to create the vector field visualization for. If None,
+                defaults to [0, 1, ..., horizon - 1].
+            min_action: Scalar lower bound for each plotted axis.
+            max_action: Scalar upper bound for each plotted axis.
             grid_size: Number of grid points per axis.
             time_grid: A sequence of float values in [0.0, 1.0] indicating the time steps
-                   at which the vector field is evaluated. If None, defaults to
-                   [0.0, 0.1, ..., 1.0].
+                at which the vector field is evaluated. If None, defaults to [0.0, 0.05, ..., 1.0].
         """
         super().__init__(
             config=config,
@@ -823,14 +827,17 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        if len(action_dims) != 2:
+        if len(action_dims) not in (2, 3):
             raise ValueError(
-                "The vector-field visualisation requires len(action_dims) = 2 "
+                "The vector-field visualisation supports 2D and 3D only, "
                 f"(got action_dims = {action_dims}."
             )
 
         self.action_dims = action_dims
-        self.action_steps = action_steps if action_steps is not None else [0]
+        if action_steps is None:
+            self.action_steps = list(range(self.config.horizon))
+        else:
+            self.action_steps = action_steps
         self.min_action = min_action
         self.max_action = max_action
         self.grid_size = grid_size
@@ -881,45 +888,75 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             rtol=self.config.rtol,
         )
 
-        # Clamp values to [-3, +3]
-        min_lim = np.minimum(self.min_action, -3.0)
-        max_lim = np.maximum(self.max_action,  3.0)
+        # Always visualize at least the cube [-3, +3] as a reasonable range
+        # for the Gaussian noise samples
+        min_lim = min(self.min_action, -3.0)
+        max_lim = max(self.max_action,  3.0)
 
-        # Unpack minimum x- and y-coordinates
-        x_min, y_min = min_lim
-        x_max, y_max = max_lim
+        # Build a 1-D lin-space once and reuse it for every axis we need
+        axis_lin = np.linspace(min_lim, max_lim, self.grid_size)
 
-        # Create a 2D meshgrid in the range of [x_min, x_max] x [y_min, y_max]
-        x_lin = np.linspace(x_min, x_max, self.grid_size)
-        y_lin = np.linspace(y_min, y_max, self.grid_size)
-        x_grid, y_grid = np.meshgrid(x_lin, y_lin, indexing="xy")
-        
-        # Overwrite the two slice dimensions with the grid values
-        x_dim, y_dim = self.action_dims
-        action_step = self.action_steps[0]
+        # Create the grids
+        if len(self.action_dims) == 2:
+            x_grid, y_grid = np.meshgrid(axis_lin, axis_lin, indexing="xy")
+            x_dim, y_dim = self.action_dims
+        else:
+            x_grid, y_grid, z_grid = np.meshgrid(axis_lin, axis_lin, axis_lin, indexing="xy")
+            x_dim, y_dim, z_dim = self.action_dims
+
+        action_step = random.choice(self.action_steps)
         positions = actions.repeat(x_grid.size, 1, 1)
         positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
         positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)
+        if len(self.action_dims) == 3:
+            positions[:, action_step, z_dim] = torch.tensor(z_grid.ravel(), dtype=dtype, device=device)
 
         # Build a condition vector tensor whose batch size is the number of grid points
         num_grid_points = positions.shape[0]
         global_cond_batch = global_cond.repeat(num_grid_points, 1)
         
+        # Compute the max velocity norm over the timesteps for coloring
+        max_velocity_norm = float('-inf')
+        for time in reversed(self.time_grid):
+            time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
+            with torch.no_grad():
+                velocities = self.velocity_model(positions, time_batch, global_cond_batch)
+            norms = torch.norm(velocities[:, action_step, self.action_dims], dim=1)
+            cur_max_velocity_norm = norms.max().item()
+            if cur_max_velocity_norm <= max_velocity_norm:
+                break
+            max_velocity_norm = cur_max_velocity_norm
+
         for time in self.time_grid:
             time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
             # Compute velocity at grid points and current time as given by flow matching velocity model
             with torch.no_grad():
                 velocities = self.velocity_model(positions, time_batch, global_cond_batch)
 
-            fig = self._create_vector_field_plot(
-                x_positions=x_grid.reshape(-1),
-                y_positions=y_grid.reshape(-1),
-                x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
-                y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
-                x_lim=(x_min, x_max),
-                y_lim=(y_min, y_max),
-                time=time,
-            )
+            if len(self.action_dims) == 2:
+                fig = self._create_vector_field_plot_2d(
+                    x_positions=x_grid.reshape(-1),
+                    y_positions=y_grid.reshape(-1),
+                    x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
+                    y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
+                    limits=(min_lim, max_lim),
+                    action_step=action_step,
+                    time=time,
+                    velocity_norm=max_velocity_norm
+                )
+            else:
+                fig = self._create_vector_field_plot_3d(
+                    x_positions=x_grid.reshape(-1),
+                    y_positions=y_grid.reshape(-1),
+                    z_positions=z_grid.reshape(-1),
+                    x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
+                    y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
+                    z_velocities=velocities[:, action_step, z_dim].cpu().numpy(),
+                    limits=(min_lim, max_lim),
+                    action_step=action_step,
+                    time=time,
+                    velocity_norm=max_velocity_norm
+                )
 
             if self.show:
                 plt.show(block=True)
@@ -931,22 +968,105 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         if self.create_gif:
             self._create_gif()
     
-    def _create_vector_field_plot(
+    def _create_vector_field_plot_3d(
         self,
-        x_positions: np.array,
-        y_positions: np.array,
-        x_velocities: np.array,
-        y_velocities: np.array,
-        x_lim: Tuple[float, float],
-        y_lim: Tuple[float, float],
+        x_positions: np.ndarray,
+        y_positions: np.ndarray,
+        z_positions: np.ndarray,
+        x_velocities: np.ndarray,
+        y_velocities: np.ndarray,
+        z_velocities: np.ndarray,
+        limits: Tuple[float, float],
+        action_step: int,
         time: float,
+        velocity_norm: float,
     ) -> plt.Figure:
         """
-        Draw a quiver plot for the vector field of a single two-dimensional action at a
-        given time.
+        Draw a 3D quiver plot for the vector field of a three action dimensions in a single
+        action step of a whole action sequence at a given time.
         """
         was_interactive = plt.isinteractive()
         plt.ioff()
+
+        # Color arrows by velocity norm
+        norms = np.sqrt(
+            x_velocities**2 + y_velocities**2 + z_velocities**2
+        )
+        cmap = cm.get_cmap('viridis')
+        colors = cmap(norms / velocity_norm)
+
+        # Create quiver plot
+        fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': '3d'})
+        fig.canvas.manager.set_window_title("Visualization of Vector Field")
+        quiv = ax.quiver(
+            x_positions, y_positions, z_positions,
+            x_velocities, y_velocities, z_velocities,
+            length=0.025,
+            normalize=False,
+            linewidth=0.7,
+            arrow_length_ratio=0.2,
+            colors=colors
+        )
+
+        # Set axis limits
+        ax.set_xlim(limits)
+        ax.set_ylim(limits)
+        ax.set_zlim(limits)
+        ax.set_aspect('equal')
+
+        # Colorbar and title
+        cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
+        cbar.ax.set_ylabel('Velocity Norm', fontsize=12)
+
+        # Title
+        ax.set_title(f"Vector Field of Action Step {action_step} at t={time:.2f}", fontsize=16)
+
+        # Axis labels
+        if self.action_dim_names:
+            x_label = self.action_dim_names[self.action_dims[0]]
+            y_label = self.action_dim_names[self.action_dims[1]]
+            z_label = self.action_dim_names[self.action_dims[2]]
+        else:
+            x_label = f"Action dimension {self.action_dims[0]}"
+            y_label = f"Action dimension {self.action_dims[1]}"
+            z_label = f"Action dimension {self.action_dims[2]}"
+        ax.set_xlabel(x_label, fontsize=14, labelpad=8)
+        ax.set_ylabel(y_label, fontsize=14, labelpad=8)
+        ax.set_zlabel(z_label, fontsize=14, labelpad=8)
+
+        ax.tick_params(axis='both', labelsize=12)
+        ax.grid(True)
+        plt.tight_layout()
+
+        if was_interactive:
+            plt.ion()
+
+        return fig
+    
+    def _create_vector_field_plot_2d(
+        self,
+        x_positions: np.ndarray,
+        y_positions: np.ndarray,
+        x_velocities: np.ndarray,
+        y_velocities: np.ndarray,
+        limits: Tuple[float, float],
+        action_step: int,
+        time: float,
+        velocity_norm: float,
+    ) -> plt.Figure:
+        """
+        Draw a 2D quiver plot for the vector field of a two action dimensions in a single
+        action step of a whole action sequence at a given time.
+        """
+        was_interactive = plt.isinteractive()
+        plt.ioff()
+
+        # Color arrows by velocity norm
+        norms = np.sqrt(
+            x_velocities**2 + y_velocities**2
+        )
+        cmap = cm.get_cmap('viridis')
+        colors = cmap(norms / velocity_norm)
         
         # Create quiver plot
         fig, ax = plt.subplots(figsize=(10, 10))
@@ -956,16 +1076,16 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_velocities, y_velocities,
             angles='xy', scale=40,
             scale_units='xy', width=0.004,
-            cmap='viridis'
+            colors=colors
         )
 
         # Set axis limits
-        ax.set_xlim(x_lim)
-        ax.set_ylim(y_lim)
+        ax.set_xlim(limits)
+        ax.set_ylim(limits)
         ax.set_aspect('equal')
         
         # Title
-        ax.set_title(f"Vector Field at t={time:.2f}", fontsize=16)
+        ax.set_title(f"Vector Field of Action Step {action_step} at t={time:.2f}", fontsize=16)
 
         # Axis labels
         if self.action_dim_names:
