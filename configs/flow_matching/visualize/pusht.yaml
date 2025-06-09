@@ -10,4 +10,6 @@ vis:
   action_dim_names: [x, y]
   show: false
 
+seed: 42
+
 # python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

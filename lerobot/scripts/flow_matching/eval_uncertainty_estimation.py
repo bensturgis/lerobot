@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from dataclasses import replace
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -40,6 +40,7 @@ from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.utils.io_utils import write_video
+from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 
 def plot_episode_uncertaintes(
@@ -169,6 +170,7 @@ def plot_all_uncertainties(
 def rollout(
     env: gym.Env,
     policy: PreTrainedPolicy,
+    seed: Optional[int],
 ) -> Dict[str, np.ndarray]:
     device = get_device_from_parameters(policy)
 
@@ -179,7 +181,7 @@ def rollout(
 
     # Reset the policy and environments.
     policy.reset()
-    observation, _ = env.reset()
+    observation, _ = env.reset(seed=seed)
 
     ep_frames.append(env.render())
     
@@ -227,6 +229,10 @@ def rollout(
 
 @parser.wrap()
 def main(cfg: EvalUncertaintyEstimationPipelineConfig): 
+    # Set global seed
+    if cfg.seed is not None:
+        set_seed(cfg.seed)
+    
     if cfg.policy.type != "flow_matching":
         raise ValueError(
             f"visualize_flow_matching.py only supports Flow Matching policies, "
@@ -254,7 +260,11 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             logging.info(f"Creating clean environment.")
             cfg.env.perturbation.enable = False
             clean_env = make_single_env(cfg.env)
-            clean_ep_info = rollout(clean_env, policy)
+            clean_ep_info = rollout(
+                env=clean_env,
+                policy=policy,
+                seed=cfg.seed
+            )
             
             all_uncertanties[uncert_est_method]["clean"].append(clean_ep_info["ep_uncertainties"])
             clean_output_dir = cfg.output_dir / uncert_est_method / "clean"
@@ -269,7 +279,11 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 perturb_env = make_single_env(
                     replace(cfg.env, perturbation=perturb_cfg),
                 )
-                perturb_ep_info = rollout(perturb_env, policy)
+                perturb_ep_info = rollout(
+                    env=perturb_env,
+                    policy=policy,
+                    seed=cfg.seed
+                )
                 
                 all_uncertanties[uncert_est_method][perturb_type].append(perturb_ep_info["ep_uncertainties"])
                 perturb_output_dir = cfg.output_dir / uncert_est_method / perturb_type

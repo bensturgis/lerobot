@@ -37,7 +37,8 @@ from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 @parser.wrap()
 def main(cfg: VisualizePipelineConfig): 
     # Set global seed
-    set_seed(cfg.seed)
+    if cfg.seed is not None:
+        set_seed(cfg.seed)
     
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":

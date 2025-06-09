@@ -16,6 +16,7 @@ class EvalUncertaintyEstimationPipelineConfig:
     policy: PreTrainedConfig | None = None
     uncertainty_sampler: UncertaintySamplerConfig = field(default_factory=UncertaintySamplerConfig)
     
+    seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None
 

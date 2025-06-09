@@ -95,7 +95,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
 
         scorer_veloctiy_model = self.scorer.unet if self.scorer is not None else None
         self.uncertainty_sampler = make_flow_matching_uncertainty_sampler(
-            cfg=self.config,
+            flow_matching_cfg=self.config,
             uncertainty_sampler_cfg=self.uncertainty_sampler_config,
             velocity_model=self.flow_matching.unet,
             scorer_velocity_model=scorer_veloctiy_model,

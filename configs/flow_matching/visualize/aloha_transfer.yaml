@@ -21,5 +21,7 @@ vis:
   
   # Parameters for vector field visualization
   grid_size: 20
+
+seed: 42
   
 # python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model
