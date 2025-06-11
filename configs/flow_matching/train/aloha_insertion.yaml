@@ -24,3 +24,5 @@ save_freq: 5000
 seed: 42
 wandb:
   enable: true
+
+# python lerobot/scripts/train.py --config=configs/flow_matching/train/aloha_insertion.yaml

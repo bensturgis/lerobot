@@ -5,7 +5,7 @@ from pathlib import Path
 
 from lerobot.common import envs
 from lerobot.configs import parser
-from lerobot.configs.default import EvalUncertEstConfig
+from lerobot.configs.default import DatasetConfig, EvalUncertEstConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
 
@@ -15,10 +15,15 @@ class EvalUncertaintyEstimationPipelineConfig:
     eval_uncert_est: EvalUncertEstConfig = field(default_factory=EvalUncertEstConfig)
     policy: PreTrainedConfig | None = None
     uncertainty_sampler: UncertaintySamplerConfig = field(default_factory=UncertaintySamplerConfig)
-    
+    dataset: DatasetConfig | None = None
+
     seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None
+
+    # Number of workers and batch size for the Laplace approximation calibration dataloader.
+    num_workers: int = 4
+    batch_size: int = 32
 
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
@@ -42,6 +47,27 @@ class EvalUncertaintyEstimationPipelineConfig:
             now = dt.datetime.now()
             eval_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
             self.output_dir = Path("outputs/eval_uncertainty_estimation") / eval_dir
+
+        self.validate()
+
+    def validate(self):
+        if (
+            "cross_likelihood_ensemble" in self.eval_uncert_est.uncert_est_methods and
+            self.uncertainty_sampler.cross_likelihood_ensemble_sampler.scorer_model_path is None
+        ):
+            raise ValueError(
+                "Cross-likelihood ensemble uncertainty sampler requested but no scorer "
+                "checkpoint provided."
+            )
+        
+        if (
+            "cross_likelihood_laplace" in self.eval_uncert_est.uncert_est_methods and
+            self.dataset is None
+        ):
+            raise ValueError(
+                "Cross-likelihood Laplace uncertainty sampler requested but no dataset "
+                "config for Laplace approximation provided."
+            )   
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

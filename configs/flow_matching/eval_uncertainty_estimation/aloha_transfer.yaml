@@ -1,6 +1,12 @@
+dataset:
+  repo_id: lerobot/aloha_sim_transfer_cube_human
+
 env:
   type: aloha
   task: AlohaTransferCube-v0
+
+eval_uncert_est:
+  uncert_est_methods: [cross_likelihood_laplace]
 
 seed: 47
 

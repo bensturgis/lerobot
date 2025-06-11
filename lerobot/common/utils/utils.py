@@ -118,6 +118,7 @@ def init_logging():
 
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
+    logging.getLogger().setLevel(logging.INFO)
 
     formatter = logging.Formatter()
     formatter.format = custom_format
