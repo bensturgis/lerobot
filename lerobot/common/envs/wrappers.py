@@ -100,7 +100,6 @@ class PerturbationWrapper(gym.Wrapper):
     # Gym API overrides
     def reset(self, **kwargs):
         # Call env.reset(...), then patch the returned obs
-        self.patch_frac = None
         obs, info = super().reset(**kwargs)
         return self._patch_obs(obs), info
 
