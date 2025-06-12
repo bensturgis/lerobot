@@ -8,6 +8,4 @@ env:
 eval_uncert_est:
   uncert_est_methods: [cross_likelihood_laplace]
 
-seed: 47
-
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

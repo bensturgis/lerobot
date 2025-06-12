@@ -3,7 +3,15 @@ from pathlib import Path
 
 # Sub-configs for each uncertainty sampler.
 @dataclass
-class CrossLikSamplerConfig:
+class CrossLikLaplaceSamplerConfig:
+    # Number of candidate action sequences to sample .
+    num_action_seq_samples: int = 1
+    # Whether to compute the exact divergence or use the Hutchinson trace estimator
+    # when computing the log-likelihood for an action sequence sample.
+    exact_divergence: bool = False
+
+@dataclass
+class CrossLikEnsembleSamplerConfig:
     # Number of candidate action sequences to sample .
     num_action_seq_samples: int = 1
     # Whether to compute the exact divergence or use the Hutchinson trace estimator
@@ -42,8 +50,9 @@ class EpsilonBallSamplerConfig:
 
 @dataclass
 class UncertaintySamplerConfig:
-    type: str = "cross_likelihood"
+    type: str = "cross_likelihood_ensemble"
     composed_likelihood_sampler: ComposedLikSamplerConfig = field(default_factory=ComposedLikSamplerConfig)
-    cross_likelihood_sampler: CrossLikSamplerConfig = field(default_factory=CrossLikSamplerConfig)
+    cross_likelihood_ensemble_sampler: CrossLikEnsembleSamplerConfig = field(default_factory=CrossLikEnsembleSamplerConfig)
+    cross_likelihood_laplace_sampler: CrossLikLaplaceSamplerConfig = field(default=CrossLikLaplaceSamplerConfig)
     likelihood_sampler: LikSamplerConfig = field(default_factory=LikSamplerConfig)
     epsilon_ball_sampler: EpsilonBallSamplerConfig = field(default_factory=EpsilonBallSamplerConfig)

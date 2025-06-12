@@ -18,6 +18,7 @@ import logging
 
 from pathlib import Path
 from torch import nn
+from torch.utils.data import DataLoader
 from typing import Optional, Sequence, Union
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
@@ -124,6 +125,7 @@ def make_flow_matching_uncertainty_sampler(
     uncertainty_sampler_cfg: UncertaintySamplerConfig,
     velocity_model: nn.Module,
     scorer_velocity_model: Optional[nn.Module] = None,
+    laplace_calib_loader: Optional[DataLoader] = None,
 ) -> FlowMatchingUncertaintySampler:
     if uncertainty_sampler_cfg.type == "composed_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedLikelihoodSampler
@@ -133,16 +135,28 @@ def make_flow_matching_uncertainty_sampler(
             cfg=uncertainty_sampler_cfg.composed_likelihood_sampler,
             velocity_model=velocity_model
         )
-    if uncertainty_sampler_cfg.type == "cross_likelihood":
+    elif uncertainty_sampler_cfg.type == "cross_likelihood_ensemble":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossLikelihoodEnsembleSampler
 
         if scorer_velocity_model is None:
-            raise ValueError("Cross-likelihood uncertainty sampler requires a scorer model.")
+            raise ValueError("Ensemble cross-likelihood uncertainty sampler requires a scorer model.")
         return CrossLikelihoodEnsembleSampler(
             flow_matching_cfg=flow_matching_cfg,
-            cfg=uncertainty_sampler_cfg.cross_likelihood_sampler,
+            cfg=uncertainty_sampler_cfg.cross_likelihood_ensemble_sampler,
             sampler_velocity_model=velocity_model,
             scorer_velocity_model=scorer_velocity_model,
+        )
+    elif uncertainty_sampler_cfg.type == "cross_likelihood_laplace":
+        from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossLikelihoodLaplaceSampler
+
+        if laplace_calib_loader is None:
+            raise ValueError("Laplace cross-likelihood uncertainty sampler requires a calibration data "
+                             "loader.")
+        return CrossLikelihoodLaplaceSampler(
+            flow_matching_cfg=flow_matching_cfg,
+            cfg=uncertainty_sampler_cfg.cross_likelihood_laplace_sampler,
+            sampler_velocity_model=velocity_model,
+            laplace_calib_loader=laplace_calib_loader,
         )
     elif uncertainty_sampler_cfg.type == "likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import LikelihoodSampler
@@ -302,9 +316,6 @@ def make_policy(
     else:
         # Make a fresh policy.
         policy = policy_cls(**kwargs)
-
-    if cfg.type == "flow_matching" and uncertainty_sampler_cfg is not None:
-        policy._init_uncertainty_sampler()
 
     policy.to(cfg.device)
     assert isinstance(policy, nn.Module)

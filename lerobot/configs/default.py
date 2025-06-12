@@ -78,7 +78,8 @@ class EvalUncertEstConfig:
     uncert_est_methods: list[str] = field(
         default_factory=lambda: [
             "composed_likelihood",
-            "cross_likelihood",
+            "cross_likelihood_ensemble",
+            "cross_likelihood_laplace"
             "likelihood",
             "epsilon_ball",
         ]
@@ -104,7 +105,8 @@ class EvalUncertEstConfig:
     def validate(self):
         allowed_methods = {
             "composed_likelihood",
-            "cross_likelihood",
+            "cross_likelihood_ensemble",
+            "cross_likelihood_laplace",
             "likelihood",
             "epsilon_ball",
         }

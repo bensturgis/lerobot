@@ -54,11 +54,11 @@ class VelocityModelWrapper(nn.Module):
     """
     def __init__(self, velocity_model: nn.Module) -> None:
         super().__init__()
-        self.velocity_model = velocity_model
+        self.base_model = velocity_model
 
     def forward(self, sample: VectorFieldInput):
         # Unpack VectorFieldInput attributes and forward them to the velocity model
-        return self.velocity_model(sample.interp_traj, sample.time, sample.global_cond)
+        return self.base_model(sample.interp_traj, sample.time, sample.global_cond)
     
 
 class LaplaceCalibrationDataset(TensorDataset):
@@ -239,3 +239,49 @@ def create_laplace_calibration_dataloader(
         collate_fn=collate_vectorfield_batch
     )
     return calib_loader
+
+
+class PointwiseConv1dToLinear(nn.Module):
+    """
+    Adapter that replaces a pretrained 1x1 Conv1D layer with an equivalent nn.Linear,
+    so that Laplace-torch can recognize it as a linear leaf module. The functional
+    output is identical to the original convolution.
+    """
+    def __init__(self, conv_layer: nn.Conv1d):
+        super().__init__()
+        # Number of output channels for reshaping
+        self.out_channels = conv_layer.out_channels
+        # Create a Linear layer matching the conv_layer parameters
+        self.linear_layer = nn.Linear(
+            in_features=conv_layer.in_channels,
+            out_features=conv_layer.out_channels,
+            bias=(conv_layer.bias is not None),
+            device=conv_layer.weight.device,
+            dtype=conv_layer.weight.dtype,
+        )
+        # Copy pretrained conv weights and bias
+        with torch.no_grad():
+            # conv_layer.weight shape: (C_out, C_in, 1)
+            self.linear_layer.weight.copy_(conv_layer.weight.squeeze(-1))
+            if conv_layer.bias is not None:
+                self.linear_layer.bias.copy_(conv_layer.bias)
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        """
+        Forward pass that applies the equivalent linear transformation at each time step.
+
+        Args:
+            inputs: Inputs to the final 1x1 Conv1D layer. Shape (batch_size, C_in, horizon).
+
+        Returns:
+           Outputs of the final 1x1 Conv1D layer. Shape (batch_size, action_dim, horizon).
+        """
+        # Inputs Shape: (batch_size, C_in, horizon)
+        batch_size, _, horizon = inputs.shape
+        # Flatten horizon dimension into batch dimension: (bach_size*horizon, C_in)
+        flat_inputs = inputs.permute(0, 2, 1).reshape(batch_size * horizon, -1)
+        # Apply linear layer: (bach_size*horizon, action_dim)
+        flat_outputs = self.linear_layer(flat_inputs)
+        # Restore shape: (bach_size*horizon, action_dim, horizon)
+        outputs = flat_outputs.view(batch_size, horizon, self.out_channels).permute(0, 2, 1)
+        return outputs

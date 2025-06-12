@@ -1,0 +1,10 @@
+dataset:
+  repo_id: lerobot/pusht
+
+env:
+  type: pusht
+
+eval_uncert_est:
+  uncert_est_methods: [cross_likelihood_laplace]
+
+# python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

@@ -1,16 +1,25 @@
+import copy
 import torch
 
 from abc import ABC, abstractmethod
+from laplace import Laplace
 from torch import nn, Tensor
+from torch.nn.utils import vector_to_parameters
 from torch.distributions import Independent, Normal
+from torch.utils.data import DataLoader
 from typing import Optional, Tuple
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
     ComposedLikSamplerConfig,
-    CrossLikSamplerConfig,
+    CrossLikEnsembleSamplerConfig,
+    CrossLikLaplaceSamplerConfig,
     LikSamplerConfig,
     EpsilonBallSamplerConfig,
+)
+from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import (
+    VelocityModelWrapper,
+    PointwiseConv1dToLinear
 )
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
@@ -79,6 +88,114 @@ class FlowMatchingUncertaintySampler(ABC):
         pass
 
 
+class CrossLikelihoodLaplaceSampler(FlowMatchingUncertaintySampler):
+    def __init__(
+        self,
+        flow_matching_cfg: FlowMatchingConfig,
+        cfg: CrossLikLaplaceSamplerConfig,
+        sampler_velocity_model: nn.Module,
+        laplace_calib_loader: DataLoader,
+        generator: Optional[torch.Generator] = None,
+    ):
+        super().__init__(
+            flow_matching_cfg=flow_matching_cfg,
+            velocity_model=sampler_velocity_model,
+            num_action_seq_samples=cfg.num_action_seq_samples,
+            generator=generator,
+        )
+        self.exact_divergence = cfg.exact_divergence
+        self.method_name = "cross_likelihood_laplace"
+        
+        sampler_velocity_model.final_conv[1] = PointwiseConv1dToLinear(sampler_velocity_model.final_conv[1])
+        self.wrapped_velocity_model = VelocityModelWrapper(sampler_velocity_model)
+        self.laplace_posterior = Laplace(
+            self.wrapped_velocity_model,
+            likelihood="regression",
+            subset_of_weights="last_layer",
+            hessian_structure="diag"
+        )
+        self.laplace_posterior.fit(laplace_calib_loader)
+
+    def _draw_laplace_velocity_model(self) -> nn.Module:
+        """
+        Returns a fresh copy of the MAP velocity model whose final linear
+        layer weights are drawn from the Laplace posterior.
+        """
+        laplace_model_weights = self.laplace_posterior.sample(
+            n_samples=1,
+            generator=self.generator
+        ).squeeze(0)
+        wrapped_laplace_velocity_model = copy.deepcopy(self.wrapped_velocity_model)
+        last_linear_layer_params = wrapped_laplace_velocity_model.base_model.final_conv[1].parameters()
+        vector_to_parameters(laplace_model_weights, last_linear_layer_params)
+        laplace_velocity_model = wrapped_laplace_velocity_model.base_model
+        laplace_velocity_model.eval()
+
+        return laplace_velocity_model.to(laplace_model_weights.device)
+
+    def conditional_sample_with_uncertainty(self, global_cond: Tensor) -> Tuple[Tensor, Tensor]:
+        # Adjust shape of conditioning vector
+        global_cond = self._prepare_conditioning(global_cond)
+
+        device = get_device_from_parameters(self.velocity_model)
+        dtype = get_dtype_from_parameters(self.velocity_model)
+
+        # Sample noise priors
+        noise_samples = torch.randn(
+            size=(self.num_action_seq_samples, self.horizon, self.action_dim),
+            dtype=dtype,
+            device=device,
+            generator=self.generator,
+        )
+
+        # Noise distribution is an isotropic Gaussian
+        gaussian_log_density = Independent(
+            Normal(
+                loc = torch.zeros(self.horizon, self.action_dim, device=device),
+                scale = torch.ones(self.horizon, self.action_dim, device=device),
+            ),
+            reinterpreted_batch_ndims=2
+        ).log_prob
+
+        # Solve ODE forward from noise to sample action sequences
+        sampling_ode_solver = ODESolver(self.velocity_model)
+        sampled_action_seqs = sampling_ode_solver.sample(
+            x_0=noise_samples,
+            global_cond=global_cond,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
+        )
+
+        # Store sampled action sequences for logging
+        self.latest_action_candidates = sampled_action_seqs
+
+        # Draw velocity model from the Laplace posterior
+        laplace_velocity_model = self._draw_laplace_velocity_model()
+        scoring_ode_solver = ODESolver(laplace_velocity_model)
+        _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
+            x_init=sampled_action_seqs,
+            time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
+            global_cond=global_cond,
+            log_p_0 = gaussian_log_density,
+            method=self.flow_matching_cfg.ode_solver_method,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
+            exact_divergence=self.exact_divergence,
+            generator=self.generator,
+        )
+
+        # Use negative log-likelihood as uncertainty score
+        uncertainty_scores = -log_probs
+        
+        # Store uncertainty scores for logging
+        self.latest_uncertainties = uncertainty_scores
+
+        return sampled_action_seqs, uncertainty_scores
+
+
 class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
     """
     Samples action sequences from a “sampler” flow-matching model and evaluates their
@@ -89,7 +206,7 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
-        cfg: CrossLikSamplerConfig,
+        cfg: CrossLikEnsembleSamplerConfig,
         sampler_velocity_model: nn.Module,
         scorer_velocity_model: nn.Module,
         generator: Optional[torch.Generator] = None,
