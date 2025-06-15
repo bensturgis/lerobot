@@ -121,3 +121,8 @@ class PerturbationWrapper(gym.Wrapper):
             frame = self._apply_patch(frame.copy())
 
         return frame
+    
+    def get_obs(self):
+        # Call env.get_obs(), then patch the returned obs
+        obs = self.env.get_obs()
+        return self._patch_obs(obs)
