@@ -21,7 +21,8 @@ class EvalUncertaintyEstimationPipelineConfig:
     job_name: str | None = None
     output_dir: Path | None = None
 
-    # Number of workers and batch size for the Laplace approximation calibration dataloader.
+    # Parameters for the Laplace approximation calibration dataloader.
+    calib_fraction: float = 1.0
     num_workers: int = 4
     batch_size: int = 32
 

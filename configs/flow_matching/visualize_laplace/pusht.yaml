@@ -13,6 +13,8 @@ policy:
 vis:
   vis_types: [action_seq]
 
+calib_fraction: 0.1
+laplace_scope: velocity_last
 n_laplace_models: 3
 
 # python lerobot/scripts/flow_matching/visualize_laplace.py --config=configs/flow_matching/visualize_laplace/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

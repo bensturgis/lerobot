@@ -6,7 +6,7 @@ import math
 import random
 from collections import deque
 from tqdm import tqdm
-from typing import Optional
+from typing import Dict, Optional
 
 import einops
 import numpy as np
@@ -94,12 +94,11 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             self.uncertainty_sampler = None
             return
 
-        scorer_veloctiy_model = self.scorer.unet if self.scorer is not None else None
         self.uncertainty_sampler = make_flow_matching_uncertainty_sampler(
             flow_matching_cfg=self.config,
             uncertainty_sampler_cfg=self.uncertainty_sampler_config,
-            velocity_model=self.flow_matching.unet,
-            scorer_velocity_model=scorer_veloctiy_model,
+            flow_matching_model=self.flow_matching,
+            scorer_flow_matching_model=self.scorer,
             laplace_calib_loader=laplace_calib_loader
         )
 
@@ -131,9 +130,6 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         batch_size, n_obs_steps = batch["observation.state"].shape[:2]
         assert n_obs_steps == self.config.n_obs_steps
 
-        # Encode image features and concatenate them all together along with the state vector.
-        global_cond = self.flow_matching.prepare_global_conditioning(batch)  # (B, global_cond_dim)
-
         # Run sampling.
         if not self.training and self.uncertainty_sampler is not None:
             if batch_size != 1:
@@ -142,13 +138,17 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                 )
             
             # Sample action sequence candidates and compute their uncertainty scores.
-            if self.uncertainty_sampler_config.type == "cross_likelihood_ensemble":
-                scorer_global_cond = self.scorer.prepare_global_conditioning(batch)  # (B, global_cond_dim)
+            if (
+                self.uncertainty_sampler_config.type == "cross_likelihood_ensemble" or
+                self.uncertainty_sampler_config.type == "cross_likelihood_laplace"
+            ):
                 action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
-                    global_cond=global_cond,
-                    scorer_global_cond=scorer_global_cond
+                    observation=batch
                 )
             else:
+                # Encode image features and concatenate them all together along with the state vector.
+                global_cond = self.flow_matching.prepare_global_conditioning(batch)  # (B, global_cond_dim)
+                
                 action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
                     global_cond=global_cond
                 )
@@ -163,6 +163,9 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                 self.uncertainty_sampler.prev_global_cond = global_cond
                 self.uncertainty_sampler.prev_action_sequence = actions
         else:
+            # Encode image features and concatenate them all together along with the state vector.
+            global_cond = self.flow_matching.prepare_global_conditioning(batch)  # (B, global_cond_dim)
+            
             actions = self.flow_matching.conditional_sample(batch_size, global_cond=global_cond)
 
         # Extract `n_action_steps` steps worth of actions (from the current observation).
@@ -253,6 +256,32 @@ class FlowMatchingModel(nn.Module):
 
         self.unet = FlowMatchingConditionalUnet1d(config, global_cond_dim=global_cond_dim * config.n_obs_steps)
 
+    def forward(
+        self, interpolated_trajectory: Tensor, timestep: Tensor, observation: Dict[str, Tensor]
+    ) -> Tensor:
+        """
+        Args:
+            interpolated_trajectory: Sample from OT conditional probability path based on some
+                initial noise sample and target actions. Shape: (batch_size, horizon, action_dim).
+            timestep: Flow matching ODE timesteps. Shape: (batch_size,).
+            observation: State of the agent stored under "observation.state" as well as
+                RGB images of the environment stored under "observation.images" AND/OR state of the
+                environment stored under "observation.environment_state".
+        Returns:
+            Predicted velocity of the flow matching model. Shape: (batch_size, horizong, action_dim).
+        """
+        # Input validation.
+        assert "observation.state" in observation
+        assert "observation.images" in observation or "observation.environment_state" in observation
+
+        # Encode image features and concatenate them all together along with the state vector.
+        global_cond = self.prepare_global_conditioning(observation)  # (B, global_cond_dim)
+
+        # Run the model that predicts the velocity
+        predicted_velocity = self.unet(interpolated_trajectory, timestep, global_cond)
+
+        return predicted_velocity
+    
     # ========= inference  ============
     def conditional_sample(
         self, batch_size: int, global_cond: Tensor, generator: torch.Generator | None = None

@@ -7,4 +7,13 @@ env:
 eval_uncert_est:
   uncert_est_methods: [cross_likelihood_laplace]
 
+uncertainty_sampler:
+  cross_likelihood_laplace_sampler:
+    laplace_scope: velocity_last
+
+  cross_likelihood_ensemble_sampler:
+    scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/last/pretrained_model
+
+calib_fraction: 0.1
+
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

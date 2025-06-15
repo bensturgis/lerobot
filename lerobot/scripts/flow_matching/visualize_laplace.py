@@ -1,23 +1,4 @@
 #!/usr/bin/env python
-"""
-Visualize different aspects of a Flow Matching policy rollout such as 
-flow trajectories, vector fields, and generated action sequence batches.
-
-Usage example:
-
-Stream the policy rollout live and create flow trajectory and generated action sequence
-batch visualizations.
-
-```
-python lerobot/scripts/visualize_flow_matching.py \
-    --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
-    --policy.device=cuda \
-    --env.type=pusht \
-    --vis.vis_types='["flows", "action_seq"]' \
-    --show=true
-``` 
-"""
-import copy
 import gymnasium as gym
 import logging
 import numpy as np
@@ -25,20 +6,19 @@ import random
 import time
 import torch
 from laplace import Laplace
-from laplace.baselaplace import BaseLaplace
 from pathlib import Path
-from tqdm import trange
 from torch import nn
-from torch.nn.utils import vector_to_parameters
-from typing import Any, Dict, List, Optional, Tuple
+from tqdm import trange
+from typing import Any, Dict, List, Optional
 
 from lerobot.configs import parser
 from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
 from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizers
 from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import (
-    create_laplace_calibration_dataloader,
+    create_laplace_flow_matching_calib_loader,
+    draw_laplace_flow_matching_model,
+    FlowMatchingModelWrapper,
     PointwiseConv1dToLinear,
-    VelocityModelWrapper,
 )
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
@@ -73,26 +53,7 @@ def restore_pusht_state(env: gym.Env, info: Dict[str, np.ndarray]) -> np.ndarray
     env.unwrapped._last_action = last_action
     env.unwrapped.space.step(0.001)
 
-    return env.unwrapped.get_obs()
-
-def draw_laplace_velocity_model(
-    laplace_posterior: BaseLaplace,
-    wrapped_velocity_model: nn.Module,
-) -> nn.Module:
-    """
-    Returns a fresh copy of the MAP velocity model whose final linear
-    layer weights are drawn from the Laplace posterior.
-    """
-    laplace_model_weights = laplace_posterior.sample(n_samples=1).squeeze(0)
-    wrapped_laplace_velocity_model = copy.deepcopy(wrapped_velocity_model)
-    last_linear_layer_params = list(
-        wrapped_laplace_velocity_model.base_model.final_conv[1].parameters()
-    )
-    vector_to_parameters(laplace_model_weights, last_linear_layer_params)
-    laplace_velocity_model = wrapped_laplace_velocity_model.base_model
-    laplace_velocity_model.eval()
-
-    return laplace_velocity_model.to(laplace_model_weights.device)
+    return env.get_obs()
 
 def rollout(
     cfg: VisualizeLaplacePipelineConfig,
@@ -218,7 +179,7 @@ def main(cfg: VisualizeLaplacePipelineConfig):
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":
         raise ValueError(
-            f"visualize_flow_matching.py only supports Flow Matching policies, "
+            f"visualize_laplace.py only supports Flow Matching policies, "
             f"but got policy type '{cfg.policy.type}'."
         )
     device = get_safe_torch_device(cfg.policy.device, log=True)
@@ -228,25 +189,53 @@ def main(cfg: VisualizeLaplacePipelineConfig):
     logging.info("Creating environment")
     env = make_single_env(cfg.env)
     # ------------------------------------------
-    velocity_model = policy.flow_matching.unet
-    velocity_model.final_conv[1] = PointwiseConv1dToLinear(velocity_model.final_conv[1])
-    wrapped_velocity_model = VelocityModelWrapper(velocity_model)
+    flow_matching_model = policy.flow_matching
+    laplace_approx_targets: list[nn.Module] = []
+    if cfg.laplace_scope in ["velocity_last", "both"]:
+        flow_matching_model.unet.final_conv[1] = PointwiseConv1dToLinear(
+            flow_matching_model.unet.final_conv[1]
+        )
+        laplace_approx_targets.append("unet.final_conv.1.linear_layer")
+
+    if cfg.laplace_scope in ["rgb_last", "both"]:
+        laplace_approx_targets.append("rgb_encoder.out")
+
+    if len(laplace_approx_targets) == 0:
+        raise ValueError(
+            f"Unknown laplace_scope={cfg.laplace_scope}. Choose from "
+            "'velocity_last', 'rgb_last' and 'both'."
+        )
+    
+    # Freeze all parameters
+    for p in flow_matching_model.parameters():
+        p.requires_grad_(False)
+
+    # Un-freeze parameters from target modules
+    for name, module in flow_matching_model.named_modules():
+        if name in laplace_approx_targets:
+            for p in module.parameters():
+                p.requires_grad_(True)
+
+    wrapped_flow_matching_model = FlowMatchingModelWrapper(flow_matching_model)
     laplace_posterior = Laplace(
-        wrapped_velocity_model,
+        wrapped_flow_matching_model,
         likelihood="regression",
-        subset_of_weights="last_layer",
-        hessian_structure="diag"
+        subset_of_weights="all",
+        hessian_structure="diag",
     )
-    laplace_calib_loader = create_laplace_calibration_dataloader(
+    
+    laplace_calib_loader = create_laplace_flow_matching_calib_loader(
         cfg=cfg,
         policy=policy,
+        calib_fraction=cfg.calib_fraction
     )
     laplace_posterior.fit(laplace_calib_loader)
-    laplace_velocity_models = []
+    laplace_flow_matching_models = []
     for k in range(cfg.n_laplace_models):
-        laplace_velocity_models.append(draw_laplace_velocity_model(
+        laplace_flow_matching_models.append(draw_laplace_flow_matching_model(
             laplace_posterior=laplace_posterior,
-            wrapped_velocity_model=wrapped_velocity_model,
+            flow_matching_model=wrapped_flow_matching_model.base_model,
+            target_modules=laplace_approx_targets
         ))
     # ------------------------------------------
     seed = cfg.seed if cfg.seed is not None else random.randrange(2**32)
@@ -258,10 +247,10 @@ def main(cfg: VisualizeLaplacePipelineConfig):
         output_dir=cfg.output_dir,
     )
 
-    for k, laplace_velocity_model in enumerate(laplace_velocity_models):
+    for k, laplace_flow_matching_model in enumerate(laplace_flow_matching_models):
         policy.reset()
         # Replace flow matching MAP velocity model with a Laplace approximation
-        policy.flow_matching.unet = laplace_velocity_model
+        policy.flow_matching = laplace_flow_matching_model
         output_dir = cfg.output_dir / f"laplace_model_{k+1}"
 
         rollout(

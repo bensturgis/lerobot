@@ -3,11 +3,11 @@ import torch
 
 from abc import ABC, abstractmethod
 from laplace import Laplace
+from laplace.utils import ModuleNameSubnetMask
 from torch import nn, Tensor
-from torch.nn.utils import vector_to_parameters
 from torch.distributions import Independent, Normal
 from torch.utils.data import DataLoader
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
@@ -18,7 +18,8 @@ from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler imp
     EpsilonBallSamplerConfig,
 )
 from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import (
-    VelocityModelWrapper,
+    draw_laplace_flow_matching_model,
+    FlowMatchingModelWrapper,
     PointwiseConv1dToLinear
 )
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
@@ -89,53 +90,131 @@ class FlowMatchingUncertaintySampler(ABC):
 
 
 class CrossLikelihoodLaplaceSampler(FlowMatchingUncertaintySampler):
+    """
+    Estimates epistemic uncertainty of flow matching model by fitting a Laplace 
+    approximation to a subset of weights. Action sequences are sampled from the MAP
+    model and scored using models sampled from the Laplace posterior.
+
+    The Laplace approximation is fit to the final layers of the velocity and/or image encoder.
+    """
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
         cfg: CrossLikLaplaceSamplerConfig,
-        sampler_velocity_model: nn.Module,
+        flow_matching_model: nn.Module,
         laplace_calib_loader: DataLoader,
         generator: Optional[torch.Generator] = None,
     ):
+        """
+        Args:
+            cfg: Sampler-specific settings.
+            flow_matching_model: The full flow-matching model including velocity and RGB encoder.
+            laplace_calib_loader: DataLoader providing samples for fitting the Laplace
+                approximation.
+        """
+        # Use the MAP velocity network for sampling action sequences
+        self.flow_matching_model = flow_matching_model
+        velocity_model = self.flow_matching_model.unet
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
-            velocity_model=sampler_velocity_model,
+            velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
         self.exact_divergence = cfg.exact_divergence
         self.method_name = "cross_likelihood_laplace"
         
-        sampler_velocity_model.final_conv[1] = PointwiseConv1dToLinear(sampler_velocity_model.final_conv[1])
-        self.wrapped_velocity_model = VelocityModelWrapper(sampler_velocity_model)
+        # Select target modules for Laplace approximation
+        self.laplace_approx_targets: list[str] = []
+        if cfg.laplace_scope in ["velocity_last", "both"]:
+            # Replace the last conv layer with a linear wrapper for Laplace compatibility
+            velocity_model.final_conv[1] = PointwiseConv1dToLinear(
+                velocity_model.final_conv[1]
+            )
+            self.laplace_approx_targets.append("unet.final_conv.1.linear_layer")
+
+        if cfg.laplace_scope in ["rgb_last", "both"]:
+            self.laplace_approx_targets.append("rgb_encoder.out")
+        
+        if len(self.laplace_approx_targets) == 0:
+            raise ValueError(
+                f"Unknown laplace_scope={cfg.laplace_scope}. Choose from "
+                "'velocity_last', 'rgb_last' and 'both'."
+            )
+        
+        # la_subnetwork_mask = ModuleNameSubnetMask(
+        #     flow_matching_model,
+        #     module_names=laplace_approx_targets
+        # )
+        # la_subnetwork_mask.select()
+        # la_subnetwork_indices = la_subnetwork_mask.indices.cpu()
+
+        # Freeze all parameters
+        for p in flow_matching_model.parameters():
+            p.requires_grad_(False)
+
+        # Unfreeze only the selected subnetwork for Laplace fitting
+        for name, module in flow_matching_model.named_modules():
+            if name in self.laplace_approx_targets:
+                for p in module.parameters():
+                    p.requires_grad_(True)
+        
+        # Wrap the model so it takes inputs and generates outputs compatible
+        # with Laplace
+        flow_matching_model.eval()
+        self.wrapped_flow_matching_model = FlowMatchingModelWrapper(
+            flow_matching_model
+        )
+        # Fit a diagonal Laplace approximation over the selected subnetwork
         self.laplace_posterior = Laplace(
-            self.wrapped_velocity_model,
+            self.wrapped_flow_matching_model,
             likelihood="regression",
-            subset_of_weights="last_layer",
-            hessian_structure="diag"
+            subset_of_weights="all", # includes only params with requires_grad=True
+            hessian_structure="diag",
         )
         self.laplace_posterior.fit(laplace_calib_loader)
 
-    def _draw_laplace_velocity_model(self) -> nn.Module:
+    def conditional_sample_with_uncertainty(
+        self,
+        observation: Dict[str, Tensor]
+    ) -> Tuple[Tensor, Tensor]:
         """
-        Returns a fresh copy of the MAP velocity model whose final linear
-        layer weights are drawn from the Laplace posterior.
+        Generates action sequences using the MAP flow matching model, then computes
+        their log-likelihoods under a Laplace-sampled model to obtain epistemic uncertainty scores.
+
+        Args:
+            observation: Info about the environment used to create the conditioning vector for
+                the flow matching model. It has to contain the following items:
+                {
+                "observation.state": (B, n_obs_steps, state_dim)
+
+                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
+                    AND/OR
+                "observation.environment_state": (B, environment_dim)
+                }
+
+        Returns:
+            - sampled_action_seqs: Action sequences drawn from the MAP model.
+                Shape: [num_action_seq_samples, horizon, action_dim].
+            - uncertainty_scores: Negative log-likelihoods of the corresponding
+              action sequence under the Laplace-sampled model. Shape: [num_action_seq_samples,],       
         """
-        laplace_model_weights = self.laplace_posterior.sample(
-            n_samples=1,
+        # Draw flow matching model from the Laplace posterior
+        laplace_flow_matching_model = draw_laplace_flow_matching_model(
+            laplace_posterior=self.laplace_posterior,
+            flow_matching_model=self.wrapped_flow_matching_model.base_model,
+            target_modules=self.laplace_approx_targets,
             generator=self.generator
-        ).squeeze(0)
-        wrapped_laplace_velocity_model = copy.deepcopy(self.wrapped_velocity_model)
-        last_linear_layer_params = wrapped_laplace_velocity_model.base_model.final_conv[1].parameters()
-        vector_to_parameters(laplace_model_weights, last_linear_layer_params)
-        laplace_velocity_model = wrapped_laplace_velocity_model.base_model
-        laplace_velocity_model.eval()
+        )
 
-        return laplace_velocity_model.to(laplace_model_weights.device)
+        # Encode image features and concatenate them all together along with the state vector
+        # to create the flow matching conditioning vectors
+        global_cond = self.flow_matching_model.prepare_global_conditioning(observation) # (B, global_cond_dim)
+        laplace_global_cond = laplace_flow_matching_model.prepare_global_conditioning(observation)  # (B, global_cond_dim)
 
-    def conditional_sample_with_uncertainty(self, global_cond: Tensor) -> Tuple[Tensor, Tensor]:
         # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
+        laplace_global_cond = self._prepare_conditioning(laplace_global_cond)
 
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
@@ -170,14 +249,11 @@ class CrossLikelihoodLaplaceSampler(FlowMatchingUncertaintySampler):
 
         # Store sampled action sequences for logging
         self.latest_action_candidates = sampled_action_seqs
-
-        # Draw velocity model from the Laplace posterior
-        laplace_velocity_model = self._draw_laplace_velocity_model()
-        scoring_ode_solver = ODESolver(laplace_velocity_model)
+        scoring_ode_solver = ODESolver(laplace_flow_matching_model.unet)
         _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
             x_init=sampled_action_seqs,
             time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
-            global_cond=global_cond,
+            global_cond=laplace_global_cond,
             log_p_0 = gaussian_log_density,
             method=self.flow_matching_cfg.ode_solver_method,
             step_size=self.flow_matching_cfg.ode_step_size,
@@ -207,41 +283,46 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
         self,
         flow_matching_cfg: FlowMatchingConfig,
         cfg: CrossLikEnsembleSamplerConfig,
-        sampler_velocity_model: nn.Module,
-        scorer_velocity_model: nn.Module,
+        sampler_flow_matching_model: nn.Module,
+        scorer_flow_matching_model: nn.Module,
         generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
             cfg: Sampler-specific settings.
-            sampler_velocity_model: The flow-matching network used to generate action sequences.
-            scorer_velocity_model: The flow-matching network used to compute log-likelihoods of
+            sampler_flow_matching_model: The flow matching network used to generate action sequences.
+            scorer_flow_matching_model: The flow matching network used to compute log-likelihoods of
                 the sampled sequences.
         """
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
-            velocity_model=sampler_velocity_model,
+            velocity_model=sampler_flow_matching_model.unet,
             num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
-        self.scorer_velocity_model = scorer_velocity_model
+        self.sampler_flow_matching_model = sampler_flow_matching_model
+        self.scorer_flow_matching_model = scorer_flow_matching_model
         self.exact_divergence = cfg.exact_divergence
         self.method_name = "cross_likelihood_ensemble"
         
     def conditional_sample_with_uncertainty(
         self,
-        global_cond: Tensor,
-        scorer_global_cond: Tensor,
+        observation: Dict[str, Tensor]
     ) -> Tuple[Tensor, Tensor]:
         """
         Generates action sequences using the sampler model, then computes their log-likelihoods
         under the scorer model to produce uncertainty scores.
 
         Args:
-            global_cond: Conditioning feature vector for the sampler model.
-                Shape: [cond_dim,] or [1, cond_dim].
-            scorer_global_cond: Conditioning feature vector for the scorer model.
-                Shape: [cond_dim,] or [1, cond_dim].
+            observation: Info about the environment used to create the conditioning vector for
+                the flow matching model. It has to contain the following items:
+                {
+                "observation.state": (B, n_obs_steps, state_dim)
+
+                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
+                    AND/OR
+                "observation.environment_state": (B, environment_dim)
+                }
 
         Returns:
             - sampled_action_seqs: Action sequences drawn from the sampler model.
@@ -249,6 +330,11 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
             - uncertainty_scores: Negative log-likelihoods of the corresponding
               action sequence under the scorer model. Shape: [num_action_seq_samples,],       
         """
+        # Encode image features and concatenate them all together along with the state vector
+        # to create the flow matching conditioning vectors
+        global_cond = self.sampler_flow_matching_model.prepare_global_conditioning(observation) # (B, global_cond_dim)
+        scorer_global_cond = self.scorer_flow_matching_model.prepare_global_conditioning(observation)  # (B, global_cond_dim)
+        
         # Adjust shape of conditioning vectors
         global_cond = self._prepare_conditioning(global_cond)
         scorer_global_cond = self._prepare_conditioning(scorer_global_cond)
@@ -288,7 +374,7 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
         self.latest_action_candidates = sampled_action_seqs
 
         # Compute log-likelihood of sampled action sequences in scorer model        
-        scoring_ode_solver = ODESolver(self.scorer_velocity_model)
+        scoring_ode_solver = ODESolver(self.scorer_flow_matching_model.unet)
         _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
             x_init=sampled_action_seqs,
             time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),

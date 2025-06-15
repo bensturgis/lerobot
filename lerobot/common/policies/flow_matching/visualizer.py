@@ -1071,18 +1071,22 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         # Create quiver plot
         fig, ax = plt.subplots(figsize=(10, 10))
         fig.canvas.manager.set_window_title("Visualization of Vector Field")
-        ax.quiver(
+        quiv = ax.quiver(
             x_positions, y_positions,
             x_velocities, y_velocities,
             angles='xy', scale=40,
             scale_units='xy', width=0.004,
-            colors=colors
+            color=colors
         )
 
         # Set axis limits
         ax.set_xlim(limits)
         ax.set_ylim(limits)
         ax.set_aspect('equal')
+
+        # Colorbar and title
+        cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
+        cbar.ax.set_ylabel('Velocity Norm', fontsize=12)
         
         # Title
         ax.set_title(f"Vector Field of Action Step {action_step} at t={time:.2f}", fontsize=16)

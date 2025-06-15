@@ -9,6 +9,11 @@ class CrossLikLaplaceSamplerConfig:
     # Whether to compute the exact divergence or use the Hutchinson trace estimator
     # when computing the log-likelihood for an action sequence sample.
     exact_divergence: bool = False
+    # Which layer(s) to place the Laplace posterior on:
+    #  - "velocity_last": The final layer of the flow matching velocity model
+    #  - "rgb_last": the final layer of the RGB encoder
+    #  - "both": jointly on both layers
+    laplace_scope: str = "both"
 
 @dataclass
 class CrossLikEnsembleSamplerConfig:

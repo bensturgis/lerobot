@@ -131,7 +131,7 @@ class VisConfig:
     """Options that control what we draw and how we save/show it."""
     # Which visualizers to run (you can pick one or more)
     vis_types: list[str] = field(
-        default_factory=lambda: ["action_seq", "flows"]
+        default_factory=lambda: ["action_seq", "flows", "vector_field"]
     )
 
     # If set, start drawing only after this environment step

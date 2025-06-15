@@ -25,7 +25,14 @@ class VisualizeLaplacePipelineConfig:
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
 
-    # Number of workers and batch size for the Laplace approximation calibration dataloader.
+    # Which layer(s) to place the Laplace posterior on:
+    #  - "velocity_last": The final layer of the flow matching velocity model
+    #  - "rgb_last": the final layer of the RGB encoder
+    #  - "both": jointly on both layers
+    laplace_scope: str = "both"
+
+    # Parameters for the Laplace approximation calibration dataloader.
+    calib_fraction: float = 1.0
     num_workers: int = 4
     batch_size: int = 32
 

@@ -123,8 +123,8 @@ def make_rgb_encoder(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
 def make_flow_matching_uncertainty_sampler(
     flow_matching_cfg: FlowMatchingConfig,
     uncertainty_sampler_cfg: UncertaintySamplerConfig,
-    velocity_model: nn.Module,
-    scorer_velocity_model: Optional[nn.Module] = None,
+    flow_matching_model: nn.Module,
+    scorer_flow_matching_model: Optional[nn.Module] = None,
     laplace_calib_loader: Optional[DataLoader] = None,
 ) -> FlowMatchingUncertaintySampler:
     if uncertainty_sampler_cfg.type == "composed_likelihood":
@@ -133,18 +133,18 @@ def make_flow_matching_uncertainty_sampler(
         return ComposedLikelihoodSampler(
             flow_matching_cfg=flow_matching_cfg, 
             cfg=uncertainty_sampler_cfg.composed_likelihood_sampler,
-            velocity_model=velocity_model
+            velocity_model=flow_matching_model.unet
         )
     elif uncertainty_sampler_cfg.type == "cross_likelihood_ensemble":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossLikelihoodEnsembleSampler
 
-        if scorer_velocity_model is None:
+        if scorer_flow_matching_model is None:
             raise ValueError("Ensemble cross-likelihood uncertainty sampler requires a scorer model.")
         return CrossLikelihoodEnsembleSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.cross_likelihood_ensemble_sampler,
-            sampler_velocity_model=velocity_model,
-            scorer_velocity_model=scorer_velocity_model,
+            sampler_flow_matching_model=flow_matching_model,
+            scorer_flow_matching_model=scorer_flow_matching_model,
         )
     elif uncertainty_sampler_cfg.type == "cross_likelihood_laplace":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossLikelihoodLaplaceSampler
@@ -155,7 +155,7 @@ def make_flow_matching_uncertainty_sampler(
         return CrossLikelihoodLaplaceSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.cross_likelihood_laplace_sampler,
-            sampler_velocity_model=velocity_model,
+            flow_matching_model=flow_matching_model,
             laplace_calib_loader=laplace_calib_loader,
         )
     elif uncertainty_sampler_cfg.type == "likelihood":
@@ -164,7 +164,7 @@ def make_flow_matching_uncertainty_sampler(
         return LikelihoodSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.likelihood_sampler,
-            velocity_model=velocity_model
+            velocity_model=flow_matching_model.unet
         )
     elif uncertainty_sampler_cfg.type == "epsilon_ball":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import EpsilonBallSampler
@@ -172,7 +172,7 @@ def make_flow_matching_uncertainty_sampler(
         return EpsilonBallSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.epsilon_ball_sampler,
-            velocity_model=velocity_model
+            velocity_model=flow_matching_model.unet
         )
     else:
         raise ValueError(f"Unknown uncertainty sampler {uncertainty_sampler_cfg.type}.")

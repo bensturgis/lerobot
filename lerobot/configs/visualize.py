@@ -48,6 +48,8 @@ class VisualizePipelineConfig:
             vis_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
             self.output_dir = Path("outputs/visualizations") / vis_dir
 
+        self.validate()
+
     @classmethod
     def __get_path_fields__(cls) -> list[str]:
         """This enables the parser to load config from the policy using `--policy.path=local/dir`"""
@@ -56,7 +58,7 @@ class VisualizePipelineConfig:
     def validate(self):
         # vis_types check
         allowed_vis = {"flows", "vector_field", "action_seq"}
-        for v in self.vis_types:
+        for v in self.vis.vis_types:
             if v not in allowed_vis:
                 raise ValueError(
                     f"Unknown visualization type '{v}'. "

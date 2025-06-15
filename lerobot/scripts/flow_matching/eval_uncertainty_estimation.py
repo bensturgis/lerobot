@@ -35,7 +35,7 @@ from tqdm import trange
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
 from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import create_laplace_calibration_dataloader
+from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import create_laplace_flow_matching_calib_loader
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.envs.factory import make_single_env
@@ -258,10 +258,13 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             ).to(device)
             policy.eval()
             if uncert_est_method == "cross_likelihood_laplace":
-                laplace_calib_loader = create_laplace_calibration_dataloader(
+                laplace_calib_loader = create_laplace_flow_matching_calib_loader(
                     cfg=cfg,
                     policy=policy,
+                    calib_fraction=cfg.calib_fraction
                 )
+            else:
+                laplace_calib_loader = None
             policy._init_uncertainty_sampler(
                 laplace_calib_loader=laplace_calib_loader
             )
