@@ -14,6 +14,7 @@
 
 import abc
 from dataclasses import dataclass, field
+from typing import Tuple
 
 import draccus
 
@@ -26,6 +27,7 @@ class PerturbationConfig:
     static: bool    = True
     min_frac: float = 0.1
     max_frac: float = 0.2
+    allowed_area: Tuple[float, float] | None = None
 
 @dataclass
 class EnvConfig(draccus.ChoiceRegistry, abc.ABC):
