@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lerobot.common import envs, policies
+from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig, VisConfig
 from lerobot.configs.policies import PreTrainedConfig
@@ -15,6 +16,7 @@ class VisualizeLaplacePipelineConfig:
     policy: PreTrainedConfig | None = None
     vis: VisConfig = field(default_factory=VisConfig)
     dataset: DatasetConfig | None = None
+    uncertainty_sampler: UncertaintySamplerConfig = field(default_factory=UncertaintySamplerConfig)
 
     # Number of Laplace models
     n_laplace_models: int = 5
@@ -24,17 +26,6 @@ class VisualizeLaplacePipelineConfig:
     output_dir: Path | None = None
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
-
-    # Which layer(s) to place the Laplace posterior on:
-    #  - "velocity_last": The final layer of the flow matching velocity model
-    #  - "rgb_last": the final layer of the RGB encoder
-    #  - "both": jointly on both layers
-    laplace_scope: str = "both"
-
-    # Parameters for the Laplace approximation calibration dataloader.
-    calib_fraction: float = 1.0
-    num_workers: int = 4
-    batch_size: int = 32
 
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.

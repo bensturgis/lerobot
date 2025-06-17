@@ -14,11 +14,11 @@ from typing import Any, Dict, List, Optional
 from lerobot.configs import parser
 from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
 from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizers
-from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import (
+from lerobot.common.policies.flow_matching.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
     draw_laplace_flow_matching_model,
-    FlowMatchingModelWrapper,
-    PointwiseConv1dToLinear,
+    get_laplace_posterior,
+    make_laplace_path,
 )
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
@@ -190,51 +190,38 @@ def main(cfg: VisualizeLaplacePipelineConfig):
     env = make_single_env(cfg.env)
     # ------------------------------------------
     flow_matching_model = policy.flow_matching
-    laplace_approx_targets: list[nn.Module] = []
-    if cfg.laplace_scope in ["velocity_last", "both"]:
-        flow_matching_model.unet.final_conv[1] = PointwiseConv1dToLinear(
-            flow_matching_model.unet.final_conv[1]
-        )
-        laplace_approx_targets.append("unet.final_conv.1.linear_layer")
-
-    if cfg.laplace_scope in ["rgb_last", "both"]:
-        laplace_approx_targets.append("rgb_encoder.out")
-
-    if len(laplace_approx_targets) == 0:
-        raise ValueError(
-            f"Unknown laplace_scope={cfg.laplace_scope}. Choose from "
-            "'velocity_last', 'rgb_last' and 'both'."
-        )
-    
-    # Freeze all parameters
-    for p in flow_matching_model.parameters():
-        p.requires_grad_(False)
-
-    # Un-freeze parameters from target modules
-    for name, module in flow_matching_model.named_modules():
-        if name in laplace_approx_targets:
-            for p in module.parameters():
-                p.requires_grad_(True)
-
-    wrapped_flow_matching_model = FlowMatchingModelWrapper(flow_matching_model)
-    laplace_posterior = Laplace(
-        wrapped_flow_matching_model,
-        likelihood="regression",
-        subset_of_weights="all",
-        hessian_structure="diag",
+    # Get path to save or load the Laplace posterior
+    laplace_cfg = cfg.uncertainty_sampler.cross_likelihood_laplace_sampler
+    laplace_output_path = make_laplace_path(
+        repo_id=cfg.dataset.repo_id,
+        scope=laplace_cfg.laplace_scope,
+        calib_fraction=laplace_cfg.calib_fraction,
+        batch_size=laplace_cfg.batch_size,
     )
+
+    # Create the Laplace calibration data loader if Laplace posterior if not stored
+    # on disk
+    if not laplace_output_path.exists():
+        laplace_calib_loader = create_laplace_flow_matching_calib_loader(
+            cfg=cfg,
+            policy=policy,
+        )
+    else:
+        laplace_calib_loader = None
     
-    laplace_calib_loader = create_laplace_flow_matching_calib_loader(
-        cfg=cfg,
-        policy=policy,
-        calib_fraction=cfg.calib_fraction
+    # Get the fitted Laplace posterior
+    laplace_posterior, laplace_approx_targets = get_laplace_posterior(
+        cfg=laplace_cfg,
+        flow_matching_model=flow_matching_model,
+        laplace_calib_loader=laplace_calib_loader,
+        laplace_path=laplace_output_path,
     )
-    laplace_posterior.fit(laplace_calib_loader)
+
     laplace_flow_matching_models = []
     for k in range(cfg.n_laplace_models):
         laplace_flow_matching_models.append(draw_laplace_flow_matching_model(
             laplace_posterior=laplace_posterior,
-            flow_matching_model=wrapped_flow_matching_model.base_model,
+            flow_matching_model=flow_matching_model,
             target_modules=laplace_approx_targets
         ))
     # ------------------------------------------

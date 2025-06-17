@@ -35,7 +35,10 @@ from tqdm import trange
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
 from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import create_laplace_flow_matching_calib_loader
+from lerobot.common.policies.flow_matching.laplace_utils import (
+    create_laplace_flow_matching_calib_loader,
+    make_laplace_path
+)
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.envs.factory import make_single_env
@@ -258,15 +261,26 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             ).to(device)
             policy.eval()
             if uncert_est_method == "cross_likelihood_laplace":
-                laplace_calib_loader = create_laplace_flow_matching_calib_loader(
-                    cfg=cfg,
-                    policy=policy,
-                    calib_fraction=cfg.calib_fraction
+                laplace_cfg = cfg.uncertainty_sampler.cross_likelihood_laplace_sampler
+                laplace_path = make_laplace_path(
+                    repo_id=cfg.dataset.repo_id,
+                    scope=laplace_cfg.laplace_scope,
+                    calib_fraction=laplace_cfg.calib_fraction,
+                    batch_size=laplace_cfg.batch_size,
                 )
+                if not laplace_path.exists():
+                    laplace_calib_loader = create_laplace_flow_matching_calib_loader(
+                        cfg=cfg,
+                        policy=policy,
+                    )
+                else:
+                    laplace_calib_loader = None
             else:
                 laplace_calib_loader = None
+                repo_id = None
             policy._init_uncertainty_sampler(
-                laplace_calib_loader=laplace_calib_loader
+                laplace_calib_loader=laplace_calib_loader,
+                laplace_path=laplace_path,
             )
 
             logging.info(f"Creating clean environment.")

@@ -126,6 +126,7 @@ def make_flow_matching_uncertainty_sampler(
     flow_matching_model: nn.Module,
     scorer_flow_matching_model: Optional[nn.Module] = None,
     laplace_calib_loader: Optional[DataLoader] = None,
+    laplace_path: Optional[Path] = None,
 ) -> FlowMatchingUncertaintySampler:
     if uncertainty_sampler_cfg.type == "composed_likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedLikelihoodSampler
@@ -149,14 +150,22 @@ def make_flow_matching_uncertainty_sampler(
     elif uncertainty_sampler_cfg.type == "cross_likelihood_laplace":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossLikelihoodLaplaceSampler
 
-        if laplace_calib_loader is None:
-            raise ValueError("Laplace cross-likelihood uncertainty sampler requires a calibration data "
-                             "loader.")
+        if laplace_path is None:
+            raise ValueError(
+                "Laplace cross-likelihood uncertainty sampler requires a path to save/load the "
+                "Laplace posterior"
+                )
+        if laplace_calib_loader is None and not laplace_path.exists():
+            raise ValueError(
+                "Laplace cross-likelihood uncertainty sampler requires a calibration data "
+                "to fit the Laplace posterior."
+            )
         return CrossLikelihoodLaplaceSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.cross_likelihood_laplace_sampler,
             flow_matching_model=flow_matching_model,
             laplace_calib_loader=laplace_calib_loader,
+            laplace_path=laplace_path,
         )
     elif uncertainty_sampler_cfg.type == "likelihood":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import LikelihoodSampler

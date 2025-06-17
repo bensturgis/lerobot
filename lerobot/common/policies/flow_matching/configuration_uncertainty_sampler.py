@@ -4,7 +4,7 @@ from pathlib import Path
 # Sub-configs for each uncertainty sampler.
 @dataclass
 class CrossLikLaplaceSamplerConfig:
-    # Number of candidate action sequences to sample .
+    # Number of candidate action sequences to sample.
     num_action_seq_samples: int = 1
     # Whether to compute the exact divergence or use the Hutchinson trace estimator
     # when computing the log-likelihood for an action sequence sample.
@@ -14,6 +14,10 @@ class CrossLikLaplaceSamplerConfig:
     #  - "rgb_last": the final layer of the RGB encoder
     #  - "both": jointly on both layers
     laplace_scope: str = "both"
+    # Parameters for the Laplace approximation calibration dataloader.
+    calib_fraction: float = 1.0
+    num_workers: int = 4
+    batch_size: int = 32
 
 @dataclass
 class CrossLikEnsembleSamplerConfig:
