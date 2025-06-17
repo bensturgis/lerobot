@@ -277,7 +277,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                     laplace_calib_loader = None
             else:
                 laplace_calib_loader = None
-                repo_id = None
+                laplace_path = None
             policy._init_uncertainty_sampler(
                 laplace_calib_loader=laplace_calib_loader,
                 laplace_path=laplace_path,
