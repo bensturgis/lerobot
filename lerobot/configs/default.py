@@ -15,7 +15,8 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from pathlib import Path
+from typing import Optional
 
 from lerobot.common import (
     policies,  # noqa: F401
@@ -85,22 +86,13 @@ class EvalUncertEstConfig:
         ]
     )
 
-    perturb_types: list[str] = field(
-        default_factory=lambda: ["static", "dynamic"]
+    perturbation_config: PerturbationConfig = PerturbationConfig(
+        enable=True,
+        static=False
     )
 
-    @property
-    def perturbation_configs(self) -> dict[str, PerturbationConfig]:
-        default_perturb_cfg = PerturbationConfig()
-        perturbation_configs = {}
-        for t in self.perturb_types:
-            perturbation_configs[t] = PerturbationConfig(
-                enable = True,
-                static = (t == "static"),
-                min_frac = default_perturb_cfg.min_frac,
-                max_frac = default_perturb_cfg.max_frac,
-            )
-        return perturbation_configs
+    id_failure_seeds_path: Path | None = None
+    ood_failure_seeds_path: Path | None = None
     
     def validate(self):
         allowed_methods = {
@@ -116,14 +108,6 @@ class EvalUncertEstConfig:
                 raise ValueError(
                     f"Unknown uncertainty-estimation method '{m}'. "
                     f"Allowed: {sorted(allowed_methods)}"
-                )
-
-        allowed_perturbs = {"clean", "static", "dynamic"}
-        for p in self.perturb_types:
-            if p not in allowed_perturbs:
-                raise ValueError(
-                    f"Unknown perturbation type '{p}'. "
-                    f"Allowed: {sorted(allowed_perturbs)}"
                 )
 
 @dataclass

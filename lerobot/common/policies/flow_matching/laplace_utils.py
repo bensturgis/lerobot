@@ -200,11 +200,8 @@ def create_laplace_flow_matching_calib_loader(
         drop_last=False,
     )
 
-    # Accumulate velocity fieldd inputs and targets for Laplace calibration dataset
-    interp_traj_list: list[torch.Tensor] = []
-    time_list: list[torch.Tensor] = []
-    obs_list: list[torch.Tensor] = []
-    target_vel_list: list[torch.Tensor] = []
+    disk_dir = Path(cfg.output_dir) / "laplace_calib_tmp"
+    disk_dir.mkdir(parents=True, exist_ok=True)  
 
     calib_fraction = cfg.uncertainty_sampler.cross_likelihood_laplace_sampler.calib_fraction
     num_calib_samples = int(calib_fraction * len(train_dataset))
@@ -265,27 +262,46 @@ def create_laplace_flow_matching_calib_loader(
             if key.startswith("observation.")
         }
 
-        # Accumulate tensors
-        interp_traj_list.append(interpolated_trajectory.cpu())
-        time_list.append(times.cpu())
-        if len(obs_list) == 0:
-            obs_list = {k: [v] for k, v in observation.items()}
-        else:
-            for k, v in observation.items():
-                obs_list[k].append(v)
-        target_vel_list.append(target_vel.cpu())
-        samples_added = trajectory.shape[0]
-        samples_collected += samples_added
-        pbar.update(samples_added)
+        # Create storage tensors on first batch
+        if not storage_created:
+            interp_traj_tensor = torch.empty(
+                (num_calib_samples, *interpolated_trajectory.shape[1:]),
+                dtype=interpolated_trajectory.dtype
+            )
+            time_tensor = torch.empty(num_calib_samples, dtype=times.dtype)
+            target_vel_tensor = torch.empty(
+                (num_calib_samples, *target_vel.shape[1:]),
+                dtype=target_vel.dtype
+            )
+            # observation dict – allocate per key
+            observation_tensor_dict = {
+                k: torch.empty(
+                    (num_calib_samples, *v.shape[1:]),
+                    dtype=v.dtype
+                )
+                for k, v in observation.items()
+            }
+            storage_created = True
 
-    # Stack velocity fieldd inputs and targets and wrap in data loader
-    interp_traj_tensor = torch.cat(interp_traj_list)[:num_calib_samples]
-    time_tensor = torch.cat(time_list)[:num_calib_samples]
+        end_index = write_index + batch_size
+        interp_traj_tensor[write_index:end_index] = interpolated_trajectory.cpu()
+        time_tensor[write_index:end_index] = times.cpu()
+        target_vel_tensor[write_index:end_index] = target_vel.cpu()
+        for k, v in observation.items():
+            observation_tensor_dict[k][write_index:end_index] = v
+
+        write_index = end_index
+        samples_collected = write_index
+        pbar.update(batch_size)
+
+    # Trim in case we over-collected by a few samples
+    interp_traj_tensor = interp_traj_tensor[:num_calib_samples]
+    time_tensor = time_tensor[:num_calib_samples]
+    target_vel_tensor = target_vel_tensor[:num_calib_samples]
     observation_tensor_dict = {
-        k: torch.cat(v_list)[:num_calib_samples]
-        for k, v_list in obs_list.items()
+        k: v[:num_calib_samples] for k, v in observation_tensor_dict.items()
     }
-    target_vel_tensor = torch.cat(target_vel_list)[:num_calib_samples]
+
     calib_dataset = LaplaceFlowMatchingCalibrationDataset(
         interp_traj_tensor,
         time_tensor,

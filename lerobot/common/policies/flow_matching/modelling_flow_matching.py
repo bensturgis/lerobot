@@ -122,6 +122,13 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         if self.config.env_state_feature:
             self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
 
+        if (
+            self.uncertainty_sampler is not None and
+            self.uncertainty_sampler.method_name == "composed_likelihood"
+        ):
+            self.uncertainty_sampler.prev_global_cond = None
+            self.uncertainty_sampler.prev_action_sequence = None
+
     def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
         """
         This function expects `batch` to have:

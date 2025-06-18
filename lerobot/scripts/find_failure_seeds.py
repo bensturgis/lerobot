@@ -493,7 +493,7 @@ def main(cfg: FindFailureSeedsConfig):
             if cfg.env.perturbation.allowed_area is not None:
                 failure_data["perturbation_allowed_area"] = cfg.env.perturbation.allowed_area
 
-        failure_data["failure_seeds"] = sorted(failure_seeds),
+        failure_data["failure_seeds"] = sorted(failure_seeds)
         with failure_info_path.open("w") as f:
             json.dump(failure_data, f, indent=2)   
 
