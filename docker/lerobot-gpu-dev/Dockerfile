@@ -1,6 +1,7 @@
 FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
 
 # Configure image
+ARG PYTHON_VERSION=3.10
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install apt dependencies
