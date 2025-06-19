@@ -5,6 +5,7 @@
 import math
 import random
 from collections import deque
+from pathlib import Path
 from tqdm import tqdm
 from typing import Dict, Optional
 
@@ -86,7 +87,11 @@ class FlowMatchingPolicy(PreTrainedPolicy):
 
         self.reset()
 
-    def _init_uncertainty_sampler(self, laplace_calib_loader: Optional[DataLoader] = None):
+    def _init_uncertainty_sampler(
+        self, 
+        laplace_calib_loader: Optional[DataLoader] = None,
+        laplace_path: Optional[Path] = None,
+    ):
         """
         Constructs the uncertainty sampler based on the config.
         """
@@ -99,7 +104,8 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             uncertainty_sampler_cfg=self.uncertainty_sampler_config,
             flow_matching_model=self.flow_matching,
             scorer_flow_matching_model=self.scorer,
-            laplace_calib_loader=laplace_calib_loader
+            laplace_calib_loader=laplace_calib_loader,
+            laplace_path=laplace_path,
         )
 
     def get_optim_params(self) -> dict:
@@ -115,6 +121,13 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             self._queues["observation.images"] = deque(maxlen=self.config.n_obs_steps)
         if self.config.env_state_feature:
             self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
+
+        if (
+            self.uncertainty_sampler is not None and
+            self.uncertainty_sampler.method_name == "composed_likelihood"
+        ):
+            self.uncertainty_sampler.prev_global_cond = None
+            self.uncertainty_sampler.prev_action_sequence = None
 
     def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
         """

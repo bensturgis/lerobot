@@ -33,7 +33,7 @@ from lerobot.common.utils.utils import (
     inside_slurm,
 )
 from lerobot.configs import parser
-from lerobot.configs.find_iid_failure_seeds import FindIidFailureSeedsConfig
+from lerobot.configs.find_failure_seeds import FindFailureSeedsConfig
 
 
 def rollout(
@@ -423,7 +423,7 @@ def _compile_episode_data(
 
 
 @parser.wrap()
-def main(cfg: FindIidFailureSeedsConfig):
+def main(cfg: FindFailureSeedsConfig):
     logging.info(pformat(asdict(cfg)))
     # Check device is available
     device = get_safe_torch_device(cfg.policy.device, log=True)
@@ -448,10 +448,9 @@ def main(cfg: FindIidFailureSeedsConfig):
     )
     policy.eval()
 
-    
-    iid_failure_seeds = set()    
+    failure_seeds = set()    
     start_seed = 0
-    while len(iid_failure_seeds) < cfg.num_iid_failure_seeds:
+    while len(failure_seeds) < cfg.num_failure_seeds:
         start_seed += cfg.eval.batch_size
         set_seed(start_seed)
 
@@ -467,7 +466,7 @@ def main(cfg: FindIidFailureSeedsConfig):
             )
         for ep_idx in range(cfg.eval.n_episodes):
             if cur_eval_info["per_episode"][ep_idx]["success"] == False:
-                iid_failure_seeds.add(cur_eval_info["per_episode"][ep_idx]["seed"])
+                failure_seeds.add(cur_eval_info["per_episode"][ep_idx]["seed"])
 
         # Save info
         eval_info_path = Path(cfg.output_dir) / "eval_info.json"
@@ -480,17 +479,23 @@ def main(cfg: FindIidFailureSeedsConfig):
         with eval_info_path.open("w") as f:
             json.dump(eval_info, f, indent=2)
 
-        # Save IID failure seeds
-        iid_failure_info_path = Path(cfg.output_dir) / "iid_failure_seeds.json"
-        iid_failure_data = {
+        # Save failure seeds
+        failure_info_path = Path(cfg.output_dir) / "failure_seeds.json"
+        failure_data = {
             "policy_path": str(cfg.policy.pretrained_path),
             "env_type": cfg.env.type,
         }
         if hasattr(cfg.env, "task"):
-            iid_failure_data["env_task"] = cfg.env.task
-        iid_failure_data["iid_failure_seeds"] = sorted(iid_failure_seeds),
-        with iid_failure_info_path.open("w") as f:
-            json.dump(iid_failure_data, f, indent=2)   
+            failure_data["env_task"] = cfg.env.task
+        failure_data["perturbation"] = cfg.env.perturbation.enable
+        if cfg.env.perturbation.enable:
+            failure_data["perturbation_type"] = "static" if cfg.env.perturbation.static else "dynamic"
+            if cfg.env.perturbation.allowed_area is not None:
+                failure_data["perturbation_allowed_area"] = cfg.env.perturbation.allowed_area
+
+        failure_data["failure_seeds"] = sorted(failure_seeds)
+        with failure_info_path.open("w") as f:
+            json.dump(failure_data, f, indent=2)   
 
     env.close()
 

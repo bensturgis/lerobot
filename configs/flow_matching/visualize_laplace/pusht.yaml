@@ -4,7 +4,7 @@ dataset:
 env:
   type: pusht
   perturbation:
-    enable: True
+    enable: False
 
 policy:
   type: flow_matching
@@ -13,8 +13,12 @@ policy:
 vis:
   vis_types: [action_seq]
 
-calib_fraction: 0.1
-laplace_scope: velocity_last
+uncertainty_sampler:
+  cross_likelihood_laplace_sampler:
+    laplace_scope: both
+    calib_fraction: 1.0
+    batch_size: 10
+
 n_laplace_models: 3
 
 # python lerobot/scripts/flow_matching/visualize_laplace.py --config=configs/flow_matching/visualize_laplace/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

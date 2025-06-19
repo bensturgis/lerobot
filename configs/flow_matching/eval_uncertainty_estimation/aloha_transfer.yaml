@@ -7,5 +7,23 @@ env:
 
 eval_uncert_est:
   uncert_est_methods: [cross_likelihood_laplace]
+  perturbation_config:
+    enable: True
+    static: False
+    allowed_area: [0.7, 0.5]
+  n_episodes: 200
+  id_failure_seeds_path: outputs/failure_seeds/aloha_transfer_id_failure_seeds/failure_seeds.json
+  ood_failure_seeds_path: outputs/failure_seeds/aloha_transfer_ood_failure_seeds/failure_seeds.json
+
+uncertainty_sampler:
+  cross_likelihood_laplace_sampler:
+    laplace_scope: velocity_last
+    calib_fraction: 0.2
+    batch_size: 4
+  cross_likelihood_ensemble_sampler:
+    use_vel: False
+    scorer_model_path: outputs/train/flow_matching_aloha_transfer_02/checkpoints/055000/pretrained_model
+  composed_likelihood_sampler:
+    use_vel: False
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

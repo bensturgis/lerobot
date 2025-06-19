@@ -51,6 +51,7 @@ def make_single_env(
             static=cfg.perturbation.static,
             min_patch_frac=cfg.perturbation.min_frac,
             max_patch_frac=cfg.perturbation.max_frac,
+            allowed_area=cfg.perturbation.allowed_area,
         )
     return env
 

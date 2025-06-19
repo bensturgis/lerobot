@@ -10,7 +10,7 @@ from lerobot.configs.policies import PreTrainedConfig
 
 
 @dataclass
-class FindIidFailureSeedsConfig:
+class FindFailureSeedsConfig:
     # Either the repo ID of a model hosted on the Hub or a path to a directory containing weights
     # saved using `Policy.save_pretrained`. If not provided, the policy is initialized from scratch
     # (useful for debugging). This argument is mutually exclusive with `--config`.
@@ -18,7 +18,7 @@ class FindIidFailureSeedsConfig:
     eval: EvalConfig = field(default_factory=EvalConfig)
     policy: PreTrainedConfig | None = None
     output_dir: Path | None = None
-    num_iid_failure_seeds: int = 100
+    num_failure_seeds: int = 100
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
     job_name: str | None = None
@@ -45,7 +45,7 @@ class FindIidFailureSeedsConfig:
         if not self.output_dir:
             now = dt.datetime.now()
             output_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
-            self.output_dir = Path("outputs/find_iid_failures") / output_dir
+            self.output_dir = Path("outputs/failure_seeds") / output_dir
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

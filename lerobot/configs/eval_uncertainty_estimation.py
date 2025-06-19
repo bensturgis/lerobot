@@ -21,11 +21,6 @@ class EvalUncertaintyEstimationPipelineConfig:
     job_name: str | None = None
     output_dir: Path | None = None
 
-    # Parameters for the Laplace approximation calibration dataloader.
-    calib_fraction: float = 1.0
-    num_workers: int = 4
-    batch_size: int = 32
-
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
         policy_path = parser.get_path_arg("policy")

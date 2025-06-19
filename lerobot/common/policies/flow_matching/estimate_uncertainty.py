@@ -1,13 +1,15 @@
 import copy
+import logging
 import torch
 
 from abc import ABC, abstractmethod
 from laplace import Laplace
 from laplace.utils import ModuleNameSubnetMask
+from pathlib import Path
 from torch import nn, Tensor
 from torch.distributions import Independent, Normal
 from torch.utils.data import DataLoader
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
@@ -17,10 +19,9 @@ from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler imp
     LikSamplerConfig,
     EpsilonBallSamplerConfig,
 )
-from lerobot.common.policies.flow_matching.uncertainty_estimation_utils import (
+from lerobot.common.policies.flow_matching.laplace_utils import (
     draw_laplace_flow_matching_model,
-    FlowMatchingModelWrapper,
-    PointwiseConv1dToLinear
+    get_laplace_posterior
 )
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
@@ -103,14 +104,16 @@ class CrossLikelihoodLaplaceSampler(FlowMatchingUncertaintySampler):
         cfg: CrossLikLaplaceSamplerConfig,
         flow_matching_model: nn.Module,
         laplace_calib_loader: DataLoader,
+        laplace_path: Union[str, Path],
         generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
             cfg: Sampler-specific settings.
-            flow_matching_model: The full flow-matching model including velocity and RGB encoder.
+            flow_matching_model: The full flow matching model including velocity and RGB encoder.
             laplace_calib_loader: DataLoader providing samples for fitting the Laplace
                 approximation.
+            laplace_path: Path to save or load the Laplace posterior.
         """
         # Use the MAP velocity network for sampling action sequences
         self.flow_matching_model = flow_matching_model
@@ -124,55 +127,13 @@ class CrossLikelihoodLaplaceSampler(FlowMatchingUncertaintySampler):
         self.exact_divergence = cfg.exact_divergence
         self.method_name = "cross_likelihood_laplace"
         
-        # Select target modules for Laplace approximation
-        self.laplace_approx_targets: list[str] = []
-        if cfg.laplace_scope in ["velocity_last", "both"]:
-            # Replace the last conv layer with a linear wrapper for Laplace compatibility
-            velocity_model.final_conv[1] = PointwiseConv1dToLinear(
-                velocity_model.final_conv[1]
-            )
-            self.laplace_approx_targets.append("unet.final_conv.1.linear_layer")
-
-        if cfg.laplace_scope in ["rgb_last", "both"]:
-            self.laplace_approx_targets.append("rgb_encoder.out")
-        
-        if len(self.laplace_approx_targets) == 0:
-            raise ValueError(
-                f"Unknown laplace_scope={cfg.laplace_scope}. Choose from "
-                "'velocity_last', 'rgb_last' and 'both'."
-            )
-        
-        # la_subnetwork_mask = ModuleNameSubnetMask(
-        #     flow_matching_model,
-        #     module_names=laplace_approx_targets
-        # )
-        # la_subnetwork_mask.select()
-        # la_subnetwork_indices = la_subnetwork_mask.indices.cpu()
-
-        # Freeze all parameters
-        for p in flow_matching_model.parameters():
-            p.requires_grad_(False)
-
-        # Unfreeze only the selected subnetwork for Laplace fitting
-        for name, module in flow_matching_model.named_modules():
-            if name in self.laplace_approx_targets:
-                for p in module.parameters():
-                    p.requires_grad_(True)
-        
-        # Wrap the model so it takes inputs and generates outputs compatible
-        # with Laplace
-        flow_matching_model.eval()
-        self.wrapped_flow_matching_model = FlowMatchingModelWrapper(
-            flow_matching_model
+        # Get the fitted Laplace posterior
+        self.laplace_posterior = get_laplace_posterior(
+            cfg=cfg,
+            flow_matching_model=self.flow_matching_model,
+            laplace_calib_loader=laplace_calib_loader,
+            laplace_path=laplace_path,
         )
-        # Fit a diagonal Laplace approximation over the selected subnetwork
-        self.laplace_posterior = Laplace(
-            self.wrapped_flow_matching_model,
-            likelihood="regression",
-            subset_of_weights="all", # includes only params with requires_grad=True
-            hessian_structure="diag",
-        )
-        self.laplace_posterior.fit(laplace_calib_loader)
 
     def conditional_sample_with_uncertainty(
         self,
@@ -202,8 +163,7 @@ class CrossLikelihoodLaplaceSampler(FlowMatchingUncertaintySampler):
         # Draw flow matching model from the Laplace posterior
         laplace_flow_matching_model = draw_laplace_flow_matching_model(
             laplace_posterior=self.laplace_posterior,
-            flow_matching_model=self.wrapped_flow_matching_model.base_model,
-            target_modules=self.laplace_approx_targets,
+            flow_matching_model=self.flow_matching_model,
             generator=self.generator
         )
 
@@ -303,6 +263,7 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
         self.sampler_flow_matching_model = sampler_flow_matching_model
         self.scorer_flow_matching_model = scorer_flow_matching_model
         self.exact_divergence = cfg.exact_divergence
+        self.use_vel = cfg.use_vel
         self.method_name = "cross_likelihood_ensemble"
         
     def conditional_sample_with_uncertainty(
@@ -374,22 +335,39 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
         self.latest_action_candidates = sampled_action_seqs
 
         # Compute log-likelihood of sampled action sequences in scorer model        
-        scoring_ode_solver = ODESolver(self.scorer_flow_matching_model.unet)
-        _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
-            x_init=sampled_action_seqs,
-            time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
-            global_cond=scorer_global_cond,
-            log_p_0 = gaussian_log_density,
-            method=self.flow_matching_cfg.ode_solver_method,
-            step_size=self.flow_matching_cfg.ode_step_size,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
-            exact_divergence=self.exact_divergence,
-            generator=self.generator,
-        )
+        if self.use_vel:
+            time = torch.full(
+                (sampled_action_seqs.shape[0],),
+                0.95,
+                device=sampled_action_seqs.device,
+                dtype=sampled_action_seqs.dtype
+            )
+            velocity = self.scorer_flow_matching_model.unet(
+                sampled_action_seqs,
+                time,
+                scorer_global_cond,
+            )
+            velocity_norms = velocity.norm(p=2, dim=1)
+            max_velocity_norms, _ = velocity_norms.max(dim=1)
 
-        # Use negative log-likelihood as uncertainty score
-        uncertainty_scores = -log_probs
+            uncertainty_scores = max_velocity_norms
+        else:
+            scoring_ode_solver = ODESolver(self.scorer_flow_matching_model.unet)
+            _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
+                x_init=sampled_action_seqs,
+                time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
+                global_cond=scorer_global_cond,
+                log_p_0 = gaussian_log_density,
+                method=self.flow_matching_cfg.ode_solver_method,
+                step_size=self.flow_matching_cfg.ode_step_size,
+                atol=self.flow_matching_cfg.atol,
+                rtol=self.flow_matching_cfg.rtol,
+                exact_divergence=self.exact_divergence,
+                generator=self.generator,
+            )
+
+            # Use negative log-likelihood as uncertainty score
+            uncertainty_scores = -log_probs
         
         # Store uncertainty scores for logging
         self.latest_uncertainties = uncertainty_scores
@@ -425,6 +403,7 @@ class ComposedLikelihoodSampler(FlowMatchingUncertaintySampler):
             generator=generator,
         )
         self.exact_divergence = cfg.exact_divergence
+        self.use_vel = cfg.use_vel
         # Store the action sequence and conditioning vector from the previous action
         # sequence generation
         self.prev_action_sequence = None
@@ -515,21 +494,38 @@ class ComposedLikelihoodSampler(FlowMatchingUncertaintySampler):
         ], dim=1)    
 
         # Compute log-likelihood of composed action sequences
-        _, log_probs = ode_solver.sample_with_log_likelihood(
-            x_init=composed_action_seqs,
-            time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
-            global_cond=self.prev_global_cond,
-            log_p_0 = gaussian_log_density,
-            method=self.flow_matching_cfg.ode_solver_method,
-            step_size=self.flow_matching_cfg.ode_step_size,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
-            exact_divergence=self.exact_divergence,
-            generator=self.generator,
-        )
+        if self.use_vel:
+            time = torch.full(
+                (composed_action_seqs.shape[0],),
+                0.95,
+                device=composed_action_seqs.device,
+                dtype=composed_action_seqs.dtype
+            )
+            velocity = self.velocity_model(
+                composed_action_seqs,
+                time,
+                global_cond,
+            )
+            velocity_norms = velocity.norm(p=2, dim=1)
+            max_velocity_norms, _ = velocity_norms.max(dim=1)
 
-        # Use negative log-likelihood as uncertainty score
-        uncertainty_scores = -log_probs
+            uncertainty_scores = max_velocity_norms
+        else:
+            _, log_probs = ode_solver.sample_with_log_likelihood(
+                x_init=composed_action_seqs,
+                time_grid=torch.tensor([1.0, 0.0], device=device, dtype=dtype),
+                global_cond=self.prev_global_cond,
+                log_p_0 = gaussian_log_density,
+                method=self.flow_matching_cfg.ode_solver_method,
+                step_size=self.flow_matching_cfg.ode_step_size,
+                atol=self.flow_matching_cfg.atol,
+                rtol=self.flow_matching_cfg.rtol,
+                exact_divergence=self.exact_divergence,
+                generator=self.generator,
+            )
+
+            # Use negative log-likelihood as uncertainty score
+            uncertainty_scores = -log_probs
 
         # Store computed uncertainty scores for logging
         self.latest_uncertainties = uncertainty_scores
