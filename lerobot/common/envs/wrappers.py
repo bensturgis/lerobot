@@ -118,7 +118,7 @@ class PerturbationWrapper(gym.Wrapper):
         patch_width = int(round(patch_width_frac * width))
         
         img = img.copy()
-        img[patch_top : patch_top + patch_height, patch_left : patch_left + patch_width] = 0
+        img[patch_top : patch_top + patch_height, patch_left : patch_left + patch_width] = np.array([255, 0, 0], dtype=img.dtype)
         return img
 
     def _patch_obs(self, observation: Dict[str, Any]) -> Dict[str, Any]:

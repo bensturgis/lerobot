@@ -17,7 +17,7 @@ uncertainty_sampler:
   cross_likelihood_laplace_sampler:
     laplace_scope: both
     calib_fraction: 1.0
-    batch_size: 8
+    batch_size: 10
 
 n_laplace_models: 3
 

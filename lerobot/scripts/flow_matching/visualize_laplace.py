@@ -210,7 +210,7 @@ def main(cfg: VisualizeLaplacePipelineConfig):
         laplace_calib_loader = None
     
     # Get the fitted Laplace posterior
-    laplace_posterior, laplace_approx_targets = get_laplace_posterior(
+    laplace_posterior = get_laplace_posterior(
         cfg=laplace_cfg,
         flow_matching_model=flow_matching_model,
         laplace_calib_loader=laplace_calib_loader,
@@ -222,7 +222,6 @@ def main(cfg: VisualizeLaplacePipelineConfig):
         laplace_flow_matching_models.append(draw_laplace_flow_matching_model(
             laplace_posterior=laplace_posterior,
             flow_matching_model=flow_matching_model,
-            target_modules=laplace_approx_targets
         ))
     # ------------------------------------------
     seed = cfg.seed if cfg.seed is not None else random.randrange(2**32)
