@@ -1,0 +1,16 @@
+{
+  "name": "lerobot devcontainer",
+  "privileged": true,
+  "dockerComposeFile": "docker-compose.yaml",
+  "service": "devcontainer",
+  "workspaceFolder": "/lerobot",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {}
+    }
+  }
+}

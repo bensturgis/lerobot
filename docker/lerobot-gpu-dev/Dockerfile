@@ -1,12 +1,11 @@
 FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
 
 # Configure image
-ARG PYTHON_VERSION=3.10
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install apt dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake \
+    build-essential cmake python3-pip\
     git git-lfs openssh-client \
     nano vim less util-linux tree \
     htop atop nvtop \
@@ -66,3 +65,12 @@ RUN poetry config virtualenvs.in-project true
 
 # Set EGL as the rendering backend for MuJoCo
 ENV MUJOCO_GL="egl"
+
+# Copy the Poetry project files
+COPY pyproject.toml /lerobot/
+WORKDIR /lerobot
+
+# Install dependencies with Poetry
+RUN poetry install --no-root
+
+# docker build -t lerobot -f docker/lerobot-gpu-dev/Dockerfile .
