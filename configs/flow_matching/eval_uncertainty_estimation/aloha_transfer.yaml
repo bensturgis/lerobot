@@ -6,7 +6,7 @@ env:
   task: AlohaTransferCube-v0
 
 eval_uncert_est:
-  uncert_est_methods: [cross_likelihood_laplace]
+  uncert_est_methods: [cross_likelihood_ensemble]
   perturbation_config:
     enable: True
     static: False
@@ -17,13 +17,13 @@ eval_uncert_est:
 
 uncertainty_sampler:
   cross_likelihood_laplace_sampler:
-    laplace_scope: velocity_last
-    calib_fraction: 0.2
-    batch_size: 4
+    laplace_scope: both
+    calib_fraction: 1.0
+    batch_size: 1
   cross_likelihood_ensemble_sampler:
-    use_vel: False
+    use_vel_score: True
     scorer_model_path: outputs/train/flow_matching_aloha_transfer_02/checkpoints/055000/pretrained_model
   composed_likelihood_sampler:
-    use_vel: False
+    use_vel_score: False
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

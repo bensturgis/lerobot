@@ -1,9 +1,6 @@
-import copy
-import logging
 import torch
 
 from abc import ABC, abstractmethod
-from laplace import Laplace
 from laplace.utils import ModuleNameSubnetMask
 from pathlib import Path
 from torch import nn, Tensor
@@ -14,7 +11,7 @@ from typing import Dict, Optional, Tuple, Union
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
     ComposedLikSamplerConfig,
-    CrossLikEnsembleSamplerConfig,
+    CrossEnsembleSamplerConfig,
     CrossLikLaplaceSamplerConfig,
     LikSamplerConfig,
     EpsilonBallSamplerConfig,
@@ -232,27 +229,28 @@ class CrossLikelihoodLaplaceSampler(FlowMatchingUncertaintySampler):
         return sampled_action_seqs, uncertainty_scores
 
 
-class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
+class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
     """
-    Samples action sequences from a “sampler” flow-matching model and evaluates their
-    negative log-likelihood under a separate “scorer” flow-matching model to estimate
-    epistemic uncertainty. A lower likelihood under the scorer indicates greater
-    uncertainty about the sampled sequence.
+    Samples action sequences from a "sampler" flow-matching model and evaluates their
+    uncertainty under a separate "scorer" flow-matching model. Uncertainty can be measured
+    either as the negative log-likelihood (via reverse-time ODE) or as the velocity norm
+    along the ODE path under the scorer model.
     """
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
-        cfg: CrossLikEnsembleSamplerConfig,
+        cfg: CrossEnsembleSamplerConfig,
         sampler_flow_matching_model: nn.Module,
         scorer_flow_matching_model: nn.Module,
         generator: Optional[torch.Generator] = None,
     ):
         """
+        Initializes the cross-likelihood ensemble sampler.
+
         Args:
             cfg: Sampler-specific settings.
             sampler_flow_matching_model: The flow matching network used to generate action sequences.
-            scorer_flow_matching_model: The flow matching network used to compute log-likelihoods of
-                the sampled sequences.
+            scorer_flow_matching_model: Model to score sequences using log-likelihood or velocity norm.
         """
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
@@ -260,10 +258,13 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
+        # Save models for sampling and scoring
         self.sampler_flow_matching_model = sampler_flow_matching_model
         self.scorer_flow_matching_model = scorer_flow_matching_model
+        # Whether to compute exact divergence for log-likelihood
         self.exact_divergence = cfg.exact_divergence
-        self.use_vel = cfg.use_vel
+        # Flag to choose uncertainty metric: True uses velocity norm, False uses log-likelihood
+        self.use_vel_score = cfg.use_vel_score
         self.method_name = "cross_likelihood_ensemble"
         
     def conditional_sample_with_uncertainty(
@@ -271,8 +272,13 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
         observation: Dict[str, Tensor]
     ) -> Tuple[Tensor, Tensor]:
         """
-        Generates action sequences using the sampler model, then computes their log-likelihoods
-        under the scorer model to produce uncertainty scores.
+        Samples candidate action sequences and computes uncertainty scores.
+
+        Uncertainty metric choice:
+        - If use_vel_score is True, computes the average velocity norm along intermediate ODE steps
+          under the scorer model to measure uncertainty.
+        - If use_vel_score is False, computes negative log-likelihood of the sequences via reverse-time ODE
+          under the scorer model as the uncertainty score.
 
         Args:
             observation: Info about the environment used to create the conditioning vector for
@@ -288,8 +294,8 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
         Returns:
             - sampled_action_seqs: Action sequences drawn from the sampler model.
                 Shape: [num_action_seq_samples, horizon, action_dim].
-            - uncertainty_scores: Negative log-likelihoods of the corresponding
-              action sequence under the scorer model. Shape: [num_action_seq_samples,],       
+            - uncertainty_scores: Uncertainty scores where a higher value means more
+                uncertain. Shape: [num_action_seq_samples,],       
         """
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
@@ -320,38 +326,50 @@ class CrossLikelihoodEnsembleSampler(FlowMatchingUncertaintySampler):
             reinterpreted_batch_ndims=2
         ).log_prob
 
+        # Build time grid: include intermediate times if computing velocity norm
+        if self.use_vel_score:
+            time_grid = torch.tensor([0.0, 0.95, 0.97, 1.0], device=device, dtype=dtype)
+        else:
+            time_grid = torch.tensor([0.0, 1.0], device=device, dtype=dtype)
+
         # Solve ODE forward from noise to sample action sequences
         sampling_ode_solver = ODESolver(self.velocity_model)
-        sampled_action_seqs = sampling_ode_solver.sample(
+        noisy_action_seqs = sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
             step_size=self.flow_matching_cfg.ode_step_size,
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
+            time_grid=time_grid,
+            return_intermediates=True
         )
 
         # Store sampled action sequences for logging
+        sampled_action_seqs = noisy_action_seqs[-1]
         self.latest_action_candidates = sampled_action_seqs
 
-        # Compute log-likelihood of sampled action sequences in scorer model        
-        if self.use_vel:
-            time = torch.full(
-                (sampled_action_seqs.shape[0],),
-                0.95,
-                device=sampled_action_seqs.device,
-                dtype=sampled_action_seqs.dtype
-            )
-            velocity = self.scorer_flow_matching_model.unet(
-                sampled_action_seqs,
-                time,
-                scorer_global_cond,
-            )
-            velocity_norms = velocity.norm(p=2, dim=1)
-            max_velocity_norms, _ = velocity_norms.max(dim=1)
+        # TODO: Use difference in velocity vectors instead
+        # Compute uncertainty based on selected metric
+        if self.use_vel_score:
+            # Evaluate velocity field at each intermediate time point under scorer
+            per_step_vel_norms = []
+            for time, noisy_action_seq in zip(time_grid[1:-1], noisy_action_seqs[1:-1]):
+                time_batch = torch.full(
+                    (sampled_action_seqs.shape[0],), time, device=device, dtype=dtype
+                )
+                velocity = self.scorer_flow_matching_model.unet(
+                    noisy_action_seq,
+                    time_batch,
+                    scorer_global_cond,
+                )
+                # L2 norm across time and action dims gives per-sample velocity magnitude
+                per_step_vel_norms.append(torch.norm(velocity, dim=(1, 2)))
 
-            uncertainty_scores = max_velocity_norms
+            velocity_norm = torch.stack(per_step_vel_norms, dim=0).mean(dim=0)
+            uncertainty_scores = velocity_norm
         else:
+            # Compute log-likelihood of sampled action sequences in scorer model    
             scoring_ode_solver = ODESolver(self.scorer_flow_matching_model.unet)
             _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
                 x_init=sampled_action_seqs,
@@ -403,7 +421,7 @@ class ComposedLikelihoodSampler(FlowMatchingUncertaintySampler):
             generator=generator,
         )
         self.exact_divergence = cfg.exact_divergence
-        self.use_vel = cfg.use_vel
+        self.use_vel_score = cfg.use_vel_score
         # Store the action sequence and conditioning vector from the previous action
         # sequence generation
         self.prev_action_sequence = None
@@ -494,7 +512,7 @@ class ComposedLikelihoodSampler(FlowMatchingUncertaintySampler):
         ], dim=1)    
 
         # Compute log-likelihood of composed action sequences
-        if self.use_vel:
+        if self.use_vel_score:
             time = torch.full(
                 (composed_action_seqs.shape[0],),
                 0.95,

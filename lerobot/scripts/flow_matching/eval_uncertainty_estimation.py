@@ -356,7 +356,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
     progbar = trange(
         n_episods,
         desc=f"Evaluating uncertainty estimation for {n_episods} episodes."
-    )   
+    )
     for episode in progbar:
         for uncert_est_method in cfg.eval_uncert_est.uncert_est_methods:
             logging.info("Loading policy")
@@ -463,6 +463,10 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 ood_failure_uncertainties = all_uncertainties[uncert_est_method]["ood_failure"],
                 output_dir = cfg.output_dir / uncert_est_method,
             )
+
+            policy.cpu()
+            del policy
+            torch.cuda.empty_cache()
 
 if __name__ == "__main__":
     init_logging()

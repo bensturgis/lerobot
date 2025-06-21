@@ -137,11 +137,11 @@ def make_flow_matching_uncertainty_sampler(
             velocity_model=flow_matching_model.unet
         )
     elif uncertainty_sampler_cfg.type == "cross_likelihood_ensemble":
-        from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossLikelihoodEnsembleSampler
+        from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossEnsembleSampler
 
         if scorer_flow_matching_model is None:
             raise ValueError("Ensemble cross-likelihood uncertainty sampler requires a scorer model.")
-        return CrossLikelihoodEnsembleSampler(
+        return CrossEnsembleSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.cross_likelihood_ensemble_sampler,
             sampler_flow_matching_model=flow_matching_model,
