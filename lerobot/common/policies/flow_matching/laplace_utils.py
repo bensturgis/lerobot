@@ -7,10 +7,9 @@ from laplace import Laplace
 from laplace.baselaplace import BaseLaplace
 from pathlib import Path
 from torch import nn, Tensor
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.nn.utils import vector_to_parameters
-from tqdm.auto import trange
 from typing import Dict, List, Optional, Tuple, Union
 
 from lerobot.common.datasets.factory import make_dataset
@@ -301,7 +300,6 @@ def make_laplace_path(
     repo_id: str,
     scope: str,
     calib_fraction: float,
-    batch_size: int,
 ) -> Path:
     """
     Build (and create) the on-disk path where we save/load a Laplace posterior.
@@ -312,7 +310,7 @@ def make_laplace_path(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     pct = int(calib_fraction * 100)
-    fname = f"laplace_{scope}_frac{pct}pct_bs{batch_size}.bin"
+    fname = f"laplace_{scope}_frac{pct}pct.bin"
     return out_dir / fname
 
 def get_laplace_posterior(

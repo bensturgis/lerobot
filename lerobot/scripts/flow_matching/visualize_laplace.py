@@ -196,7 +196,6 @@ def main(cfg: VisualizeLaplacePipelineConfig):
         repo_id=cfg.dataset.repo_id,
         scope=laplace_cfg.laplace_scope,
         calib_fraction=laplace_cfg.calib_fraction,
-        batch_size=laplace_cfg.batch_size,
     )
 
     # Create the Laplace calibration data loader if Laplace posterior if not stored
