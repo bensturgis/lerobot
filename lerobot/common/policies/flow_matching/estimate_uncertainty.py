@@ -6,7 +6,7 @@ from pathlib import Path
 from torch import nn, Tensor
 from torch.distributions import Independent, Normal
 from torch.utils.data import DataLoader
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
@@ -334,7 +334,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
 
         # Solve ODE forward from noise to sample action sequences
         sampling_ode_solver = ODESolver(self.velocity_model)
-        intermediate_ode_states, intermediate_ode_vels = sampling_ode_solver.sample(
+        intermediate_ode_states = sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
             step_size=self.flow_matching_cfg.ode_step_size,
@@ -343,7 +343,6 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             rtol=self.flow_matching_cfg.rtol,
             time_grid=time_grid,
             return_intermediate_states=True,
-            return_intermediate_vels=True,
         )
 
         # Store sampled action sequences for logging
@@ -386,6 +385,30 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
 
             # Use average velocity norm as uncertainty score 
             uncertainty_scores = torch.stack(terminal_vel_norms, dim=0).mean(dim=0)
+        elif self.uncertainty_metric == "intermediate_vel_diff":
+            # Evaluate difference between sampler and scorer velocity field at each
+            # intermediate time point
+            per_step_vel_diff: List[Tensor] = []
+            for time, intermediate_state in zip(time_grid[1:], intermediate_ode_states[1:]):
+                time_batch = torch.full(
+                    (sampled_action_seqs.shape[0],), time, device=device, dtype=dtype
+                )
+                sampler_velocity = self.sampler_flow_matching_model.unet(
+                    intermediate_state,
+                    time_batch,
+                    scorer_global_cond,
+                )
+                scorer_velocity = self.scorer_flow_matching_model.unet(
+                    intermediate_state,
+                    time_batch,
+                    scorer_global_cond,
+                )
+                velocity_difference = sampler_velocity - scorer_velocity
+                # L2 norm across time and action dims gives magnitude of velocity difference
+                per_step_vel_diff.append(torch.norm(velocity_difference, dim=(1, 2)))
+            
+            # Use average velocity difference as uncertainty score
+            uncertainty_scores = torch.stack(per_step_vel_diff, dim=0).mean(dim=0)
         elif self.uncertainty_metric == "likelihood":
             # Compute log-likelihood of sampled action sequences in scorer model    
             scoring_ode_solver = ODESolver(self.scorer_flow_matching_model.unet)

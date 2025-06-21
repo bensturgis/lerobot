@@ -34,9 +34,12 @@ class CrossEnsembleSamplerConfig:
     scorer_model_path: str | Path | None = None
     # Which uncertainty metric to use:
     #  - "likelihood": negative log‐likelihood of the action sequence
-    #  - "intermediate_vel_norm": average L2 norm of the velocity field over intermdiate steps of the ODE
+    #  - "intermediate_vel_norm": average L2 norm of the velocity field over intermediate evaluation
+    #       points of the ODE
     #  - "terminal_vel_norm": average L2-norm of the velocity field evaluated only for the final state
     #       of the ODE at times close to t=1.0
+    #  - "intermediate_vel_diff": average L2 norm of the velocity differences between the scorer and sampler ODE
+    #       over intermediate evaluation points of the ODE
     uncertainty_metric: str = "likelihood"
 
 @dataclass
