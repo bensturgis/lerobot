@@ -582,7 +582,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             atol=self.config.atol,
             rtol=self.config.rtol,
             time_grid=time_grid,
-            return_intermediates=True,
+            return_intermediate_states=True,
         ).transpose(0, 1)  # Shape: (num_paths, timesteps, horizon, action_dim)
 
         # Compute vector field (velocity at each position)

@@ -264,7 +264,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
         # Whether to compute exact divergence for log-likelihood
         self.exact_divergence = cfg.exact_divergence
         # Flag to choose uncertainty metric: True uses velocity norm, False uses log-likelihood
-        self.use_vel_score = cfg.use_vel_score
+        self.uncertainty_metric = cfg.uncertainty_metric
         self.method_name = "cross_likelihood_ensemble"
         
     def conditional_sample_with_uncertainty(
@@ -327,14 +327,14 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
         ).log_prob
 
         # Build time grid: include intermediate times if computing velocity norm
-        if self.use_vel_score:
-            time_grid = torch.tensor([0.0, 0.95, 0.97, 1.0], device=device, dtype=dtype)
+        if self.uncertainty_metric in ["intermediate_vel_norm", "terminal_vel_norm"]:
+            time_grid = torch.tensor([0.0, 0.9, 0.95, 0.97, 1.0], device=device, dtype=dtype)
         else:
             time_grid = torch.tensor([0.0, 1.0], device=device, dtype=dtype)
 
         # Solve ODE forward from noise to sample action sequences
         sampling_ode_solver = ODESolver(self.velocity_model)
-        noisy_action_seqs = sampling_ode_solver.sample(
+        intermediate_ode_states, intermediate_ode_vels = sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
             step_size=self.flow_matching_cfg.ode_step_size,
@@ -342,19 +342,20 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
             time_grid=time_grid,
-            return_intermediates=True
+            return_intermediate_states=True,
+            return_intermediate_vels=True,
         )
 
         # Store sampled action sequences for logging
-        sampled_action_seqs = noisy_action_seqs[-1]
+        sampled_action_seqs = intermediate_ode_states[-1]
         self.latest_action_candidates = sampled_action_seqs
 
         # TODO: Use difference in velocity vectors instead
         # Compute uncertainty based on selected metric
-        if self.use_vel_score:
+        if self.uncertainty_metric == "intermediate_vel_norm":
             # Evaluate velocity field at each intermediate time point under scorer
             per_step_vel_norms = []
-            for time, noisy_action_seq in zip(time_grid[1:-1], noisy_action_seqs[1:-1]):
+            for time, noisy_action_seq in zip(time_grid[1:], intermediate_ode_states[1:]):
                 time_batch = torch.full(
                     (sampled_action_seqs.shape[0],), time, device=device, dtype=dtype
                 )
@@ -365,10 +366,27 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
                 )
                 # L2 norm across time and action dims gives per-sample velocity magnitude
                 per_step_vel_norms.append(torch.norm(velocity, dim=(1, 2)))
+            
+            # Use average velocity norm as uncertainty score
+            uncertainty_scores = torch.stack(per_step_vel_norms, dim=0).mean(dim=0)
+        elif self.uncertainty_metric == "terminal_vel_norm":
+            # Evaluate velocity on the final sampled sequence at times close to t=1
+            terminal_vel_norms = []
+            for time in time_grid[1:-1]:
+                time_batch = torch.full(
+                    (sampled_action_seqs.shape[0],), time, device=device, dtype=dtype
+                )
+                velocity = self.scorer_flow_matching_model.unet(
+                    sampled_action_seqs,
+                    time_batch,
+                    scorer_global_cond,
+                )
+                # L2 norm across time and action dims gives velocity magnitude
+                terminal_vel_norms.append(torch.norm(velocity, dim=(1, 2)))
 
-            velocity_norm = torch.stack(per_step_vel_norms, dim=0).mean(dim=0)
-            uncertainty_scores = velocity_norm
-        else:
+            # Use average velocity norm as uncertainty score 
+            uncertainty_scores = torch.stack(terminal_vel_norms, dim=0).mean(dim=0)
+        elif self.uncertainty_metric == "likelihood":
             # Compute log-likelihood of sampled action sequences in scorer model    
             scoring_ode_solver = ODESolver(self.scorer_flow_matching_model.unet)
             _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
@@ -386,7 +404,12 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
 
             # Use negative log-likelihood as uncertainty score
             uncertainty_scores = -log_probs
-        
+        else:
+            raise ValueError(
+                f"Unsupported uncertainty_metric '{self.uncertainty_metric}'. "
+                "Expected one of: 'vel_norm', 'likelihood'."
+            )
+
         # Store uncertainty scores for logging
         self.latest_uncertainties = uncertainty_scores
 
