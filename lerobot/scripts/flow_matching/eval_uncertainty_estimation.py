@@ -69,7 +69,7 @@ def plot_id_ood_uncertainties(
         plt.plot(
             np.arange(len(uncert)),
             uncert,
-            colour=colours["ID"],
+            color=colours["ID"],
             alpha=0.3,
             label="In-Distribution" if ep_idx == 0 else None)
     for ep_idx, uncert in enumerate(ood_uncertainties):
@@ -77,7 +77,7 @@ def plot_id_ood_uncertainties(
         plt.plot(
             np.arange(len(uncert)),
             uncert,
-            colour=colours["OoD"],
+            color=colours["OoD"],
             alpha=0.3,
             label="Out-of-Distribution" if ep_idx == 0 else None
         )
@@ -100,9 +100,9 @@ def plot_id_ood_uncertainties(
     ood_mean, ood_std = compute_uncert_stats(ood_uncertainties)
 
     for label, mean, std in [("ID", id_mean, id_std), ("OoD", ood_mean, ood_std)]:
-        plt.plot(np.arange(len(mean)), mean, colour=colours[label])
+        plt.plot(np.arange(len(mean)), mean, color=colours[label])
         plt.fill_between(
-            np.arange(len(mean)), mean - std, mean + std, colour=colours[label], alpha=0.5
+            np.arange(len(mean)), mean - std, mean + std, color=colours[label], alpha=0.5
         )
 
     plt.xlabel("Action-Sequence Index")
@@ -317,7 +317,6 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                     repo_id=cfg.dataset.repo_id,
                     scope=laplace_cfg.laplace_scope,
                     calib_fraction=laplace_cfg.calib_fraction,
-                    batch_size=laplace_cfg.batch_size,
                 )
                 if not laplace_path.exists():
                     laplace_calib_loader = create_laplace_flow_matching_calib_loader(

@@ -3,15 +3,15 @@ dataset:
 
 env:
   type: pusht
-  perturbation:
-    patch_color: [0, 0, 0]
 
 eval_uncert_est:
+  n_episodes: 20
   uncert_est_methods: [cross_likelihood_laplace]
+  collapse_success_failure: True
   perturbation_config:
     enable: True
     static: False
-  collapse_success_failure: True
+    patch_color: [0, 0, 0]
 
 uncertainty_sampler:
   cross_likelihood_laplace_sampler:
@@ -21,6 +21,5 @@ uncertainty_sampler:
 
   cross_likelihood_ensemble_sampler:
     scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
-    use_vel_score: True
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/200000/pretrained_model
