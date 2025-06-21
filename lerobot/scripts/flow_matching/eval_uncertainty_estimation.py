@@ -49,134 +49,72 @@ from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 
-def plot_single_episode_uncertaintes(
-    episode: int,
+
+def plot_id_ood_uncertainties(
     uncert_est_method: str,
-    success_uncertainties: np.ndarray,
-    id_success: bool,
-    failure_uncertainties: np.ndarray,
-    id_failure: bool,
+    id_uncertainties: list[np.ndarray],
+    ood_uncertainties: list[np.ndarray],
     output_dir: Path,
 ):
-    success_uncertainties = np.where(np.isneginf(success_uncertainties), np.nan, success_uncertainties)
-    failure_uncertainties = np.where(np.isneginf(failure_uncertainties), np.nan, failure_uncertainties)
+    """
+    Draw per-episode uncertainties and mean ± std bands for ID and OoD scenarios.
+    """
+    # Consistent colours
+    colours = {"ID": "C0", "OoD": "C1"}
 
+    # Plot every episode as a faint line
     plt.figure()
-    success_label = "ID success" if id_success else "OoD success"
-    plt.plot(
-        np.arange(len(success_uncertainties)), 
-        success_uncertainties, 
-        label=success_label
-    )
-    failure_label = "ID failure" if id_failure else "OoD failure"
-    plt.plot(
-        np.arange(len(failure_uncertainties)), 
-        failure_uncertainties, 
-        label=failure_label
-    )
-    plt.xlabel("Action-Sequence Index")
-    plt.ylabel("Uncertainty Score")
-    plt.title(f"{uncert_est_method.replace('_', ' ').title()} - Episode {episode + 1}")
-    plt.legend()
-    file_path = output_dir / f"uncertainty_scores_ep{(episode + 1):03d}.png"
-    plt.savefig(file_path, dpi=160, bbox_inches="tight")
-    plt.close()
-
-def plot_success_failure_uncertainties(
-    uncert_est_method: str,
-    success_uncertainties: list[np.ndarray],
-    id_success: bool,
-    failure_uncertainties: list[np.ndarray],
-    id_failure: bool,
-    output_dir: Path,
-):
-    # Pick consistent colors
-    success_uncert_color = "C0"
-    failure_uncert_color = "C1"
-
-    plt.figure()
-
-    # Plot all clean episodes in blue
-    for episode, uncertainties in enumerate(success_uncertainties):
-        uncertainties = np.where(np.isneginf(uncertainties), np.nan, uncertainties)
-        action_seq_indices = np.arange(len(uncertainties))
-        success_label = "ID success" if id_success else "OoD success"
+    for ep_idx, uncert in enumerate(id_uncertainties):
+        uncert = np.where(np.isneginf(uncert), np.nan, uncert)
         plt.plot(
-            action_seq_indices,
-            uncertainties,
-            color=success_uncert_color,
-            alpha=0.3, 
-            label=success_label if episode == 0 else None
+            np.arange(len(uncert)),
+            uncert,
+            colour=colours["ID"],
+            alpha=0.3,
+            label="In-Distribution" if ep_idx == 0 else None)
+    for ep_idx, uncert in enumerate(ood_uncertainties):
+        uncert = np.where(np.isneginf(uncert), np.nan, uncert)
+        plt.plot(
+            np.arange(len(uncert)),
+            uncert,
+            colour=colours["OoD"],
+            alpha=0.3,
+            label="Out-of-Distribution" if ep_idx == 0 else None
         )
 
-    # Plot all perturbed episodes in orange
-    for episode, uncertainties in enumerate(failure_uncertainties):
-        uncertainties = np.where(np.isneginf(uncertainties), np.nan, uncertainties)
-        action_seq_indices = np.arange(len(uncertainties))
-        failure_label = "ID failure" if id_failure else "OoD failure"
-        plt.plot(
-            action_seq_indices,
-            uncertainties, 
-            color=failure_uncert_color,
-            alpha=0.3, 
-            label=failure_label if episode == 0 else None
+    # Compute mean ± std across episodes in each bucket
+    all_eps = [u for eps in [id_uncertainties, ood_uncertainties] for u in eps]
+    max_len = max(len(u) for u in all_eps) if all_eps else 0
+    
+    def compute_uncert_stats(arrays: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+        if not arrays:
+            return np.full(max_len, np.nan), np.full(max_len, np.nan)
+        mean, std = [], []
+        for t in range(max_len):
+            vals = np.array([a[t] for a in arrays if len(a) > t and np.isfinite(a[t])])
+            mean.append(vals.mean() if vals.size else np.nan)
+            std.append(vals.std() if vals.size else np.nan)
+        return np.asarray(mean), np.asarray(std)
+
+    id_mean, id_std = compute_uncert_stats(id_uncertainties)
+    ood_mean, ood_std = compute_uncert_stats(ood_uncertainties)
+
+    for label, mean, std in [("ID", id_mean, id_std), ("OoD", ood_mean, ood_std)]:
+        plt.plot(np.arange(len(mean)), mean, colour=colours[label])
+        plt.fill_between(
+            np.arange(len(mean)), mean - std, mean + std, colour=colours[label], alpha=0.5
         )
-
-    # Determine maximum episode length
-    max_episode_len = max(len(u) for u in success_uncertainties + failure_uncertainties)
-
-    def compute_uncert_stats(uncertainties):
-        uncerts_mean, uncerts_std = [], []
-        for action_seq_idx in np.arange(max_episode_len):
-            uncerts_at_idx = np.array([
-                u[action_seq_idx]
-                for u in uncertainties
-                if len(u) > action_seq_idx
-                and np.isfinite(u[action_seq_idx])
-            ])
-            if uncerts_at_idx.size > 0:
-                uncerts_mean.append(uncerts_at_idx.mean())
-                uncerts_std.append(uncerts_at_idx.std())
-            else:
-                uncerts_mean.append(np.nan)
-                uncerts_std.append(np.nan)
-        return np.array(uncerts_mean), np.array(uncerts_std)
-
-    success_uncerts_mean, success_uncerts_std = compute_uncert_stats(success_uncertainties)
-    failure_uncerts_mean, failure_uncerts_std = compute_uncert_stats(failure_uncertainties)
-
-    # Plot means and standard deviation bands
-    plt.plot(
-        np.arange(max_episode_len),
-        success_uncerts_mean,
-        color=success_uncert_color,
-    )
-    plt.fill_between(
-        np.arange(max_episode_len),
-        success_uncerts_mean - success_uncerts_std,
-        success_uncerts_mean + success_uncerts_std,
-        alpha=0.5
-    )
-    plt.plot(
-        np.arange(max_episode_len),
-        failure_uncerts_mean,
-        color=failure_uncert_color,
-    )
-    plt.fill_between(
-        np.arange(max_episode_len),
-        failure_uncerts_mean - failure_uncerts_std,
-        failure_uncerts_mean + failure_uncerts_std,
-        alpha=0.5
-    )
 
     plt.xlabel("Action-Sequence Index")
     plt.ylabel("Uncertainty Score")
-    plt.title(f"{uncert_est_method.replace('_', ' ').title()}")
+    plt.title(uncert_est_method.replace("_", " ").title())
     plt.legend()
-
-    file_path = output_dir / f"uncertainty_scores_{uncert_est_method}.png"
-    plt.savefig(file_path, dpi=160, bbox_inches="tight")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(
+        output_dir / f"uncertainty_scores_{uncert_est_method}.png", dpi=160, bbox_inches="tight"
+    )
     plt.close()
+
 
 def plot_all_uncertainties(
     uncert_est_method: str,
@@ -247,9 +185,11 @@ def plot_all_uncertainties(
     plt.title(uncert_est_method.replace("_", " ").title())
     plt.legend()
     output_dir.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_dir / f"uncertainty_scores_{uncert_est_method}.png",
-                dpi=160, bbox_inches="tight")
+    plt.savefig(
+        output_dir / f"uncertainty_scores_{uncert_est_method}.png", dpi=160, bbox_inches="tight"
+    )
     plt.close()
+
 
 def rollout(
     env: gym.Env,
@@ -316,11 +256,13 @@ def rollout(
 
     return info
 
+
 def load_failure_seeds(path: Path) -> list[int]:
     if not path or not path.exists():
         return []
     data = json.loads(path.read_text())
     return [int(s) for s in data.get("failure_seeds", [])]
+
 
 def choose_seed(failure_pool: list[int]) -> int:
     """
@@ -335,6 +277,7 @@ def choose_seed(failure_pool: list[int]) -> int:
         return seed
 
     return random.randrange(2**31 - 1)
+
 
 @parser.wrap()
 def main(cfg: EvalUncertaintyEstimationPipelineConfig): 
@@ -455,14 +398,28 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                     fps=ood_env.metadata["render_fps"]
                 )
 
-            plot_all_uncertainties(
-                uncert_est_method = uncert_est_method,
-                id_success_uncertainties = all_uncertainties[uncert_est_method]["id_success"],
-                id_failure_uncertainties = all_uncertainties[uncert_est_method]["id_failure"],
-                ood_success_uncertainties = all_uncertainties[uncert_est_method]["ood_success"],
-                ood_failure_uncertainties = all_uncertainties[uncert_est_method]["ood_failure"],
-                output_dir = cfg.output_dir / uncert_est_method,
-            )
+            if cfg.eval_uncert_est.collapse_success_failure:
+                id_all = (all_uncertainties[uncert_est_method]["id_success"] +
+                          all_uncertainties[uncert_est_method]["id_failure"])
+                ood_all = (all_uncertainties[uncert_est_method]["ood_success"] +
+                           all_uncertainties[uncert_est_method]["ood_failure"])
+
+                plot_id_ood_uncertainties(
+                    uncert_est_method=uncert_est_method,
+                    id_uncertainties=id_all,
+                    ood_uncertainties=ood_all,
+                    output_dir=cfg.output_dir / uncert_est_method,
+                )
+            else:
+                plot_all_uncertainties(
+                    uncert_est_method=uncert_est_method,
+                    id_success_uncertainties=all_uncertainties[uncert_est_method]["id_success"],
+                    id_failure_uncertainties=all_uncertainties[uncert_est_method]["id_failure"],
+                    ood_success_uncertainties=all_uncertainties[uncert_est_method]["ood_success"],
+                    ood_failure_uncertainties=all_uncertainties[uncert_est_method]["ood_failure"],
+                    output_dir=cfg.output_dir / uncert_est_method,
+                )
+
 
 if __name__ == "__main__":
     init_logging()

@@ -75,6 +75,10 @@ class EvalConfig:
 @dataclass
 class EvalUncertEstConfig:
     n_episodes: int = 20
+    
+    # If True we ignore success/failure and only keep ID vs. OoD
+    collapse_success_failure: bool = False
+
     # Which uncertainty estimation methods to evaluate
     uncert_est_methods: list[str] = field(
         default_factory=lambda: [
@@ -86,11 +90,13 @@ class EvalUncertEstConfig:
         ]
     )
 
+    # Perturbation config to create OoD scenarios
     perturbation_config: PerturbationConfig = PerturbationConfig(
         enable=True,
         static=False
     )
 
+    # Paths to ID and OoD failure seeds to balance success and failure cases
     id_failure_seeds_path: Path | None = None
     ood_failure_seeds_path: Path | None = None
     
