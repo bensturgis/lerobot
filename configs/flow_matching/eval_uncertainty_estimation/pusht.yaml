@@ -3,6 +3,8 @@ dataset:
 
 env:
   type: pusht
+  perturbation:
+    patch_color: [0, 0, 0]
 
 eval_uncert_est:
   uncert_est_methods: [cross_likelihood_laplace]
@@ -18,6 +20,7 @@ uncertainty_sampler:
     batch_size: 10
 
   cross_likelihood_ensemble_sampler:
-    scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/last/pretrained_model
+    scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
+    use_vel_score: True
 
-# python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
+# python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/200000/pretrained_model

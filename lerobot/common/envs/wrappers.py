@@ -1,7 +1,7 @@
 import numpy as np
 import random
 import warnings
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import gymnasium as gym
 from gymnasium.utils import seeding
@@ -16,7 +16,8 @@ class PerturbationWrapper(gym.Wrapper):
         static: bool,
         min_patch_frac: float,
         max_patch_frac: float,
-        allowed_area: Optional[Tuple[float, float]] = None,
+        allowed_area: Optional[Tuple[float, float]],
+        patch_color: Union[Tuple[int, int, int], np.ndarray],
         seed: Optional[int] = None,
     ):
         """
@@ -28,6 +29,7 @@ class PerturbationWrapper(gym.Wrapper):
             max_patch_frac: Maximum height/width fraction of the patch relative to image size.
             allowed_area: (width_frac, height_frac) of a central region
                 within which patches must lie. If None, the whole image is allowed.
+            patch_color: RGB color of the patch.
             seed: Optional seed for deterministic patch placement.
         """
         super().__init__(env)
@@ -51,6 +53,9 @@ class PerturbationWrapper(gym.Wrapper):
 
         # Normalised rectangle coordinates: (top_frac, left_frac, height_frac, width_frac) from [0, 1]
         self.patch_frac: Optional[Tuple[float, float, float, float]] = None
+
+        # Color for the patch, stored as an array matching image dtype
+        self.patch_color = np.array(patch_color, dtype=np.uint8)
 
         self.seed(seed)
 
@@ -118,7 +123,7 @@ class PerturbationWrapper(gym.Wrapper):
         patch_width = int(round(patch_width_frac * width))
         
         img = img.copy()
-        img[patch_top : patch_top + patch_height, patch_left : patch_left + patch_width] = np.array([255, 0, 0], dtype=img.dtype)
+        img[patch_top : patch_top + patch_height, patch_left : patch_left + patch_width] = self.patch_color
         return img
 
     def _patch_obs(self, observation: Dict[str, Any]) -> Dict[str, Any]:

@@ -28,6 +28,7 @@ class PerturbationConfig:
     min_frac: float = 0.1
     max_frac: float = 0.2
     allowed_area: Tuple[float, float] | None = None
+    patch_color: Tuple[int, int, int] = (0, 0, 0)
 
 @dataclass
 class EnvConfig(draccus.ChoiceRegistry, abc.ABC):
