@@ -4,7 +4,7 @@ import warnings
 
 from torch import nn, Tensor
 from torchdiffeq import odeint
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 FIXED_STEP_SOLVERS = {
     "euler",
@@ -40,9 +40,14 @@ class ODESolver():
         atol: float,
         rtol: float,
         time_grid: Tensor = torch.tensor([0.0, 1.0]),
-        return_intermediates: bool = False,
+        return_intermediate_states: bool = False,
+        return_intermediate_vels: bool = False,
         enable_grad: bool = False,
-    ) -> Union[Tensor, Sequence[Tensor]]:
+    ) -> Union[
+            Tensor,
+            Sequence[Tensor],
+            Tuple[Tensor, Tensor]
+    ]:
         """
         Solve the flow matching ODE with the conditioned velocity model.
 
@@ -60,12 +65,16 @@ class ODESolver():
                 Ignored for fixed-step solvers.
             time_grid: Times at which ODE is evluated. Integration runs from time_grid[0] to time_grid[-1].
                 Must start at 0.0 and end at 1.0 for flow matching sampling. 
-            return_intermediates: If True then return intermediate evaluation points according to time_grid.
+            return_intermediate_states: If True then return intermediate evaluation points according to time_grid.
+            return_intermediate_vels: If True then return velocities at intermediate evaluation points acoording
+                to time_grid.
             enable_grad: If True then compute gradients during sampling.
 
         Returns:
-            Solely the solution of the ODE at time 1.0 when `return_intermediates` = False, otherwise all
+            - The solution of the ODE at time 1.0 when return_intermediate_states = False, otherwise all
             evaluation points specified in time_grid.
+            - If return_intermediate_vels = True, additionally the velocities at the intermediate evaluation
+            points specified in time_grid.
         """
         if time_grid[0] != 0.0 and time_grid[-1] == 1.0:
             raise ValueError(f"Time grid must start at 0.0 and end at 1.0. Got {time_grid}.")
@@ -109,7 +118,21 @@ class ODESolver():
                 **ode_kwargs,
             )
 
-        return trajetory if return_intermediates else trajetory[-1]
+        outputs: List[Tensor] = []
+
+        if return_intermediate_states:
+            outputs.append(trajetory)
+        else:
+            outputs.append(trajetory[-1])
+
+        if return_intermediate_vels:
+            velocities = []
+            for t, x_t in zip(time_grid, trajetory):
+                t_batch = t.expand(x_t.shape[0])
+                velocities.append(self.velocity_model(x_t, t_batch, global_cond))
+            outputs.append(torch.stack(velocities, dim=0))
+
+        return outputs[0] if len(outputs) == 1 else tuple(outputs)
 
     def sample_with_log_likelihood(
         self,
@@ -121,7 +144,7 @@ class ODESolver():
         step_size: Optional[float],
         atol: Optional[float],
         rtol: Optional[float],
-        return_intermediates: bool = False,
+        return_intermediate_states: bool = False,
         exact_divergence: bool = True,
         num_hutchinson_samples: Optional[int] = 3,
         generator: Optional[torch.Generator] = None,
@@ -156,7 +179,7 @@ class ODESolver():
                 for adaptive solvers.
             atol, rtol: Absolute/relative error tolerances for accepting an adaptive solver step.
                 Ignored for fixed-step solvers.
-            return_intermediates: If True then return intermediate evaluation points according to time_grid.
+            return_intermediate_states: If True then return intermediate evaluation points according to time_grid.
             exact_divergence: Whether to compute the exact divergence or estimate it using the Hutchinson
                 trace estimator.
             num_hutchinson_samples: Number of Hutchinson samples to use when estimating the divergence. Higher
@@ -165,8 +188,8 @@ class ODESolver():
 
         Returns:
             - Either the terminal state (x_0 in forward and x_1 in backward direction) when
-              `return_intermediates` = False or all evaluation points x_t specified in time_grid
-              when `return_intermediates` = True
+              `return_intermediate_states` = False or all evaluation points x_t specified in time_grid
+              when `return_intermediate_states` = True
             - The estimated log-likelihood log(p_1(x_1)).
         """
         if not (
@@ -313,7 +336,7 @@ class ODESolver():
             # sample and change-of-variables correction
             log_p_1_x_1 = log_p_0(x_init) - log_prob_diff[-1]
 
-        return (trajectory, log_p_1_x_1) if return_intermediates else (trajectory[-1], log_p_1_x_1)
+        return (trajectory, log_p_1_x_1) if return_intermediate_states else (trajectory[-1], log_p_1_x_1)
 
 
     def _validate_and_configure_solver(
