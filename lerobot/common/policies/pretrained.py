@@ -139,9 +139,9 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         if (
             config.type == "flow_matching" and
             uncertainty_sampler_config is not None and
-            uncertainty_sampler_config.type == "cross_likelihood_ensemble"
+            uncertainty_sampler_config.type == "cross_ensemble"
         ):           
-            scorer_model_path = uncertainty_sampler_config.cross_likelihood_ensemble_sampler.scorer_model_path
+            scorer_model_path = uncertainty_sampler_config.cross_ensemble_sampler.scorer_model_path
             if scorer_model_path is None:
                 raise ValueError(
                     "Cross-likelihood uncertainty sampler requested but no scorer checkpoint provided."

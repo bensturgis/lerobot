@@ -1,9 +1,21 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Sequence
+
+
+def validate_metric(field_name: str, metric: str, allowed: Sequence[str]) -> None:
+    """
+    Raise ValueError if metric is not one of allowed.
+    """
+    if metric not in allowed:
+        allowed_list = ", ".join(f"'{m}'" for m in allowed)
+        raise ValueError(
+            f"{field_name!r} must be one of: {allowed_list}. Got {metric!r}."
+        )
 
 # Sub-configs for each uncertainty sampler.
 @dataclass
-class CrossLikLaplaceSamplerConfig:
+class CrossLaplaceSamplerConfig:
     # Number of candidate action sequences to sample.
     num_action_seq_samples: int = 1
     # Whether to compute the exact divergence or use the Hutchinson trace estimator
@@ -17,8 +29,33 @@ class CrossLikLaplaceSamplerConfig:
     # Parameters for the Laplace approximation calibration dataloader.
     calib_fraction: float = 1.0
     batch_size: int = 32
-    # Flag to choose uncertainty metric: True for velocity norm, False for log-likelihood
-    uncertainty_score: str = "vel_norm"
+    # Which uncertainty metric to use:
+    #  - "likelihood": negative log‐likelihood of the action sequence
+    #  - "intermediate_vel_norm": average L2 norm of the velocity field over intermediate evaluation
+    #       points of the ODE
+    #  - "terminal_vel_norm": average L2-norm of the velocity field evaluated only for the final state
+    #       of the ODE at times close to t=1.0
+    #  - "intermediate_vel_diff": average L2 norm of the velocity differences between the scorer and sampler ODE
+    #       over intermediate evaluation points of the ODE
+    scoring_metric: str = "likelihood"
+
+    def __post_init__(self):
+        # Validate Laplace scope
+        allowed_scopes = {"velocity_last", "rgb_last", "both"}
+        if self.laplace_scope not in allowed_scopes:
+            raise ValueError(
+                f"CrossLaplaceSamplerConfig.laplace_scope must be one of "
+                f"{sorted(allowed_scopes)}, got {self.laplace_scope!r}."
+            )
+        
+        # Validate scoring metric
+        validate_metric(
+            field_name="CrossEnsembleSamplerConfig.scoring_metric",
+            metric=self.scoring_metric,
+            allowed=(
+                "likelihood", "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff",
+            ),
+        )
 
 @dataclass
 class CrossEnsembleSamplerConfig:
@@ -40,17 +77,38 @@ class CrossEnsembleSamplerConfig:
     #       of the ODE at times close to t=1.0
     #  - "intermediate_vel_diff": average L2 norm of the velocity differences between the scorer and sampler ODE
     #       over intermediate evaluation points of the ODE
-    uncertainty_metric: str = "likelihood"
+    scoring_metric: str = "likelihood"
+
+    def __post_init__(self):
+        validate_metric(
+            field_name="CrossEnsembleSamplerConfig.scoring_metric",
+            metric=self.scoring_metric,
+            allowed=(
+                "likelihood", "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff",
+            ),
+        )
 
 @dataclass
-class ComposedLikSamplerConfig:
+class ComposedSequenceSamplerConfig:
     # Number of candidate action sequences to sample .
     num_action_seq_samples: int = 1
     # Whether to compute the exact divergence or use the Hutchinson trace estimator
     # when computing the log-likelihood for an action sequence sample.
     exact_divergence: bool = False
-    # Flag to choose uncertainty metric: True for velocity norm, False for log-likelihood
-    use_vel_score: bool = False
+    # Which uncertainty metric to use:
+    #  - "likelihood": negative log‐likelihood of the action sequence
+    #  - "terminal_vel_norm": average L2-norm of the velocity field evaluated only for the final state
+    #       of the ODE at times close to t=1.0
+    scoring_metric: str = "likelihood"
+    
+    def __post_init__(self):
+        validate_metric(
+            field_name="CrossEnsembleSamplerConfig.scoring_metric",
+            metric=self.scoring_metric,
+            allowed=(
+                "likelihood", "terminal_vel_norm",
+            ),
+        )
 
 @dataclass
 class LikSamplerConfig:
@@ -71,9 +129,9 @@ class EpsilonBallSamplerConfig:
 
 @dataclass
 class UncertaintySamplerConfig:
-    type: str = "cross_likelihood_ensemble"
-    composed_likelihood_sampler: ComposedLikSamplerConfig = field(default_factory=ComposedLikSamplerConfig)
-    cross_likelihood_ensemble_sampler: CrossEnsembleSamplerConfig = field(default_factory=CrossEnsembleSamplerConfig)
-    cross_likelihood_laplace_sampler: CrossLikLaplaceSamplerConfig = field(default=CrossLikLaplaceSamplerConfig)
+    type: str = "cross_ensemble"
+    composed_sequence_sampler: ComposedSequenceSamplerConfig = field(default_factory=ComposedSequenceSamplerConfig)
+    cross_ensemble_sampler: CrossEnsembleSamplerConfig = field(default_factory=CrossEnsembleSamplerConfig)
+    cross_laplace_sampler: CrossLaplaceSamplerConfig = field(default=CrossLaplaceSamplerConfig)
     likelihood_sampler: LikSamplerConfig = field(default_factory=LikSamplerConfig)
     epsilon_ball_sampler: EpsilonBallSamplerConfig = field(default_factory=EpsilonBallSamplerConfig)

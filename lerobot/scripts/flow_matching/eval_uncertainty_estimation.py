@@ -16,7 +16,7 @@ python lerobot/scripts/eval_uncertainty_estimation.py \
     --policy.device=cuda \
     --env.type=pusht \
     --eval_uncert_est.n_episodes=10 \
-    --eval_uncert_est.uncert_est_methods='["likelihood", "composed_likelihood"]'
+    --eval_uncert_est.uncert_est_methods='["likelihood", "composed_sequence"]'
 ```
 """
 import json
@@ -311,8 +311,8 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 uncertainty_sampler_cfg=cfg.uncertainty_sampler
             ).to(device)
             policy.eval()
-            if uncert_est_method == "cross_likelihood_laplace":
-                laplace_cfg = cfg.uncertainty_sampler.cross_likelihood_laplace_sampler
+            if uncert_est_method == "cross_laplace":
+                laplace_cfg = cfg.uncertainty_sampler.cross_laplace_sampler
                 laplace_path = make_laplace_path(
                     repo_id=cfg.dataset.repo_id,
                     scope=laplace_cfg.laplace_scope,

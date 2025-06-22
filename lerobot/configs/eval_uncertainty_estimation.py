@@ -48,8 +48,8 @@ class EvalUncertaintyEstimationPipelineConfig:
 
     def validate(self):
         if (
-            "cross_likelihood_ensemble" in self.eval_uncert_est.uncert_est_methods and
-            self.uncertainty_sampler.cross_likelihood_ensemble_sampler.scorer_model_path is None
+            "cross_ensemble" in self.eval_uncert_est.uncert_est_methods and
+            self.uncertainty_sampler.cross_ensemble_sampler.scorer_model_path is None
         ):
             raise ValueError(
                 "Cross-likelihood ensemble uncertainty sampler requested but no scorer "
@@ -57,13 +57,13 @@ class EvalUncertaintyEstimationPipelineConfig:
             )
         
         if (
-            "cross_likelihood_laplace" in self.eval_uncert_est.uncert_est_methods and
+            "cross_laplace" in self.eval_uncert_est.uncert_est_methods and
             self.dataset is None
         ):
             raise ValueError(
                 "Cross-likelihood Laplace uncertainty sampler requested but no dataset "
                 "config for Laplace approximation provided."
-            )   
+            )  
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

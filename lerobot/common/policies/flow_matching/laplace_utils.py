@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.policies.flow_matching.conditional_probability_path import OTCondProbPath
 from lerobot.common.policies.pretrained import PreTrainedPolicy
-from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import CrossLikLaplaceSamplerConfig
+from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import CrossLaplaceSamplerConfig
 from lerobot.common.utils.utils import get_safe_torch_device
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
 from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
@@ -158,12 +158,12 @@ def create_laplace_flow_matching_calib_loader(
     # Extract a subset of the full train dataset for calibration
     train_dataset = make_dataset(cfg)
     num_train_samples = len(train_dataset)
-    calib_fraction = cfg.uncertainty_sampler.cross_likelihood_laplace_sampler.calib_fraction
+    calib_fraction = cfg.uncertainty_sampler.cross_laplace_sampler.calib_fraction
     num_calib_samples = int(calib_fraction * num_train_samples)
     calib_indices = torch.randperm(num_train_samples)[:num_calib_samples].tolist()
     calib_subset = torch.utils.data.Subset(train_dataset, calib_indices)
 
-    batch_size = cfg.uncertainty_sampler.cross_likelihood_laplace_sampler.batch_size
+    batch_size = cfg.uncertainty_sampler.cross_laplace_sampler.batch_size
 
     calib_loader = torch.utils.data.DataLoader(
         calib_subset,
@@ -314,7 +314,7 @@ def make_laplace_path(
     return out_dir / fname
 
 def get_laplace_posterior(
-    cfg: CrossLikLaplaceSamplerConfig,
+    cfg: CrossLaplaceSamplerConfig,
     flow_matching_model: nn.Module,
     laplace_calib_loader: Optional[torch.utils.data.DataLoader],
     laplace_path: str,
