@@ -103,8 +103,8 @@ class FlowMatchingUncertaintySampler(ABC):
         scorer_global_cond: Tensor,
         ode_states: Tensor,
         time_grid: Tensor,
-        sampler_global_cond: Tensor,
         exact_divergence: bool,
+        sampler_global_cond: Optional[Tensor] = None,
     ) -> Tensor:
         """
         Compute an uncertainty score for a batch of action sequence samples
@@ -530,7 +530,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         """
         Samples `num_action_seq_samples` many new action sequences and computes
         uncertainty scores by composing them with a previous action sequence and evaluating
-        their negative log-likelihoods under the flow model.
+        them under the flow model.
 
         Args:
             global_cond: Single conditioning feature vector for the velocity
@@ -538,8 +538,8 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
 
         Returns:
             - Action sequence samples. Shape: [num_action_seq_samples, horizon, action_dim].
-            - Uncertainty scores given by negative log-likelihood of composed trajectories.
-              Shape: [num_action_seq_samples,]
+            - Uncertainty scores where a higher value means more uncertain.
+                Shape: [num_action_seq_samples,].
         """
         # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
@@ -603,10 +603,9 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         uncertainty_scores = self.score_sample(
             scoring_metric=self.scoring_metric,
             scorer_velocity_model=self.velocity_model,
-            scorer_global_cond=global_cond,
+            scorer_global_cond=self.prev_global_cond,
             ode_states=composed_action_seqs.unsqueeze(0),
             time_grid=time_grid,
-            sampler_global_cond=global_cond,
             exact_divergence=self.exact_divergence,
         )
 
