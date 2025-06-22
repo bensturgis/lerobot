@@ -22,7 +22,7 @@ from lerobot.common.policies.flow_matching.laplace_utils import (
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
-# TODO: Initialize ODE solver and gaussian_log_density during class initialization
+
 class FlowMatchingUncertaintySampler(ABC):
     """
     Abstract base class for uncertainty samplers that sample multiple action sequences
@@ -44,12 +44,21 @@ class FlowMatchingUncertaintySampler(ABC):
         """
         self.flow_matching_cfg = flow_matching_cfg
         self.velocity_model = velocity_model
+        self.sampling_ode_solver = ODESolver(velocity_model)
         self.num_action_seq_samples = num_action_seq_samples
         self.generator = generator
         self.horizon = self.flow_matching_cfg.horizon
         self.action_dim = self.flow_matching_cfg.action_feature.shape[0]
         self.device = get_device_from_parameters(velocity_model)
         self.dtype = get_dtype_from_parameters(velocity_model)
+        # Noise distribution is an isotropic Gaussian
+        self.gaussian_log_density = Independent(
+            Normal(
+                loc = torch.zeros(self.horizon, self.action_dim, device=self.device),
+                scale = torch.ones(self.horizon, self.action_dim, device=self.device),
+            ),
+            reinterpreted_batch_ndims=2
+        ).log_prob
         # Store latest sampled action sequences and their uncertainty scores for logging
         self.latest_action_candidates = None
         self.latest_uncertainties = None
@@ -87,8 +96,6 @@ class FlowMatchingUncertaintySampler(ABC):
         """
         pass
 
-    # TODO: Initialize gaussian_log_density in class initialization
-    # TODO: Validate for each class that valid uncertainty metric is used. 
     def score_sample(
         self,
         scoring_metric: str,
@@ -191,23 +198,14 @@ class FlowMatchingUncertaintySampler(ABC):
             
             # Use average velocity difference as uncertainty score
             return torch.stack(per_step_vel_diff, dim=0).mean(dim=0)
-        elif scoring_metric == "likelihood":
-            # Noise distribution is an isotropic Gaussian
-            gaussian_log_density = Independent(
-                Normal(
-                    loc = torch.zeros(self.horizon, self.action_dim, device=self.device),
-                    scale = torch.ones(self.horizon, self.action_dim, device=self.device),
-                ),
-                reinterpreted_batch_ndims=2
-            ).log_prob
-            
+        elif scoring_metric == "likelihood":            
             # Compute log-likelihood of sampled action sequences in scorer model    
             scoring_ode_solver = ODESolver(scorer_velocity_model)
             _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
                 x_init=ode_states[-1],
                 time_grid=torch.tensor([1.0, 0.0], device=self.device, dtype=self.dtype),
                 global_cond=scorer_global_cond,
-                log_p_0 = gaussian_log_density,
+                log_p_0 = self.gaussian_log_density,
                 method=self.flow_matching_cfg.ode_solver_method,
                 step_size=self.flow_matching_cfg.ode_step_size,
                 atol=self.flow_matching_cfg.atol,
@@ -332,8 +330,7 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
 
         # Solve ODE forward from noise to sample action sequences
-        sampling_ode_solver = ODESolver(self.velocity_model)
-        ode_states = sampling_ode_solver.sample(
+        ode_states = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
             step_size=self.flow_matching_cfg.ode_step_size,
@@ -453,8 +450,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
 
         # Solve ODE forward from noise to sample action sequences
-        sampling_ode_solver = ODESolver(self.velocity_model)
-        ode_states = sampling_ode_solver.sample(
+        ode_states = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
             step_size=self.flow_matching_cfg.ode_step_size,
@@ -559,8 +555,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         )
 
         # Solve ODE forward from noise to sample action sequences
-        ode_solver = ODESolver(self.velocity_model)
-        new_action_seqs = ode_solver.sample(
+        new_action_seqs = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
             step_size=self.flow_matching_cfg.ode_step_size,
@@ -697,8 +692,7 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
         
         # Solve combined flow matching ODE in forward direction to sample
         # action sequences x_1 and compute their log-likelihoods log(p_1(x_1)).
-        ode_solver = ODESolver(self.velocity_model)
-        action_seqs, log_probs = ode_solver.sample_with_log_likelihood(
+        action_seqs, log_probs = self.sampling_ode_solver.sample_with_log_likelihood(
             x_init=noise_sample,
             time_grid=torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype),
             global_cond=global_cond,
@@ -831,8 +825,7 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
 
             # Based on the center noise sample of the epsilon-ball use the velocity model
             # and an ODE solver to predict an action sequence sample from the target distribution.
-            ode_solver = ODESolver(self.velocity_model)
-            reference_action_sequence = ode_solver.sample(
+            reference_action_sequence = self.sampling_ode_solver.sample(
                 x_0=noise_sample.unsqueeze(0),
                 global_cond=global_cond,
                 step_size=self.flow_matching_cfg.ode_step_size,
@@ -843,7 +836,7 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
             action_sequences[action_seq_idx] = reference_action_sequence
 
             # Solve flow matching ODE for samples in epsilon-ball around the initial noise sample.
-            perturbed_action_sequences = ode_solver.sample(
+            perturbed_action_sequences = self.sampling_ode_solver.sample(
                 x_0=epsilon_samples,
                 global_cond=global_cond.repeat(self.num_eps_ball_samples, 1),
                 step_size=self.flow_matching_cfg.ode_step_size,
