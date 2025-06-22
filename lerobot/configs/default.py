@@ -83,6 +83,8 @@ class EvalUncertEstConfig:
     uncert_est_methods: list[str] = field(
         default_factory=lambda: [
             "composed_sequence",
+            "composed_cross_ensemble",
+            "composed_cross_laplace"
             "cross_ensemble",
             "cross_laplace"
             "likelihood",
@@ -103,6 +105,8 @@ class EvalUncertEstConfig:
     def validate(self):
         allowed_methods = {
             "composed_sequence",
+            "composed_cross_ensemble",
+            "composed_cross_laplace"
             "cross_ensemble",
             "cross_laplace",
             "likelihood",

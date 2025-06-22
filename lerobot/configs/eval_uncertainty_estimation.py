@@ -58,7 +58,8 @@ class EvalUncertaintyEstimationPipelineConfig:
             )
         
         if (
-            "cross_laplace" in self.eval_uncert_est.uncert_est_methods and
+            ("cross_laplace" in self.eval_uncert_est.uncert_est_methods or
+            "composed_cross_laplace" in self.eval_uncert_est.uncert_est_methods) and
             self.dataset is None
         ):
             raise ValueError(

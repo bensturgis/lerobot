@@ -137,6 +137,16 @@ def make_flow_matching_uncertainty_sampler(
             sampler_flow_matching_model=flow_matching_model,
             scorer_flow_matching_model=scorer_flow_matching_model
         )
+    if uncertainty_sampler_cfg.type == "composed_cross_laplace":
+        from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedCrossLaplaceSampler
+
+        return ComposedCrossLaplaceSampler(
+            flow_matching_cfg=flow_matching_cfg,
+            cfg=uncertainty_sampler_cfg.composed_cross_laplace_sampler,
+            flow_matching_model=flow_matching_model,
+            laplace_calib_loader=laplace_calib_loader,
+            laplace_path=laplace_path,
+        )
     if uncertainty_sampler_cfg.type == "composed_sequence":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedSequenceSampler
 

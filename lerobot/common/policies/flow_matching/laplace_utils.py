@@ -140,6 +140,8 @@ def make_laplace_collate(
 def create_laplace_flow_matching_calib_loader(
     cfg: Union[EvalUncertaintyEstimationPipelineConfig, VisualizeLaplacePipelineConfig],
     policy: PreTrainedPolicy,
+    calib_fraction: float,
+    batch_size: int,
 ) -> DataLoader:
     """
     Build a data loader for Laplace approximation calibration of a flow matching model
@@ -148,7 +150,10 @@ def create_laplace_flow_matching_calib_loader(
     Args:
         cfg: Configuration object providing dataset construction parameters.
         policy: A trained flow matching policy.
-
+        calib_fraction: Fraction of the full dataset to reserve for calibration
+            (between 0 and 1).
+        batch_size: Number of samples per batch in the returned DataLoader.
+            
     Returns:
         A data loader over a small calibration set yielding batches of the form
         ((interpolated_trajectory, time_step, observation), target_velocity).
@@ -158,12 +163,9 @@ def create_laplace_flow_matching_calib_loader(
     # Extract a subset of the full train dataset for calibration
     train_dataset = make_dataset(cfg)
     num_train_samples = len(train_dataset)
-    calib_fraction = cfg.uncertainty_sampler.cross_laplace_sampler.calib_fraction
     num_calib_samples = int(calib_fraction * num_train_samples)
     calib_indices = torch.randperm(num_train_samples)[:num_calib_samples].tolist()
     calib_subset = torch.utils.data.Subset(train_dataset, calib_indices)
-
-    batch_size = cfg.uncertainty_sampler.cross_laplace_sampler.batch_size
 
     calib_loader = torch.utils.data.DataLoader(
         calib_subset,

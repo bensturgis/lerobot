@@ -191,7 +191,10 @@ def main(cfg: VisualizeLaplacePipelineConfig):
     # ------------------------------------------
     flow_matching_model = policy.flow_matching
     # Get path to save or load the Laplace posterior
-    laplace_cfg = cfg.uncertainty_sampler.cross_laplace_sampler
+    if cfg.uncertainty_sampler.type == "cross_laplace":
+        laplace_cfg = cfg.uncertainty_sampler.cross_laplace_sampler
+    elif cfg.uncertainty_sampler.type == "composed_cross_laplace":
+        laplace_cfg = cfg.uncertainty_sampler.composed_cross_laplace_sampler
     laplace_output_path = make_laplace_path(
         repo_id=cfg.dataset.repo_id,
         scope=laplace_cfg.laplace_scope,

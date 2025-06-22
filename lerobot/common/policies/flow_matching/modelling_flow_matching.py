@@ -124,16 +124,10 @@ class FlowMatchingPolicy(PreTrainedPolicy):
 
         if (
             self.uncertainty_sampler is not None and
-            self.uncertainty_sampler.method_name == "composed_sequence"
+            self.uncertainty_sampler.method_name in [
+                "composed_cross_ensemble", "composed_laplace_ensemble" "composed_sequence"
+            ]
         ):
-            self.uncertainty_sampler.prev_global_cond = None
-            self.uncertainty_sampler.prev_action_sequence = None
-
-        if (
-            self.uncertainty_sampler is not None and
-            self.uncertainty_sampler.method_name == "composed_cross_ensemble"
-        ):
-            self.uncertainty_sampler.prev_scorer_global_cond = None
             self.uncertainty_sampler.prev_action_sequence = None
 
     def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
@@ -159,7 +153,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             
             # Sample action sequence candidates and compute their uncertainty scores.
             if self.uncertainty_sampler_config.type in [
-                "composed_cross_ensemble", "cross_ensemble", "cross_laplace"
+                "composed_cross_ensemble", "composed_cross_laplace", "cross_ensemble", "cross_laplace"
             ]:
                 action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
                     observation=batch

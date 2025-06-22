@@ -14,6 +14,7 @@ vis:
   vis_types: [action_seq]
 
 uncertainty_sampler:
+  type: cross_laplace
   cross_laplace_sampler:
     laplace_scope: both
     calib_fraction: 1.0

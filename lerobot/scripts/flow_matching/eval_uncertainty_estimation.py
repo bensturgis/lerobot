@@ -311,8 +311,11 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 uncertainty_sampler_cfg=cfg.uncertainty_sampler
             ).to(device)
             policy.eval()
-            if uncert_est_method == "cross_laplace":
-                laplace_cfg = cfg.uncertainty_sampler.cross_laplace_sampler
+            if uncert_est_method in ["cross_laplace", "composed_cross_laplace"]:
+                if uncert_est_method == "cross_laplace":
+                    laplace_cfg = cfg.uncertainty_sampler.cross_laplace_sampler
+                elif uncert_est_method == "composed_cross_laplace":
+                    laplace_cfg = cfg.uncertainty_sampler.composed_cross_laplace_sampler
                 laplace_path = make_laplace_path(
                     repo_id=cfg.dataset.repo_id,
                     scope=laplace_cfg.laplace_scope,
@@ -322,6 +325,8 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                     laplace_calib_loader = create_laplace_flow_matching_calib_loader(
                         cfg=cfg,
                         policy=policy,
+                        calib_fraction=laplace_cfg.calib_fraction,
+                        batch_size=laplace_cfg.batch_size
                     )
                 else:
                     laplace_calib_loader = None

@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
     ComposedCrossEnsembleSamplerConfig,
+    ComposedCrossLaplaceSamplerConfig,
     ComposedSequenceSamplerConfig,
     CrossEnsembleSamplerConfig,
     CrossLaplaceSamplerConfig,
@@ -272,6 +273,164 @@ class FlowMatchingUncertaintySampler(ABC):
             )
 
 
+class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
+    """
+    Splices newly sampled action sequence tails onto the previously executed
+    prefix and evaluates the full trajectories with a flow matching scorer
+    sampled from a fitted Laplace posterior.
+
+    The class therefore mixes
+    - sequence composition from ComposedSequenceSampler and  
+    - cross laplace epistemic scoring from CrossLaplaceSampler.
+    """
+    def __init__(
+        self,
+        flow_matching_cfg: FlowMatchingConfig,
+        cfg: ComposedCrossLaplaceSamplerConfig,
+        flow_matching_model: nn.Module,
+        laplace_calib_loader: DataLoader,
+        laplace_path: Union[str, Path],
+        generator: Optional[torch.Generator] = None,
+    ):
+        """
+        Initializes the composed sequence cross laplace sampler.
+        
+        Args:
+            cfg: Sampler-specific settings.
+            flow_matching_model: The full flow matching model including velocity and RGB encoder.
+            laplace_calib_loader: DataLoader providing samples for fitting the Laplace
+                approximation.
+            laplace_path: Path to save or load the Laplace posterior.
+        """
+        # Use the MAP velocity network for sampling action sequences
+        self.flow_matching_model = flow_matching_model
+        velocity_model = self.flow_matching_model.unet
+        super().__init__(
+            flow_matching_cfg=flow_matching_cfg,
+            velocity_model=velocity_model,
+            num_action_seq_samples=cfg.num_action_seq_samples,
+            scoring_metric=cfg.scoring_metric,
+            generator=generator,
+        )
+        # Whether to compute exact divergence for log-likelihood
+        self.exact_divergence = cfg.exact_divergence
+        # Choice of scoring metric
+        self.scoring_metric = cfg.scoring_metric
+        if self.scoring_metric not in ("likelihood", "terminal_vel_norm"):
+            raise ValueError(
+                f"Unsupported scoring_metric '{self.scoring_metric}'. "
+                "Expected one of: 'likelihood', 'terminal_vel_norm'."
+            )
+        # Store the action sequence, conditioning vector and laplace model
+        # from the previous action sequence generation step
+        self.prev_action_sequence = None
+        self.prev_laplace_global_cond = None
+        self.prev_laplace_model = None
+        self.method_name = "composed_cross_laplace"
+        
+        # Get the fitted Laplace posterior
+        self.laplace_posterior = get_laplace_posterior(
+            cfg=cfg,
+            flow_matching_model=self.flow_matching_model,
+            laplace_calib_loader=laplace_calib_loader,
+            laplace_path=laplace_path,
+        )
+
+    def conditional_sample_with_uncertainty(
+        self,
+        observation: Dict[str, Tensor]
+    ) -> Tuple[Tensor, Tensor]:
+        """
+        Composes previous and current action sequence and evaluates the result
+        with a Laplace sampled flow matching scorer.
+        
+        Args:
+            observation: Info about the environment used to create the conditioning vector for
+                the flow matching model. It has to contain the following items:
+                {
+                "observation.state": (B, n_obs_steps, state_dim)
+
+                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
+                    AND/OR
+                "observation.environment_state": (B, environment_dim)
+                }
+
+        Returns:
+            - sampled_action_seqs: Action sequences drawn from the MAP model.
+              Shape: [num_action_seq_samples, horizon, action_dim].
+            - uncertainty_scores: Uncertainty scores where a higher value means more
+                uncertain. Shape: [num_action_seq_samples,].      
+        """
+        # Encode image features and concatenate them all together along with the state vector
+        # to create the flow matching conditioning vectors
+        global_cond = self.flow_matching_model.prepare_global_conditioning(observation) # (B, global_cond_dim)
+
+        # Adjust shape of conditioning vector
+        global_cond = self._prepare_conditioning(global_cond)
+
+        # Sample noise priors
+        noise_samples = torch.randn(
+            size=(self.num_action_seq_samples, self.horizon, self.action_dim),
+            dtype=self.dtype,
+            device=self.device,
+            generator=self.generator,
+        )
+
+        # Solve ODE forward from noise to sample action sequences
+        new_action_seq = self.sampling_ode_solver.sample(
+            x_0=noise_samples,
+            global_cond=global_cond,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
+        )
+        # Store sampled action sequences for logging
+        self.latest_action_candidates = new_action_seq
+
+        if self.prev_action_sequence is None:
+            # If no previous trajectory is stored, return placeholder uncertainties
+            uncertainty_scores = torch.full(
+                (self.num_action_seq_samples,),
+                float('-inf'),
+                dtype=self.dtype,
+                device=self.device
+            )
+        else:
+            # Compose full action sequences from stored prefix and newly sampled
+            # action sequences
+            composed_action_seq = self._compose_action_seqs(
+                prev_action_seq=self.prev_action_sequence,
+                new_action_seq=new_action_seq  
+            )
+
+            # Compute uncertainty based on selected metric
+            uncertainty_scores = self.score_sample(
+                scoring_metric=self.scoring_metric,
+                scorer_velocity_model=self.prev_laplace_model.unet,
+                scorer_global_cond=self.prev_laplace_global_cond,
+                ode_states=composed_action_seq.unsqueeze(0),
+                exact_divergence=self.exact_divergence,
+            )
+        
+        # Store uncertainty scores for logging
+        self.latest_uncertainties = uncertainty_scores
+
+        # Draw flow matching model from the Laplace posterior
+        laplace_flow_matching_model = draw_laplace_flow_matching_model(
+            laplace_posterior=self.laplace_posterior,
+            flow_matching_model=self.flow_matching_model,
+            generator=self.generator
+        )
+
+        # Store conditioning vector of the scoring model from the previous action sampling step
+        laplace_global_cond = laplace_flow_matching_model.prepare_global_conditioning(observation)  # (B, global_cond_dim)
+        self.prev_laplace_global_cond = self._prepare_conditioning(laplace_global_cond)
+        self.prev_laplace_model = laplace_flow_matching_model
+
+        return new_action_seq, uncertainty_scores
+
+
 class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
     """
     Estimates epistemic uncertainty of flow matching model by fitting a Laplace 
@@ -403,6 +562,15 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
 
 
 class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
+    """
+    Splices newly sampled action sequence tails onto the previously executed
+    prefix and evaluates the full trajectories with a flow matching scorer
+    from an independent training.
+
+    The class therefore mixes
+    - sequence composition from ComposedSequenceSampler and  
+    - cross ensemble epistemic scoring from CrossEnsembleSampler.
+    """
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
@@ -416,8 +584,9 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
 
         Args:
             cfg: Sampler-specific settings.
-            sampler_flow_matching_model: The flow matching network used to generate action sequences.
-            scorer_flow_matching_model: Model to score sampled actions.
+            sampler_flow_matching_model: The flow matching network used to generate action
+                sequences.
+            scorer_flow_matching_model: Model to score the composed action sequence.
         """
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
@@ -433,6 +602,11 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         self.exact_divergence = cfg.exact_divergence
         # Choice of scoring metric
         self.scoring_metric = cfg.scoring_metric
+        if self.scoring_metric not in ("likelihood", "terminal_vel_norm"):
+            raise ValueError(
+                f"Unsupported scoring_metric '{self.scoring_metric}'. "
+                "Expected one of: 'likelihood', 'terminal_vel_norm'."
+            )
         # Store the action sequence and conditioning vector from the previous action
         # sequence generation
         self.prev_action_sequence = None
@@ -444,8 +618,8 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         observation: Dict[str, Tensor]
     ) -> Tuple[Tensor, Tensor]:
         """
-        Samples candidate action sequences and evaluates uncertainty under separate
-        scorer flow matching model using one of several metrics.
+        Composes previous and current action sequence and evaluates the result
+        with an independent flow matching scorer.
 
         Args:
             observation: Info about the environment used to create the conditioning vector for
@@ -491,8 +665,8 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         # Store sampled action sequences for logging
         self.latest_action_candidates = new_action_seq
 
-        # If no previous trajectory is stored, return placeholder uncertainties
         if self.prev_action_sequence is None:
+            # If no previous trajectory is stored, return placeholder uncertainties
             uncertainty_scores = torch.full(
                 (self.num_action_seq_samples,),
                 float('-inf'),
@@ -500,7 +674,8 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
                 device=self.device
             )
         else:
-            # Compose full action sequences from stored prefix and newly sampled action sequences
+            # Compose full action sequences from stored prefix and newly sampled
+            # action sequences
             composed_action_seq = self._compose_action_seqs(
                 prev_action_seq=self.prev_action_sequence,
                 new_action_seq=new_action_seq  
