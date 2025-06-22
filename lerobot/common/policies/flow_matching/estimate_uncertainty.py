@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
+    ComposedCrossEnsembleSamplerConfig,
     ComposedSequenceSamplerConfig,
     CrossEnsembleSamplerConfig,
     CrossLaplaceSamplerConfig,
@@ -33,6 +34,7 @@ class FlowMatchingUncertaintySampler(ABC):
         flow_matching_cfg: FlowMatchingConfig,
         velocity_model: nn.Module,
         num_action_seq_samples: int,
+        scoring_metric: Optional[str] = None,
         generator: Optional[torch.Generator] = None,
     ):
         """
@@ -62,6 +64,16 @@ class FlowMatchingUncertaintySampler(ABC):
         # Store latest sampled action sequences and their uncertainty scores for logging
         self.latest_action_candidates = None
         self.latest_uncertainties = None
+        # Build time grid to score samples according to specified scoring metric
+        if scoring_metric is not None:
+            if scoring_metric in [
+                "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff"
+            ]:
+                self.time_grid = torch.tensor(
+                    [0.0, 0.92, 0.95, 0.98, 1.0], device=self.device, dtype=self.dtype
+                )
+            else:
+                self.time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
 
     def _prepare_conditioning(self, global_cond: Tensor) -> Tensor:
         """
@@ -76,6 +88,44 @@ class FlowMatchingUncertaintySampler(ABC):
             )
         # repeat batch‐dim
         return global_cond.repeat(self.num_action_seq_samples, 1)
+    
+    def _compose_action_seqs(
+        self,
+        prev_action_seq: Tensor,
+        new_action_seq: Tensor   
+    ) -> Tensor:
+        """
+        Stitch together a complete candidate action sequence by keeping the prefix that
+        has already been executed and appending the freshly sampled suffix.
+
+        Args:
+            prev_action_seq: Sequence collected during the previous sampling step.
+                Shape: (batch_size, horizon, action_dim).
+            new_action_seq: Newly generated action sequence.
+                Shape: (batch_size, horizon, action_dim).
+
+        Returns:
+            The composed action sequence. Shape: (batch_size, horizon, action_dim).
+        """
+        # Indices where to split and recompose the trajectory
+        prev_action_seq_end = (
+            self.flow_matching_cfg.n_obs_steps - 1 + self.flow_matching_cfg.n_action_steps
+        )
+        new_action_seqs_start = self.flow_matching_cfg.n_obs_steps - 1
+        new_action_seqs_end = new_action_seqs_start + (self.horizon - prev_action_seq_end)
+        
+        # Repeat previous prefix to match batch dimension
+        prev_action_sequence_duplicated = prev_action_seq.expand(
+            self.num_action_seq_samples, -1, -1
+        )
+        
+        # Compose full action sequences from stored prefix and newly sampled action sequences
+        composed_action_seq = torch.cat([
+            prev_action_sequence_duplicated[:, :prev_action_seq_end, :],
+            new_action_seq[:, new_action_seqs_start:new_action_seqs_end, :]
+        ], dim=1)
+
+        return composed_action_seq
 
     @abstractmethod
     def conditional_sample_with_uncertainty(
@@ -102,7 +152,6 @@ class FlowMatchingUncertaintySampler(ABC):
         scorer_velocity_model: nn.Module,
         scorer_global_cond: Tensor,
         ode_states: Tensor,
-        time_grid: Tensor,
         exact_divergence: bool,
         sampler_global_cond: Optional[Tensor] = None,
     ) -> Tensor:
@@ -125,9 +174,8 @@ class FlowMatchingUncertaintySampler(ABC):
                 scoring.
             scorer_global_cond: Conditioning vector used for the scorer model.
                 Shape: (batch_size, cond_dim).
-            ode_states: States produced by the forward ODE solver. Shape: (len(time_grid), batch_size,
+            ode_states: States produced by the forward ODE solver. Shape: (num_eval_points, batch_size,
             horizon, action_dim).
-            time_grid: Times of integration evaluation points matching 'ode_states'.
             sampler_global_cond: Conditioning vector that was used for the sampler's velocity model.
                 Needed for "intermediate_vel_diff".
             exact_divergence: Whether to compute exact divergence in the reverse-time ODE.
@@ -141,7 +189,7 @@ class FlowMatchingUncertaintySampler(ABC):
         if scoring_metric == "intermediate_vel_norm":
             # Evaluate velocity field at each intermediate time point under scorer
             per_step_vel_norms = []
-            for time, noisy_action_seq in zip(time_grid[1:-1], ode_states[1:-1]):
+            for time, noisy_action_seq in zip(self.time_grid[1:-1], ode_states[1:-1]):
                 time_batch = torch.full(
                     (ode_states[-1].shape[0],), time, device=self.device, dtype=self.dtype
                 )
@@ -160,7 +208,7 @@ class FlowMatchingUncertaintySampler(ABC):
             sampled_action_seq = ode_states[-1]
             # Evaluate velocity on the final sampled sequence at times close to t=1
             terminal_vel_norms = []
-            for time in time_grid[1:-1]:
+            for time in self.time_grid[1:-1]:
                 time_batch = torch.full(
                     (sampled_action_seq.shape[0],), time, device=self.device, dtype=self.dtype
                 )
@@ -178,7 +226,7 @@ class FlowMatchingUncertaintySampler(ABC):
             # Evaluate difference between sampler and scorer velocity field at each
             # intermediate time point
             per_step_vel_diff: List[Tensor] = []
-            for time, intermediate_state in zip(time_grid[1:-1], ode_states[1:-1]):
+            for time, intermediate_state in zip(self.time_grid[1:-1], ode_states[1:-1]):
                 time_batch = torch.full(
                     (ode_states[-1].shape[0],), time, device=self.device, dtype=self.dtype
                 )
@@ -256,6 +304,7 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
+            scoring_metric=cfg.scoring_metric,
             generator=generator,
         )
         # Whether to compute exact divergence for log-likelihood
@@ -321,14 +370,6 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             generator=self.generator,
         )
 
-        # Build time grid: include intermediate times if computing velocity norm
-        if self.scoring_metric in [
-            "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff"
-        ]:
-            time_grid = torch.tensor([0.0, 0.92, 0.95, 0.98, 1.0], device=self.device, dtype=self.dtype)
-        else:
-            time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
-
         # Solve ODE forward from noise to sample action sequences
         ode_states = self.sampling_ode_solver.sample(
             x_0=noise_samples,
@@ -337,7 +378,7 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
-            time_grid=time_grid,
+            time_grid=self.time_grid,
             return_intermediate_states=True,
         )
 
@@ -351,7 +392,6 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             scorer_velocity_model=laplace_flow_matching_model.unet,
             scorer_global_cond=laplace_global_cond,
             ode_states=ode_states,
-            time_grid=time_grid,
             sampler_global_cond=global_cond,
             exact_divergence=self.exact_divergence,
         )
@@ -360,6 +400,129 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
         self.latest_uncertainties = uncertainty_scores
 
         return sampled_action_seqs, uncertainty_scores
+
+
+class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
+    def __init__(
+        self,
+        flow_matching_cfg: FlowMatchingConfig,
+        cfg: ComposedCrossEnsembleSamplerConfig,
+        sampler_flow_matching_model: nn.Module,
+        scorer_flow_matching_model: nn.Module,
+        generator: Optional[torch.Generator] = None,
+    ):
+        """
+        Initializes the composed sequence cross ensemble sampler.
+
+        Args:
+            cfg: Sampler-specific settings.
+            sampler_flow_matching_model: The flow matching network used to generate action sequences.
+            scorer_flow_matching_model: Model to score sampled actions.
+        """
+        super().__init__(
+            flow_matching_cfg=flow_matching_cfg,
+            velocity_model=sampler_flow_matching_model.unet,
+            num_action_seq_samples=cfg.num_action_seq_samples,
+            scoring_metric=cfg.scoring_metric,
+            generator=generator,
+        )
+        # Save models for sampling and scoring
+        self.sampler_flow_matching_model = sampler_flow_matching_model
+        self.scorer_flow_matching_model = scorer_flow_matching_model
+        # Whether to compute exact divergence for log-likelihood
+        self.exact_divergence = cfg.exact_divergence
+        # Choice of scoring metric
+        self.scoring_metric = cfg.scoring_metric
+        # Store the action sequence and conditioning vector from the previous action
+        # sequence generation
+        self.prev_action_sequence = None
+        self.prev_scorer_global_cond = None
+        self.method_name = "composed_cross_ensemble"
+
+    def conditional_sample_with_uncertainty(
+        self,
+        observation: Dict[str, Tensor]
+    ) -> Tuple[Tensor, Tensor]:
+        """
+        Samples candidate action sequences and evaluates uncertainty under separate
+        scorer flow matching model using one of several metrics.
+
+        Args:
+            observation: Info about the environment used to create the conditioning vector for
+                the flow matching model. It has to contain the following items:
+                {
+                "observation.state": (B, n_obs_steps, state_dim)
+
+                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
+                    AND/OR
+                "observation.environment_state": (B, environment_dim)
+                }
+
+        Returns:
+            - sampled_action_seqs: Action sequences drawn from the sampler model.
+                Shape: [num_action_seq_samples, horizon, action_dim].
+            - uncertainty_scores: Uncertainty scores where a higher value means more
+                uncertain. Shape: [num_action_seq_samples,].       
+        """
+        # Encode image features and concatenate them all together along with the state vector
+        # to create the flow matching conditioning vectors
+        global_cond = self.sampler_flow_matching_model.prepare_global_conditioning(observation) # (B, global_cond_dim)
+        
+        # Adjust shape of conditioning vectors
+        global_cond = self._prepare_conditioning(global_cond)
+
+        # Sample noise priors
+        noise_samples = torch.randn(
+            size=(self.num_action_seq_samples, self.horizon, self.action_dim),
+            dtype=self.dtype,
+            device=self.device,
+            generator=self.generator,
+        )
+
+        # Solve ODE forward from noise to sample action sequences
+        new_action_seq = self.sampling_ode_solver.sample(
+            x_0=noise_samples,
+            global_cond=global_cond,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
+        )
+        # Store sampled action sequences for logging
+        self.latest_action_candidates = new_action_seq
+
+        # If no previous trajectory is stored, return placeholder uncertainties
+        if self.prev_action_sequence is None:
+            uncertainty_scores = torch.full(
+                (self.num_action_seq_samples,),
+                float('-inf'),
+                dtype=self.dtype,
+                device=self.device
+            )
+        else:
+            # Compose full action sequences from stored prefix and newly sampled action sequences
+            composed_action_seq = self._compose_action_seqs(
+                prev_action_seq=self.prev_action_sequence,
+                new_action_seq=new_action_seq  
+            )
+
+            # Compute uncertainty based on selected metric
+            uncertainty_scores = self.score_sample(
+                scoring_metric=self.scoring_metric,
+                scorer_velocity_model=self.scorer_flow_matching_model.unet,
+                scorer_global_cond=self.prev_scorer_global_cond,
+                ode_states=composed_action_seq.unsqueeze(0),
+                exact_divergence=self.exact_divergence,
+            )
+        
+        # Store computed uncertainty scores for logging
+        self.latest_uncertainties = uncertainty_scores
+
+        # Store conditioning vector of the scoring model from the previous action sampling step
+        scorer_global_cond = self.scorer_flow_matching_model.prepare_global_conditioning(observation)  # (B, global_cond_dim)
+        self.prev_scorer_global_cond = self._prepare_conditioning(scorer_global_cond)
+
+        return new_action_seq, uncertainty_scores
 
 
 class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
@@ -377,7 +540,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
         generator: Optional[torch.Generator] = None,
     ):
         """
-        Initializes the cross-likelihood ensemble sampler.
+        Initializes the cross ensemble sampler.
 
         Args:
             cfg: Sampler-specific settings.
@@ -388,6 +551,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             flow_matching_cfg=flow_matching_cfg,
             velocity_model=sampler_flow_matching_model.unet,
             num_action_seq_samples=cfg.num_action_seq_samples,
+            scoring_metric=cfg.scoring_metric,
             generator=generator,
         )
         # Save models for sampling and scoring
@@ -441,14 +605,6 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             generator=self.generator,
         )
 
-        # Build time grid: include intermediate times if computing velocity norm
-        if self.scoring_metric in [
-            "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff"
-        ]:
-            time_grid = torch.tensor([0.0, 0.92, 0.95, 0.98, 1.0], device=self.device, dtype=self.dtype)
-        else:
-            time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
-
         # Solve ODE forward from noise to sample action sequences
         ode_states = self.sampling_ode_solver.sample(
             x_0=noise_samples,
@@ -457,7 +613,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
-            time_grid=time_grid,
+            time_grid=self.time_grid,
             return_intermediate_states=True,
         )
 
@@ -471,7 +627,6 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             scorer_velocity_model=self.scorer_flow_matching_model.unet,
             scorer_global_cond=scorer_global_cond,
             ode_states=ode_states,
-            time_grid=time_grid,
             sampler_global_cond=global_cond,
             exact_divergence=self.exact_divergence,
         )
@@ -506,6 +661,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
+            scoring_metric=cfg.scoring_metric,
             generator=generator,
         )
         # Whether to compute exact divergence for log-likelihood
@@ -543,8 +699,6 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         """
         # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
-        if self.prev_global_cond is not None:
-            self.prev_global_cond = self._prepare_conditioning(self.prev_global_cond)
 
         # Sample noise priors
         noise_samples = torch.randn(
@@ -555,7 +709,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         )
 
         # Solve ODE forward from noise to sample action sequences
-        new_action_seqs = self.sampling_ode_solver.sample(
+        new_action_seq = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
             step_size=self.flow_matching_cfg.ode_step_size,
@@ -564,7 +718,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             rtol=self.flow_matching_cfg.rtol,
         )
         # Store sampled action sequences for logging
-        self.latest_action_candidates = new_action_seqs
+        self.latest_action_candidates = new_action_seq
 
         # If no previous trajectory is stored, return placeholder uncertainties
         if self.prev_action_sequence is None:
@@ -574,45 +728,29 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                 dtype=self.dtype,
                 device=self.device
             )
-            # Store computed uncertainty scores for logging
-            self.latest_uncertainties = uncertainty_scores
+        else:
+            # Compose full action sequences from stored prefix and newly sampled action sequences
+            composed_action_seq = self._compose_action_seqs(
+                prev_action_seq=self.prev_action_sequence,
+                new_action_seq=new_action_seq  
+            )
 
-            return new_action_seqs, uncertainty_scores
-
-        # Indices where to split and recompose the trajectory
-        prev_action_seq_end = self.flow_matching_cfg.n_obs_steps - 1 + self.flow_matching_cfg.n_action_steps
-        new_action_seqs_start = self.flow_matching_cfg.n_obs_steps - 1
-        new_action_seqs_end = new_action_seqs_start + (self.horizon - prev_action_seq_end)
-        
-        # Repeat previous prefix to match batch dimension
-        prev_action_sequence_duplicated = self.prev_action_sequence.expand(self.num_action_seq_samples, -1, -1)
-        
-        # Compose full action sequences from stored prefix and newly sampled action sequences
-        composed_action_seqs = torch.cat([
-            prev_action_sequence_duplicated[:, :prev_action_seq_end, :],
-            new_action_seqs[:, new_action_seqs_start:new_action_seqs_end, :]
-        ], dim=1)
-
-        # Build time grid: include intermediate times if computing velocity norm
-        if self.scoring_metric == "terminal_vel_norm":
-            time_grid = torch.tensor([0.0, 0.92, 0.95, 0.98, 1.0], device=self.device, dtype=self.dtype)
-        elif self.scoring_metric == "likelihood":
-            time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
-
-        # Compute uncertainty based on selected metric
-        uncertainty_scores = self.score_sample(
-            scoring_metric=self.scoring_metric,
-            scorer_velocity_model=self.velocity_model,
-            scorer_global_cond=self.prev_global_cond,
-            ode_states=composed_action_seqs.unsqueeze(0),
-            time_grid=time_grid,
-            exact_divergence=self.exact_divergence,
-        )
+            # Compute uncertainty based on selected metric
+            uncertainty_scores = self.score_sample(
+                scoring_metric=self.scoring_metric,
+                scorer_velocity_model=self.velocity_model,
+                scorer_global_cond=self.prev_global_cond,
+                ode_states=composed_action_seq.unsqueeze(0),
+                exact_divergence=self.exact_divergence,
+            )      
 
         # Store computed uncertainty scores for logging
         self.latest_uncertainties = uncertainty_scores
 
-        return new_action_seqs, uncertainty_scores
+        # Store conditioning vector of the scoring model from the previous action sampling step
+        self.prev_global_cond = global_cond
+
+        return new_action_seq, uncertainty_scores
     
 
 class LikelihoodSampler(FlowMatchingUncertaintySampler):

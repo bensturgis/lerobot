@@ -6,7 +6,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 20
-  uncert_est_methods: [composed_sequence]
+  uncert_est_methods: [composed_cross_ensemble]
   collapse_success_failure: True
   perturbation_config:
     enable: True
@@ -14,6 +14,10 @@ eval_uncert_est:
     patch_color: [0, 0, 0]
 
 uncertainty_sampler:
+  composed_cross_ensemble_sampler:
+    scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
+    scoring_metric: terminal_vel_norm
+  
   composed_sequence_sampler:
     scoring_metric: terminal_vel_norm
   

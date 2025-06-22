@@ -48,7 +48,8 @@ class EvalUncertaintyEstimationPipelineConfig:
 
     def validate(self):
         if (
-            "cross_ensemble" in self.eval_uncert_est.uncert_est_methods and
+            ("cross_ensemble" in self.eval_uncert_est.uncert_est_methods or
+             "composed_cross_ensemble" in self.eval_uncert_est.uncert_est_methods) and
             self.uncertainty_sampler.cross_ensemble_sampler.scorer_model_path is None
         ):
             raise ValueError(

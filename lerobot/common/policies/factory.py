@@ -128,6 +128,15 @@ def make_flow_matching_uncertainty_sampler(
     laplace_calib_loader: Optional[DataLoader] = None,
     laplace_path: Optional[Path] = None,
 ) -> FlowMatchingUncertaintySampler:
+    if uncertainty_sampler_cfg.type == "composed_cross_ensemble":
+        from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedCrossEnsembleSampler
+
+        return ComposedCrossEnsembleSampler(
+            flow_matching_cfg=flow_matching_cfg,
+            cfg=uncertainty_sampler_cfg.composed_cross_ensemble_sampler,
+            sampler_flow_matching_model=flow_matching_model,
+            scorer_flow_matching_model=scorer_flow_matching_model
+        )
     if uncertainty_sampler_cfg.type == "composed_sequence":
         from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedSequenceSampler
 
