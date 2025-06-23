@@ -125,7 +125,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         if (
             self.uncertainty_sampler is not None and
             self.uncertainty_sampler.method_name in [
-                "composed_cross_ensemble", "composed_cross_laplace" "composed_sequence"
+                "composed_cross_ensemble", "composed_cross_laplace", "composed_sequence"
             ]
         ):
             self.uncertainty_sampler.prev_action_sequence = None

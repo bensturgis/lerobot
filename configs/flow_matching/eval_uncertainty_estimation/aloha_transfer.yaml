@@ -7,7 +7,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 50
-  uncert_est_methods: [composed_cross_ensemble, composed_cross_laplace]
+  uncert_est_methods: [composed_cross_laplace]
   perturbation_config:
     enable: True
     static: False
