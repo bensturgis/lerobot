@@ -1,5 +1,7 @@
 import itertools
+import logging
 import torch
+import time
 import warnings
 
 from torch import nn, Tensor
@@ -30,6 +32,11 @@ class ODESolver():
     """
     def __init__(self, velocity_model: nn.Module):
         self.velocity_model = velocity_model
+
+        # for run-time averaging
+        # self._n_runs = 0
+        # self._sum_calls = 0
+        # self._sum_time = 0.0
 
     def sample(
         self,
@@ -63,7 +70,7 @@ class ODESolver():
                 for adaptive solvers.
             atol, rtol: Absolute/relative error tolerances for accepting an adaptive solver step.
                 Ignored for fixed-step solvers.
-            time_grid: Times at which ODE is evluated. Integration runs from time_grid[0] to time_grid[-1].
+            time_grid: Times at which ODE is evaluated. Integration runs from time_grid[0] to time_grid[-1].
                 Must start at 0.0 and end at 1.0 for flow matching sampling. 
             return_intermediate_states: If True then return intermediate evaluation points according to time_grid.
             return_intermediate_vels: If True then return velocities at intermediate evaluation points acoording
@@ -93,6 +100,12 @@ class ODESolver():
             rtol=rtol,
         )
 
+        # Setup for timing the ODE sampling
+        # call_counter = 0
+        # if x_0.is_cuda:
+        #     torch.cuda.synchronize(x_0.device)
+        # t_start = time.perf_counter()
+
         def velocity_field(t: Tensor, x: Tensor) -> Tensor:
             """
             Helper function defining the right-hand side of the flow matching ODE
@@ -106,6 +119,8 @@ class ODESolver():
             Returns:
                 Velocity v_t(φ_t(x), global_cond) with the same shape as `x`.
             """
+            # nonlocal call_counter
+            # call_counter += 1
             return self.velocity_model(x, t.expand(x.shape[0]), global_cond)
 
         with torch.set_grad_enabled(enable_grad):
@@ -117,6 +132,21 @@ class ODESolver():
                 method=method,
                 **ode_kwargs,
             )
+
+        # if x_0.is_cuda:
+        #     torch.cuda.synchronize(x_0.device)
+        # elapsed = time.perf_counter() - t_start
+
+        # self._n_runs += 1
+        # if self._n_runs > 1:
+        #     # skip first call entirely
+        #     self._sum_calls += call_counter
+        #     self._sum_time += elapsed
+        #     logging.info(
+        #         "Sampling: "
+        #         f"Average inference steps: {self._sum_calls/(self._n_runs - 1):.3f}, "
+        #         f"time: {self._sum_time/(self._n_runs - 1):.3f}s"
+        #     )
 
         outputs: List[Tensor] = []
 
