@@ -89,10 +89,10 @@ class FlowMatchingConfig(PreTrainedConfig):
     use_film_scale_modulation: bool = True
     
     # ODE solver.
-    ode_step_size: float | None = None
-    ode_solver_method: str = "dopri5"
-    atol: float = 1e-5
-    rtol: float = 1e-5
+    ode_step_size: float | None = 0.1
+    ode_solver_method: str = "euler"
+    atol: float | None = None
+    rtol: float | None = None
 
     # Loss computation
     do_mask_loss_for_padding: bool = False
