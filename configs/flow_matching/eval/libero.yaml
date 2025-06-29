@@ -1,0 +1,11 @@
+env:
+  type: libero
+  task: LiberoEnv-v0
+  benchmark: libero_90
+  task_id: 25
+
+eval:
+  batch_size: 1
+  n_episodes: 100
+
+# python lerobot/scripts/eval.py --config=configs/flow_matching/eval/libero.yaml --policy.path=outputs/train/flow_matching_libero_kitchen_scene4_black_bowl_on_cabinet/checkpoints/last/pretrained_model

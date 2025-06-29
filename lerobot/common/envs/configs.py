@@ -20,6 +20,7 @@ import draccus
 
 from lerobot.common.constants import ACTION, OBS_ENV, OBS_IMAGE, OBS_IMAGES, OBS_ROBOT
 from lerobot.configs.types import FeatureType, PolicyFeature
+from libero.libero import benchmark as lb_bench
 
 @dataclass
 class PerturbationConfig:
@@ -84,6 +85,59 @@ class AlohaEnv(EnvConfig):
             "max_episode_steps": self.episode_length,
         }
 
+@EnvConfig.register_subclass("libero")
+@dataclass
+class LiberoEnv(EnvConfig):
+    benchmark: str = "libero_90"
+    task: str = "LiberoEnv-v0"
+    task_id: int = 0
+    fps: int = 20
+    episode_length: int = 500
+    # Camera and simulation settings
+    robots: list[str] = field(default_factory=lambda: ["Panda"])
+    camera_heights: int = 256
+    camera_widths: int = 256
+    control_freq: int = 20
+    horizon: int = 1000
+    has_renderer: bool = False       # True if you want on-screen
+    render_camera: str  = "frontview"
+    camera_names: list[str] = field(default_factory=lambda: [
+        "frontview", "agentview", "robot0_eye_in_hand"
+    ])
+    features: dict[str, PolicyFeature] = field(
+        default_factory=lambda: {
+            "action": PolicyFeature(type=FeatureType.ACTION, shape=(7,)),
+            "agent_pos": PolicyFeature(type=FeatureType.STATE, shape=(8,)),
+            "pixels/image": PolicyFeature(type=FeatureType.VISUAL, shape=(256, 256, 3)),
+            "pixels/wrist_image": PolicyFeature(type=FeatureType.VISUAL, shape=(256, 256, 3))
+        }
+    )
+    features_map: dict[str, str] = field(
+        default_factory=lambda: {
+            "action": ACTION,
+            "agent_pos": OBS_ROBOT,
+            "pixels/image": f"{OBS_IMAGES}.image",
+            "pixels/wrist_image": f"{OBS_IMAGES}.wrist_image",
+        }
+    )
+
+    @property
+    def gym_kwargs(self) -> dict:
+        benchmark = lb_bench.get_benchmark_dict()[self.benchmark]()
+        bddl_path = benchmark.get_task_bddl_file_path(self.task_id)
+
+        return {
+            "bddl_file_name": bddl_path,
+            "robots": self.robots,
+            "render_camera": self.render_camera,
+            "has_renderer": self.has_renderer,
+            "camera_names": self.camera_names,
+            "control_freq": self.control_freq,
+            "camera_heights": self.camera_heights,
+            "camera_widths": self.camera_widths,
+            "horizon": self.horizon,
+            "max_episode_steps": self.episode_length,
+        }
 
 @EnvConfig.register_subclass("pusht")
 @dataclass

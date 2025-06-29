@@ -7,7 +7,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 50
-  uncert_est_methods: [composed_cross_laplace]
+  uncert_est_methods: [cross_ensemble, cross_laplace, composed_sequence]
   perturbation_config:
     enable: True
     static: False
@@ -26,12 +26,17 @@ uncertainty_sampler:
     batch_size: 1
     scoring_metric: likelihood
   cross_laplace_sampler:
-    laplace_scope: velocity_last
+    laplace_scope: both
     calib_fraction: 1.0
     batch_size: 1
+    scoring_metric: terminal_vel_norm
   cross_ensemble_sampler:
     scorer_model_path: outputs/train/flow_matching_aloha_transfer_02/checkpoints/055000/pretrained_model
+    scoring_metric: terminal_vel_norm
+  composed_sequence_sampler:
+    scoring_metric: terminal_vel_norm
 
-job_name: composed_cross_likelihood
+
+job_name: terminal_vel_norm_aloha
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

@@ -2,12 +2,12 @@ env:
   type: aloha
   task: AlohaTransferCube-v0
   perturbation:
-    enable: True
+    enable: False
     static: False
     allowed_area: [0.7, 0.5]
 
 eval:
   batch_size: 10
-  n_episodes: 10
+  n_episodes: 100
 
 # python lerobot/scripts/eval.py --config=configs/flow_matching/eval/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

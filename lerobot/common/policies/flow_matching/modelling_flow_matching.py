@@ -269,6 +269,7 @@ class FlowMatchingModel(nn.Module):
             global_cond_dim += self.config.env_state_feature.shape[0]
 
         self.unet = FlowMatchingConditionalUnet1d(config, global_cond_dim=global_cond_dim * config.n_obs_steps)
+        self.ode_solver = ODESolver(self.unet)
 
     def forward(
         self, interpolated_trajectory: Tensor, timestep: Tensor, observation: Dict[str, Tensor]
@@ -312,8 +313,7 @@ class FlowMatchingModel(nn.Module):
         )
 
         # Use the velocity field model and an ODE solver to predict a sample from the target distribution.
-        ode_solver = ODESolver(self.unet)
-        sample = ode_solver.sample(
+        sample = self.ode_solver.sample(
             x_0=noise_sample,
             global_cond=global_cond,
             step_size=self.config.ode_step_size,
