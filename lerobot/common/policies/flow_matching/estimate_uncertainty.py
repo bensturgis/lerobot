@@ -1,3 +1,4 @@
+import math
 import torch
 
 from abc import ABC, abstractmethod
@@ -5,7 +6,7 @@ from pathlib import Path
 from torch import nn, Tensor
 from torch.distributions import Independent, Normal
 from torch.utils.data import DataLoader
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
@@ -14,6 +15,7 @@ from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler imp
     ComposedSequenceSamplerConfig,
     CrossEnsembleSamplerConfig,
     CrossLaplaceSamplerConfig,
+    LikelihoodODESolverConfig,
     LikSamplerConfig,
     EpsilonBallSamplerConfig,
 )
@@ -21,7 +23,11 @@ from lerobot.common.policies.flow_matching.laplace_utils import (
     draw_laplace_flow_matching_model,
     get_laplace_posterior
 )
-from lerobot.common.policies.flow_matching.ode_solver import ODESolver
+from lerobot.common.policies.flow_matching.ode_solver import (
+    ADAPTIVE_SOLVERS,
+    FIXED_STEP_SOLVERS,
+    ODESolver
+)
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 
@@ -36,6 +42,7 @@ class FlowMatchingUncertaintySampler(ABC):
         velocity_model: nn.Module,
         num_action_seq_samples: int,
         scoring_metric: Optional[str] = None,
+        velocity_eval_times: Optional[Sequence[float]] = None,
         generator: Optional[torch.Generator] = None,
     ):
         """
@@ -65,16 +72,26 @@ class FlowMatchingUncertaintySampler(ABC):
         # Store latest sampled action sequences and their uncertainty scores for logging
         self.latest_action_candidates = None
         self.latest_uncertainties = None
-        # Build time grid to score samples according to specified scoring metric
-        if scoring_metric is not None:
-            if scoring_metric in [
-                "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff"
-            ]:
-                self.time_grid = torch.tensor(
-                    [0.0, 0.92, 0.95, 0.98, 1.0], device=self.device, dtype=self.dtype
+        # Build time grid for sampling according to ODE solver method and scoring metric
+        if flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
+            if scoring_metric in ["intermediate_vel_norm", "intermediate_vel_diff"]:
+                self.sampling_time_grid = self._make_sampling_time_grid(
+                    step_size=flow_matching_cfg.ode_step_size,
+                    extra_times=velocity_eval_times
                 )
             else:
-                self.time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
+                self.sampling_time_grid = self._make_sampling_time_grid(
+                    step_size=flow_matching_cfg.ode_step_size
+                )
+        elif flow_matching_cfg.ode_solver_method in ADAPTIVE_SOLVERS:
+            if scoring_metric in ["intermediate_vel_norm", "intermediate_vel_diff"]:
+                self.sampling_time_grid = torch.tensor(
+                    [0.0, *velocity_eval_times, 1.0], device=self.device, dtype=self.dtype
+                )
+            else:
+                self.sampling_time_grid = torch.tensor(
+                    [0.0, 1.0], device=self.device, dtype=self.dtype
+                )
 
     def _prepare_conditioning(self, global_cond: Tensor) -> Tensor:
         """
@@ -128,6 +145,102 @@ class FlowMatchingUncertaintySampler(ABC):
 
         return composed_action_seq
 
+    def _make_sampling_time_grid(
+        self,
+        step_size: float,
+        extra_times: Optional[Sequence[float]] = None,
+    ) -> Tensor:
+        """
+        Build a time grid from 0.0 to 1.0 with fixed step_size, plus extra points.
+
+        Args:
+            step_size: Spacing between regular points.
+            extra_times: Additional timepoints to include.
+
+        Returns:
+            A time grid of unique, sorted times in [0.0, 1.0.
+        """
+        if not (0 < step_size <= 1.0):
+            raise ValueError("step_size must be > 0 and <= 1.")
+
+        # How many full steps of step_size fit into [0,1]
+        n = math.floor(1.0 / step_size)
+
+        # Regular grid from 0.0 to (n * step_size)
+        time_grid = torch.linspace(
+            0.0,
+            n * step_size,
+            steps=n + 1,
+            device=self.device,
+            dtype=self.dtype,
+        )
+
+        # Ensure time grid ends with 1.0
+        if time_grid[-1] < 1.0:
+            time_grid = torch.cat([
+                time_grid, torch.tensor([1.0], device=self.device, dtype=self.dtype)
+            ])
+
+        # Merge step size time grid with extra times and sort
+        if extra_times:
+            time_grid = torch.cat([
+                time_grid, torch.tensor(extra_times, device=self.device, dtype=self.dtype).clamp(0.0, 1.0)
+            ])
+            time_grid, _ = torch.sort(torch.unique(time_grid))
+
+        if time_grid[0].item() != 0.0 or time_grid[-1].item() != 1.0:
+            raise RuntimeError("Sampling time grid must start at 0.0 and end at 1.0.")
+
+        return time_grid
+    
+    def _make_fixed_lik_estimation_time_grid(
+        self, direction: Literal["backward", "forward"]
+    ) -> Tensor:
+        """
+        Create a time grid for ODE-based likelihood estiamtion.
+
+        The time grid consists of a coarse segment of 10 points evenly spaced from 0.0
+        up to 0.9  and a fine segment of 10 points evenly spaced from 0.93 up to 1.0.  
+
+        When 'direction' is "forward" this returns an ascending tensor:
+            [0.00, 0.10, …, 0.90, 0.93, …, 1.00]
+
+        When 'direction' is "backward"` it returns the reverse:
+            [1.00, …, 0.93, 0.90, …, 0.00]
+
+        Args:
+            direction:  
+                - "forward": grid runs 0.0, …, 1.0  
+                - "backward": grid runs 1.0, …, 0.0  
+
+        Returns:
+            A 1D time grid consisting of a coarse and fine segment in the order requested.
+        """
+        coarse = torch.linspace(0.0, 0.9,  steps=10, dtype=torch.float32)
+        fine = torch.linspace(0.93, 1.0, steps=10, dtype=torch.float32)
+        grid = torch.cat([coarse, fine])
+
+        if direction == "forward":
+            return grid
+        else:
+            return grid.flip(0)
+
+    def _get_lik_estimation_time_grid(self) -> Tensor:
+        """
+        Build time grid to score samples according to ODE solver method and scoring metric.
+        """
+        if self.flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
+            direction = "forward" if self.method_name == "likelihood" else "backward"
+            lik_estimation_time_grid = self._make_fixed_lik_estimation_time_grid(direction)
+        else:
+            if self.method_name == "likelihood":
+                lik_estimation_time_grid = torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype)
+            else:
+                lik_estimation_time_grid = torch.tensor([1.0, 0.0], device=self.device, dtype=self.dtype)
+
+        return lik_estimation_time_grid
+
+
     @abstractmethod
     def conditional_sample_with_uncertainty(
         self,
@@ -153,7 +266,9 @@ class FlowMatchingUncertaintySampler(ABC):
         scorer_velocity_model: nn.Module,
         scorer_global_cond: Tensor,
         ode_states: Tensor,
+        velocity_eval_times: Sequence[float],
         exact_divergence: bool,
+        lik_ode_solver_cfg: LikelihoodODESolverConfig,
         sampler_global_cond: Optional[Tensor] = None,
     ) -> Tensor:
         """
@@ -176,7 +291,9 @@ class FlowMatchingUncertaintySampler(ABC):
             scorer_global_cond: Conditioning vector used for the scorer model.
                 Shape: (batch_size, cond_dim).
             ode_states: States produced by the forward ODE solver. Shape: (num_eval_points, batch_size,
-            horizon, action_dim).
+                horizon, action_dim).
+            velocity_eval_times: Times at which the velocity model is evaluated to compute velocity-based
+                scoring metrics.
             sampler_global_cond: Conditioning vector that was used for the sampler's velocity model.
                 Needed for "intermediate_vel_diff".
             exact_divergence: Whether to compute exact divergence in the reverse-time ODE.
@@ -186,11 +303,33 @@ class FlowMatchingUncertaintySampler(ABC):
             Uncertainty scores per sample where larger values indicate higher uncertainty.
             Shape: (batch_size,).
         """
+        if scoring_metric in [
+            "intermediate_vel_norm",  "terminal_vel_norm", "intermediate_vel_diff"
+        ]:
+            # Map each configured evaluation time to its index in the solver's time grid
+            matched_indices = []
+            for eval_time in torch.tensor(velocity_eval_times, device=self.device, dtype=self.dtype):
+                # Locate entries equal to eval_t (within tolerance)
+                time_mask = torch.isclose(self.sampling_time_grid, eval_time, atol=1e-5, rtol=0)
+                match_count = int(time_mask.sum().item())
+                if match_count == 0:
+                    raise ValueError(f"Evaluation time {eval_time.item()} not found in sampling_time_grid")
+                if match_count > 1:
+                    raise ValueError(f"Evaluation time {eval_time.item()} matched {match_count} entries in sampling_time_grid; expected exactly one.")
+                
+                # Grab index of match
+                index = time_mask.nonzero(as_tuple=True)[0].item()
+                matched_indices.append(index)
+
+            # Select only the ODE states and time points that correspond to those indices
+            selected_ode_states = ode_states[matched_indices]
+            selected_grid_times = self.sampling_time_grid[matched_indices]
+
         # Compute uncertainty based on selected metric
         if scoring_metric == "intermediate_vel_norm":
             # Evaluate velocity field at each intermediate time point under scorer
             per_step_vel_norms = []
-            for time, noisy_action_seq in zip(self.time_grid[1:-1], ode_states[1:-1]):
+            for time, noisy_action_seq in zip(selected_grid_times, selected_ode_states):
                 time_batch = torch.full(
                     (ode_states[-1].shape[0],), time, device=self.device, dtype=self.dtype
                 )
@@ -209,7 +348,7 @@ class FlowMatchingUncertaintySampler(ABC):
             sampled_action_seq = ode_states[-1]
             # Evaluate velocity on the final sampled sequence at times close to t=1
             terminal_vel_norms = []
-            for time in self.time_grid[1:-1]:
+            for time in selected_grid_times:
                 time_batch = torch.full(
                     (sampled_action_seq.shape[0],), time, device=self.device, dtype=self.dtype
                 )
@@ -227,7 +366,7 @@ class FlowMatchingUncertaintySampler(ABC):
             # Evaluate difference between sampler and scorer velocity field at each
             # intermediate time point
             per_step_vel_diff: List[Tensor] = []
-            for time, intermediate_state in zip(self.time_grid[1:-1], ode_states[1:-1]):
+            for time, intermediate_state in zip(selected_grid_times, selected_ode_states):
                 time_batch = torch.full(
                     (ode_states[-1].shape[0],), time, device=self.device, dtype=self.dtype
                 )
@@ -252,13 +391,12 @@ class FlowMatchingUncertaintySampler(ABC):
             scoring_ode_solver = ODESolver(scorer_velocity_model)
             _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
                 x_init=ode_states[-1],
-                time_grid=torch.tensor([1.0, 0.0], device=self.device, dtype=self.dtype),
+                time_grid=self.lik_estimation_time_grid,
                 global_cond=scorer_global_cond,
-                log_p_0 = self.gaussian_log_density,
-                method=self.flow_matching_cfg.ode_solver_method,
-                step_size=self.flow_matching_cfg.ode_step_size,
-                atol=self.flow_matching_cfg.atol,
-                rtol=self.flow_matching_cfg.rtol,
+                log_p_0=self.gaussian_log_density,
+                method=lik_ode_solver_cfg.method,
+                atol=lik_ode_solver_cfg.atol,
+                rtol=lik_ode_solver_cfg.rtol,
                 exact_divergence=exact_divergence,
                 generator=self.generator,
             )
@@ -310,8 +448,10 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
+            velocity_eval_times=cfg.velocity_eval_times,
             generator=generator,
         )
+        self.method_name = "composed_cross_laplace"
         # Whether to compute exact divergence for log-likelihood
         self.exact_divergence = cfg.exact_divergence
         # Choice of scoring metric
@@ -321,12 +461,17 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
                 f"Unsupported scoring_metric '{self.scoring_metric}'. "
                 "Expected one of: 'likelihood', 'terminal_vel_norm'."
             )
+        # Configuration of ODE solver to score samples via a likelihood estimate
+        self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
+        # Time grid used to estimate the log-likelihood
+        self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()
+        # Times at which to evaluate the velocity field for the velocity based scoring metrics
+        self.velocity_eval_times = cfg.velocity_eval_times
         # Store the action sequence, conditioning vector and laplace model
         # from the previous action sequence generation step
         self.prev_action_sequence = None
         self.prev_laplace_global_cond = None
         self.prev_laplace_model = None
-        self.method_name = "composed_cross_laplace"
         
         # Get the fitted Laplace posterior
         self.laplace_posterior = get_laplace_posterior(
@@ -380,8 +525,8 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
         new_action_seq = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
-            step_size=self.flow_matching_cfg.ode_step_size,
             method=self.flow_matching_cfg.ode_solver_method,
+            time_grid=self.sampling_time_grid,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
         )
@@ -410,7 +555,9 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
                 scorer_velocity_model=self.prev_laplace_model.unet,
                 scorer_global_cond=self.prev_laplace_global_cond,
                 ode_states=composed_action_seq.unsqueeze(0),
+                velocity_eval_times=self.velocity_eval_times,
                 exact_divergence=self.exact_divergence,
+                lik_ode_solver_cfg=self.lik_ode_solver_cfg,
             )
         
         # Store uncertainty scores for logging
@@ -464,13 +611,20 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
+            velocity_eval_times=cfg.velocity_eval_times,
             generator=generator,
         )
+        self.method_name = "cross_laplace"
         # Whether to compute exact divergence for log-likelihood
         self.exact_divergence = cfg.exact_divergence
         # Choice of scoring metric
         self.scoring_metric = cfg.scoring_metric
-        self.method_name = "cross_laplace"
+        # Configuration of ODE solver to score samples via a likelihood estimate
+        self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
+        # Time grid used to estimate the log-likelihood
+        self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()
+        # Times at which to evaluate the velocity field for the velocity based scoring metrics
+        self.velocity_eval_times = cfg.velocity_eval_times
         
         # Get the fitted Laplace posterior
         self.laplace_posterior = get_laplace_posterior(
@@ -533,11 +687,10 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
         ode_states = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
-            step_size=self.flow_matching_cfg.ode_step_size,
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
-            time_grid=self.time_grid,
+            time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
 
@@ -551,8 +704,10 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             scorer_velocity_model=laplace_flow_matching_model.unet,
             scorer_global_cond=laplace_global_cond,
             ode_states=ode_states,
+            velocity_eval_times=self.velocity_eval_times,
             sampler_global_cond=global_cond,
             exact_divergence=self.exact_divergence,
+            lik_ode_solver_cfg=self.lik_ode_solver_cfg
         )
         
         # Store uncertainty scores for logging
@@ -593,8 +748,10 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
             velocity_model=sampler_flow_matching_model.unet,
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
+            velocity_eval_times=cfg.velocity_eval_times,
             generator=generator,
         )
+        self.method_name = "composed_cross_ensemble"
         # Save models for sampling and scoring
         self.sampler_flow_matching_model = sampler_flow_matching_model
         self.scorer_flow_matching_model = scorer_flow_matching_model
@@ -607,11 +764,14 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
                 f"Unsupported scoring_metric '{self.scoring_metric}'. "
                 "Expected one of: 'likelihood', 'terminal_vel_norm'."
             )
+        # Configuration of ODE solver to score samples via a likelihood estimate
+        self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
+        # Time grid used to estimate the log-likelihood
+        self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()
         # Store the action sequence and conditioning vector from the previous action
         # sequence generation
         self.prev_action_sequence = None
         self.prev_scorer_global_cond = None
-        self.method_name = "composed_cross_ensemble"
 
     def conditional_sample_with_uncertainty(
         self,
@@ -657,10 +817,10 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         new_action_seq = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
-            step_size=self.flow_matching_cfg.ode_step_size,
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
+            time_grid=self.sampling_time_grid,
         )
         # Store sampled action sequences for logging
         self.latest_action_candidates = new_action_seq
@@ -688,6 +848,7 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
                 scorer_global_cond=self.prev_scorer_global_cond,
                 ode_states=composed_action_seq.unsqueeze(0),
                 exact_divergence=self.exact_divergence,
+                lik_ode_solver_cfg=self.lik_ode_solver_cfg,
             )
         
         # Store computed uncertainty scores for logging
@@ -727,16 +888,23 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             velocity_model=sampler_flow_matching_model.unet,
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
+            velocity_eval_times=cfg.velocity_eval_times,
             generator=generator,
         )
+        self.method_name = "cross_ensemble"
         # Save models for sampling and scoring
         self.sampler_flow_matching_model = sampler_flow_matching_model
         self.scorer_flow_matching_model = scorer_flow_matching_model
         # Whether to compute exact divergence for log-likelihood
         self.exact_divergence = cfg.exact_divergence
+        # Configuration of ODE solver to score samples via a likelihood estimate
+        self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
+        # Time grid used to estimate the log-likelihood
+        self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()
+        # Times at which to evaluate the velocity field for the velocity based scoring metrics
+        self.velocity_eval_times = cfg.velocity_eval_times
         # Choice of scoring metric
         self.scoring_metric = cfg.scoring_metric
-        self.method_name = "cross_ensemble"
         
     def conditional_sample_with_uncertainty(
         self,
@@ -784,11 +952,10 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
         ode_states = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
-            step_size=self.flow_matching_cfg.ode_step_size,
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
-            time_grid=self.time_grid,
+            time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
 
@@ -802,8 +969,10 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             scorer_velocity_model=self.scorer_flow_matching_model.unet,
             scorer_global_cond=scorer_global_cond,
             ode_states=ode_states,
+            velocity_eval_times=self.velocity_eval_times,
             sampler_global_cond=global_cond,
             exact_divergence=self.exact_divergence,
+            lik_ode_solver_cfg=self.lik_ode_solver_cfg,
         )
 
         # Store uncertainty scores for logging
@@ -837,10 +1006,13 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
+            velocity_eval_times=cfg.velocity_eval_times,
             generator=generator,
         )
+        self.method_name = "composed_sequence"
         # Whether to compute exact divergence for log-likelihood
         self.exact_divergence = cfg.exact_divergence
+        self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
         # Choice of scoring metric
         self.scoring_metric = cfg.scoring_metric
         if self.scoring_metric not in ("likelihood", "terminal_vel_norm"):
@@ -848,11 +1020,16 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                 f"Unsupported scoring_metric '{self.scoring_metric}'. "
                 "Expected one of: 'likelihood', 'terminal_vel_norm'."
             )
+        # Configuration of ODE solver to score samples via a likelihood estimate
+        self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
+        # Time grid used to estimate the log-likelihood
+        self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()
+        # Times at which to evaluate the velocity field for the velocity based scoring metrics
+        self.velocity_eval_times = cfg.velocity_eval_times
         # Store the action sequence and conditioning vector from the previous action
         # sequence generation
         self.prev_action_sequence = None
         self.prev_global_cond = None
-        self.method_name = "composed_sequence"
 
     def conditional_sample_with_uncertainty(
         self,
@@ -887,10 +1064,10 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         new_action_seq = self.sampling_ode_solver.sample(
             x_0=noise_samples,
             global_cond=global_cond,
-            step_size=self.flow_matching_cfg.ode_step_size,
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
+            time_grid=self.sampling_time_grid,
         )
         # Store sampled action sequences for logging
         self.latest_action_candidates = new_action_seq
@@ -916,7 +1093,9 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                 scorer_velocity_model=self.velocity_model,
                 scorer_global_cond=self.prev_global_cond,
                 ode_states=composed_action_seq.unsqueeze(0),
+                velocity_eval_times=self.velocity_eval_times,
                 exact_divergence=self.exact_divergence,
+                lik_ode_solver_cfg=self.lik_ode_solver_cfg,
             )      
 
         # Store computed uncertainty scores for logging
@@ -952,8 +1131,12 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             generator=generator,
         )
-        self.exact_divergence = cfg.exact_divergence
         self.method_name = "likelihood"
+        self.exact_divergence = cfg.exact_divergence
+        # Configuration of ODE solver to score samples via a likelihood estimate
+        self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
+        # Time grid used to estimate the log-likelihood
+        self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()
     
     def conditional_sample_with_uncertainty(
         self,
@@ -1006,11 +1189,10 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
         # action sequences x_1 and compute their log-likelihoods log(p_1(x_1)).
         action_seqs, log_probs = self.sampling_ode_solver.sample_with_log_likelihood(
             x_init=noise_sample,
-            time_grid=torch.tensor([0.0, 1.0], device=self.device, dtype=self.dtype),
+            time_grid=self.lik_estimation_time_grid,
             global_cond=global_cond,
-            log_p_0 = gaussian_log_density,
+            log_p_0=gaussian_log_density,
             method=self.flow_matching_cfg.ode_solver_method,
-            step_size=self.flow_matching_cfg.ode_step_size,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
             exact_divergence=self.exact_divergence,
@@ -1140,10 +1322,10 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
             reference_action_sequence = self.sampling_ode_solver.sample(
                 x_0=noise_sample.unsqueeze(0),
                 global_cond=global_cond,
-                step_size=self.flow_matching_cfg.ode_step_size,
                 method=self.flow_matching_cfg.ode_solver_method,
                 atol=self.flow_matching_cfg.atol,
                 rtol=self.flow_matching_cfg.rtol,
+                time_grid=self.sampling_time_grid,
             )
             action_sequences[action_seq_idx] = reference_action_sequence
 
@@ -1151,10 +1333,10 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
             perturbed_action_sequences = self.sampling_ode_solver.sample(
                 x_0=epsilon_samples,
                 global_cond=global_cond.repeat(self.num_eps_ball_samples, 1),
-                step_size=self.flow_matching_cfg.ode_step_size,
                 method=self.flow_matching_cfg.ode_solver_method,
                 atol=self.flow_matching_cfg.atol,
                 rtol=self.flow_matching_cfg.rtol,
+                time_grid=self.sampling_time_grid,
             )
 
             # Compute average distance in action space.

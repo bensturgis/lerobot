@@ -7,7 +7,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 50
-  uncert_est_methods: [cross_ensemble, cross_laplace, composed_sequence]
+  uncert_est_methods: [cross_ensemble]
   perturbation_config:
     enable: True
     static: False
@@ -32,7 +32,7 @@ uncertainty_sampler:
     scoring_metric: terminal_vel_norm
   cross_ensemble_sampler:
     scorer_model_path: outputs/train/flow_matching_aloha_transfer_02/checkpoints/055000/pretrained_model
-    scoring_metric: terminal_vel_norm
+    scoring_metric: likelihood
   composed_sequence_sampler:
     scoring_metric: terminal_vel_norm
 

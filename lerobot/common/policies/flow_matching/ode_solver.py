@@ -33,19 +33,14 @@ class ODESolver():
     def __init__(self, velocity_model: nn.Module):
         self.velocity_model = velocity_model
 
-        # for run-time averaging
-        # self._n_runs = 0
-        # self._sum_calls = 0
-        # self._sum_time = 0.0
-
     def sample(
         self,
         x_0: Tensor,
         global_cond: Tensor,
         method: str,
-        step_size: Optional[float],
         atol: float,
         rtol: float,
+        step_size: Optional[float] = None,
         time_grid: Tensor = torch.tensor([0.0, 1.0]),
         return_intermediate_states: bool = False,
         return_intermediate_vels: bool = False,
@@ -100,12 +95,6 @@ class ODESolver():
             rtol=rtol,
         )
 
-        # Setup for timing the ODE sampling
-        # call_counter = 0
-        # if x_0.is_cuda:
-        #     torch.cuda.synchronize(x_0.device)
-        # t_start = time.perf_counter()
-
         def velocity_field(t: Tensor, x: Tensor) -> Tensor:
             """
             Helper function defining the right-hand side of the flow matching ODE
@@ -119,8 +108,6 @@ class ODESolver():
             Returns:
                 Velocity v_t(φ_t(x), global_cond) with the same shape as `x`.
             """
-            # nonlocal call_counter
-            # call_counter += 1
             return self.velocity_model(x, t.expand(x.shape[0]), global_cond)
 
         with torch.set_grad_enabled(enable_grad):
@@ -132,21 +119,6 @@ class ODESolver():
                 method=method,
                 **ode_kwargs,
             )
-
-        # if x_0.is_cuda:
-        #     torch.cuda.synchronize(x_0.device)
-        # elapsed = time.perf_counter() - t_start
-
-        # self._n_runs += 1
-        # if self._n_runs > 1:
-        #     # skip first call entirely
-        #     self._sum_calls += call_counter
-        #     self._sum_time += elapsed
-        #     logging.info(
-        #         "Sampling: "
-        #         f"Average inference steps: {self._sum_calls/(self._n_runs - 1):.3f}, "
-        #         f"time: {self._sum_time/(self._n_runs - 1):.3f}s"
-        #     )
 
         outputs: List[Tensor] = []
 
@@ -171,9 +143,9 @@ class ODESolver():
         global_cond: Tensor,
         log_p_0: Callable[[Tensor], Tensor],
         method: str,
-        step_size: Optional[float],
         atol: Optional[float],
         rtol: Optional[float],
+        step_size: Optional[float] = None,
         return_intermediate_states: bool = False,
         exact_divergence: bool = True,
         num_hutchinson_samples: Optional[int] = 3,
@@ -336,7 +308,7 @@ class ODESolver():
                         )
 
                     div *= (1.0 / num_hutchinson_samples)
-
+            # logging.info(f"Time: {t}, Divergence: {div}.")
             return v_t, div
 
         # Set initial state of the reverse-time combined ODE for initial noise sample
@@ -346,6 +318,7 @@ class ODESolver():
         # Solve the combined flow matching ODE to obtain a terminal state (x_1 for
         # forward direction and x_0 for reverse direction) and log-probability difference
         # of log(p_1(x_1)) and log(p_0(x_0))
+        # logging.info("---------------EULER------------------")
         trajectory, log_prob_diff = odeint(
             combined_dynamics,
             initial_state,
@@ -353,6 +326,18 @@ class ODESolver():
             method=method,
             **ode_kwargs,
         )
+        # logging.info(f"log_prob_diff: {log_prob_diff[-1]}")
+
+        # logging.info("---------------DOPRI------------------")
+        # dopri_trajectory, dopri_log_prob_diff = odeint(
+        #     combined_dynamics,
+        #     initial_state,
+        #     time_grid,
+        #     method="dopri5",
+        #     atol=1e-5,
+        #     rtol=1e-5,
+        # )
+        # logging.info(f"log_prob_diff: {dopri_log_prob_diff[-1]}")
 
         if time_grid[-1] == 0:
             # Extract initial noise sample from reverse flow trajectory
@@ -398,15 +383,18 @@ class ODESolver():
         # Check ODE solver parameters
         if method in FIXED_STEP_SOLVERS:
             # Positive step‑size required
-            if step_size is None or step_size <= 0.0:
-                raise ValueError(
-                    f"`step_size` must be a positive float for fixed-step solver '{method}'."
-                )
             if atol is not None or rtol is not None:
                 warnings.warn(
                     f"`atol`/`rtol` is ignored by fixed-step solver '{method}'."
                 )
-            return {"options": {"step_size": float(step_size)}}
+            if step_size is not None:
+                if step_size <= 0.0:
+                    raise ValueError(
+                        f"`step_size` must be a positive float for fixed-step solver '{method}'."
+                    )
+                return {"options": {"step_size": float(step_size)}}
+            else:
+                return {}    
 
         if method in ADAPTIVE_SOLVERS:
             if atol is None or rtol is None or atol <= 0.0 or rtol <= 0.0:
