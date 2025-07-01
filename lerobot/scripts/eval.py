@@ -65,6 +65,7 @@ from termcolor import colored
 from torch import Tensor, nn
 from tqdm import trange
 
+from lerobot.common.envs import EnvConfig
 from lerobot.common.envs.factory import make_env
 from lerobot.common.envs.utils import add_envs_task, check_env_attributes_and_types, preprocess_observation
 from lerobot.common.policies.factory import make_policy
@@ -219,9 +220,11 @@ def rollout(
 
 
 def eval_policy(
-    env: gym.vector.VectorEnv,
+    env_cfg: EnvConfig,
     policy: PreTrainedPolicy,
     n_episodes: int,
+    batch_size: int,
+    use_async_envs: bool,
     max_episodes_rendered: int = 0,
     videos_dir: Path | None = None,
     live_vis: bool = False,
@@ -230,9 +233,11 @@ def eval_policy(
 ) -> dict:
     """
     Args:
-        env: The batch of environments.
+        env_cfg: Configuration object for constructing the Gym environments.
         policy: The policy.
         n_episodes: The number of episodes to evaluate.
+        batch_size: Number of parallel environments to step in each batch.
+        use_async_envs: If True, use AsyncVectorEnv; otherwise use SyncVectorEnv.
         max_episodes_rendered: Maximum number of episodes to render into videos.
         videos_dir: Where to save rendered videos.
         live_vis: If True, visualize the first environment live during evaluation.
@@ -255,8 +260,8 @@ def eval_policy(
     policy.eval()
 
     # Determine how many batched rollouts we need to get n_episodes. Note that if n_episodes is not evenly
-    # divisible by env.num_envs we end up discarding some data in the last batch.
-    n_batches = n_episodes // env.num_envs + int((n_episodes % env.num_envs) != 0)
+    # divisible by batch_size we end up discarding some data in the last batch.
+    n_batches = n_episodes // batch_size + int((n_episodes % batch_size) != 0)
 
     # Keep track of some metrics.
     sum_rewards = []
@@ -296,6 +301,13 @@ def eval_policy(
     # we dont want progress bar when we use slurm, since it clutters the logs
     progbar = trange(n_batches, desc="Stepping through eval batches", disable=inside_slurm())
     for batch_ix in progbar:
+        logging.info("Making environment.")
+        env = make_env(
+            env_cfg,
+            n_envs=batch_size,
+            use_async_envs=use_async_envs,
+        )
+        
         # Cache frames for rendering videos. Each item will be (b, h, w, c), and the list indexes the rollout
         # step.
         if max_episodes_rendered > 0:
@@ -381,6 +393,8 @@ def eval_policy(
         progbar.set_postfix(
             {"running_success_rate": f"{np.mean(all_successes[:n_episodes]).item() * 100:.1f}%"}
         )
+
+        env.close()
 
     # Close the live visualization
     if live_vis:
@@ -488,13 +502,6 @@ def eval_main(cfg: EvalPipelineConfig):
 
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
-    logging.info("Making environment.")
-    env = make_env(
-        cfg.env,
-        n_envs=cfg.eval.batch_size,
-        use_async_envs=cfg.eval.use_async_envs,
-    )
-
     logging.info("Making policy.")
 
     policy = make_policy(
@@ -505,10 +512,12 @@ def eval_main(cfg: EvalPipelineConfig):
 
     with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():
         info = eval_policy(
-            env,
+            cfg.env,
             policy,
             cfg.eval.n_episodes,
-            max_episodes_rendered=10,
+            cfg.eval.batch_size,
+            cfg.eval.use_async_envs,
+            max_episodes_rendered=100,
             videos_dir=Path(cfg.output_dir) / "videos",
             live_vis=cfg.show,
             start_seed=cfg.seed,
@@ -518,8 +527,6 @@ def eval_main(cfg: EvalPipelineConfig):
     # Save info
     with open(Path(cfg.output_dir) / "eval_info.json", "w") as f:
         json.dump(info, f, indent=2)
-
-    env.close()
 
     logging.info("End of eval")
 

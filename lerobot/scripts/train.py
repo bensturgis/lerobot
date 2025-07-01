@@ -174,14 +174,6 @@ def train(cfg: TrainPipelineConfig):
         val_dataset = None
         train_ep_ids = None
 
-    # Create environment used for evaluating checkpoints during training on simulation data.
-    # On real-world data, no need to create an environment as evaluations are done outside train.py,
-    # using the eval.py instead, with gym_dora environment and dora-rs.
-    eval_env = None
-    if cfg.eval_freq > 0 and cfg.env is not None:
-        logging.info("Creating env")
-        eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
-
     logging.info("Creating policy")
     policy = make_policy(
         cfg=cfg.policy,
@@ -323,7 +315,7 @@ def train(cfg: TrainPipelineConfig):
             if wandb_logger:
                 wandb_logger.log_policy(checkpoint_dir)
 
-        if cfg.env and is_eval_step:
+        if cfg.env and is_eval_step:            
             step_id = get_step_identifier(step, cfg.steps)
             logging.info(f"Eval policy at step {step}")
             with (
@@ -331,9 +323,11 @@ def train(cfg: TrainPipelineConfig):
                 torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext(),
             ):
                 eval_info = eval_policy(
-                    eval_env,
+                    cfg.env,
                     policy,
                     cfg.eval.n_episodes,
+                    cfg.eval.batch_size,
+                    cfg.eval.use_async_envs,
                     videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
                     max_episodes_rendered=4,
                     start_seed=cfg.seed,

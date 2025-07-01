@@ -308,7 +308,6 @@ class ODESolver():
                         )
 
                     div *= (1.0 / num_hutchinson_samples)
-            # logging.info(f"Time: {t}, Divergence: {div}.")
             return v_t, div
 
         # Set initial state of the reverse-time combined ODE for initial noise sample
@@ -318,7 +317,6 @@ class ODESolver():
         # Solve the combined flow matching ODE to obtain a terminal state (x_1 for
         # forward direction and x_0 for reverse direction) and log-probability difference
         # of log(p_1(x_1)) and log(p_0(x_0))
-        # logging.info("---------------EULER------------------")
         trajectory, log_prob_diff = odeint(
             combined_dynamics,
             initial_state,
@@ -326,18 +324,6 @@ class ODESolver():
             method=method,
             **ode_kwargs,
         )
-        # logging.info(f"log_prob_diff: {log_prob_diff[-1]}")
-
-        # logging.info("---------------DOPRI------------------")
-        # dopri_trajectory, dopri_log_prob_diff = odeint(
-        #     combined_dynamics,
-        #     initial_state,
-        #     time_grid,
-        #     method="dopri5",
-        #     atol=1e-5,
-        #     rtol=1e-5,
-        # )
-        # logging.info(f"log_prob_diff: {dopri_log_prob_diff[-1]}")
 
         if time_grid[-1] == 0:
             # Extract initial noise sample from reverse flow trajectory

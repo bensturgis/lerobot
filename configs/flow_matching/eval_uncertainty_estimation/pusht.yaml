@@ -6,7 +6,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 20
-  uncert_est_methods: [likelihood]
+  uncert_est_methods: [composed_sequence, cross_ensemble, cross_laplace]
   collapse_success_failure: True
   perturbation_config:
     enable: True
@@ -25,13 +25,13 @@ uncertainty_sampler:
     scoring_metric: terminal_vel_norm
   
   composed_sequence_sampler:
-    scoring_metric: terminal_vel_norm
+    scoring_metric: likelihood
   
   cross_laplace_sampler:
     laplace_scope: both
     calib_fraction: 1.0
     batch_size: 10
-    scoring_metric: intermediate_vel_diff
+    scoring_metric: likelihood
 
   cross_ensemble_sampler:
     scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model

@@ -13,8 +13,9 @@
 # limitations under the License.
 
 import abc
+import random
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import List, Tuple
 
 import draccus
 
@@ -90,7 +91,7 @@ class AlohaEnv(EnvConfig):
 class LiberoEnv(EnvConfig):
     benchmark: str = "libero_90"
     task: str = "LiberoEnv-v0"
-    task_id: int = 0
+    task_ids: List[int] = field(default_factory=list)
     fps: int = 20
     episode_length: int = 500
     # Camera and simulation settings
@@ -124,7 +125,19 @@ class LiberoEnv(EnvConfig):
     @property
     def gym_kwargs(self) -> dict:
         benchmark = lb_bench.get_benchmark_dict()[self.benchmark]()
-        bddl_path = benchmark.get_task_bddl_file_path(self.task_id)
+        
+        # Choose an a task ID
+        all_task_ids = list(range(benchmark.get_num_tasks()))
+        if not self.task_ids:
+            self.task_ids = all_task_ids
+        chosen_task_id = random.choice(self.task_ids)
+
+        if chosen_task_id not in all_task_ids:
+            raise ValueError(
+                f"Task ID {chosen_task_id} is invalid for benchmark '{self.benchmark}' "
+                f"(valid range 0 … {benchmark.get_num_tasks()-1})."
+            )
+        bddl_path = benchmark.get_task_bddl_file_path(chosen_task_id)
 
         return {
             "bddl_file_name": bddl_path,

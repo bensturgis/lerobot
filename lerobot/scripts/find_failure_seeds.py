@@ -174,7 +174,7 @@ def rollout(
 
     return ret
 
-
+# TODO: Make it compatible with Libero environments
 def eval_policy(
     env: gym.vector.VectorEnv,
     policy: PreTrainedPolicy,
