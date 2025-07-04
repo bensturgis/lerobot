@@ -9,6 +9,7 @@ import torch
 from abc import ABC, abstractmethod
 from dm_control import mujoco
 from matplotlib.collections import LineCollection
+from matplotlib.colors import Normalize
 from pathlib import Path
 from torch import nn, Tensor
 from typing import List, Optional, Sequence, Tuple, Union
@@ -101,7 +102,7 @@ class FlowMatchingVisualizer(ABC):
         if self.vis_type == "flows":
             filename = f"flows_action_{action_step+1:02d}.png"
         elif self.vis_type == "vector_field":
-            filename = f"vector_field_{int(time * 100):02d}.png"
+            filename = f"vector_field_{int(time * 100):03d}.png"
         elif self.vis_type == "action_seq":
             action_seq_idx = 1
             while (self.run_dir / f"action_seqs_{action_seq_idx:04d}.png").exists():
@@ -967,7 +968,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     limits=(min_lim, max_lim),
                     action_step=action_step,
                     time=time,
-                    velocity_norm=max_velocity_norm
+                    max_velocity_norm=max_velocity_norm
                 )
             else:
                 fig = self._create_vector_field_plot_3d(
@@ -980,7 +981,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     limits=(min_lim, max_lim),
                     action_step=action_step,
                     time=time,
-                    velocity_norm=max_velocity_norm
+                    max_velocity_norm=max_velocity_norm
                 )
 
             if self.show:
@@ -1004,7 +1005,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         limits: Tuple[float, float],
         action_step: int,
         time: float,
-        velocity_norm: float,
+        max_velocity_norm: float,
     ) -> plt.Figure:
         """
         Draw a 3D quiver plot for the vector field of a three action dimensions in a single
@@ -1017,8 +1018,6 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         norms = np.sqrt(
             x_velocities**2 + y_velocities**2 + z_velocities**2
         )
-        cmap = cm.get_cmap('viridis')
-        colors = cmap(norms / velocity_norm)
 
         # Create quiver plot
         fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': '3d'})
@@ -1026,11 +1025,13 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         quiv = ax.quiver(
             x_positions, y_positions, z_positions,
             x_velocities, y_velocities, z_velocities,
+            array=norms,
+            cmap='viridis',
+            norm=Normalize(vmin=0.0, vmax=max_velocity_norm),
             length=0.025,
             normalize=False,
             linewidth=0.7,
             arrow_length_ratio=0.2,
-            colors=colors
         )
 
         # Set axis limits
@@ -1077,7 +1078,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         limits: Tuple[float, float],
         action_step: int,
         time: float,
-        velocity_norm: float,
+        max_velocity_norm: float,
     ) -> plt.Figure:
         """
         Draw a 2D quiver plot for the vector field of a two action dimensions in a single
@@ -1090,8 +1091,6 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         norms = np.sqrt(
             x_velocities**2 + y_velocities**2
         )
-        cmap = cm.get_cmap('viridis')
-        colors = cmap(norms / velocity_norm)
         
         # Create quiver plot
         fig, ax = plt.subplots(figsize=(10, 10))
@@ -1099,9 +1098,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         quiv = ax.quiver(
             x_positions, y_positions,
             x_velocities, y_velocities,
+            norms, cmap='viridis',
+            norm=Normalize(vmin=0.0, vmax=max_velocity_norm),
             angles='xy', scale=40,
             scale_units='xy', width=0.004,
-            color=colors
         )
 
         # Set axis limits
