@@ -8,7 +8,7 @@ policy:
   device: cuda
 
 vis:
-  vis_types: [vector_field, flows]
+  vis_types: [action_seq]
   action_dims: [0, 1, 2]
   action_dim_names: ["ee_pos_x", "ee_pos_y", "ee_pos_z",
                      "ee_rot_x", "ee_rot_y", "ee_rot_z",

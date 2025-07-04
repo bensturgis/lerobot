@@ -8,8 +8,8 @@ import torch
 
 from abc import ABC, abstractmethod
 from dm_control import mujoco
+from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
-from matplotlib.colors import Normalize
 from pathlib import Path
 from torch import nn, Tensor
 from typing import List, Optional, Sequence, Tuple, Union
@@ -250,6 +250,8 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         elif env.spec.namespace == "gym_pusht":
             frame = env.render()
             fig = self._create_pusht_action_seq_image(frame=frame, actions=actions.cpu())
+        elif env.spec.namespace == "gym_libero":
+            fig = self._create_libero_action_seq_image(env=env, actions=actions.cpu())
         else:
             raise ValueError(
                 f"ActionSeqVisualizer does not support environment with namespace '{env.spec.namespace}'."
@@ -267,22 +269,22 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         model: mujoco.MjModel,
         data: mujoco.MjData,
         point_world: np.ndarray,
-        camera_name: str = "top",
-        img_width: int = 640,
-        img_height: int = 480
+        camera_name: str,
+        img_width: int,
+        img_height: int
     ):
         """
         Project a single 3-D point from the world frame into pixel coordinates.
         """
         # Get the camera extrinsics
         cam_id = mujoco.mj_name2id(
-            model.ptr, mujoco.mjtObj.mjOBJ_CAMERA, camera_name.encode()
+            model._model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
         )
         cam_pos = data.cam_xpos[cam_id]
         cam_mat = data.cam_xmat[cam_id].reshape(3, 3)
 
         # Convert point from world to camera coordinates
-        p_cam = cam_mat @ (point_world - cam_pos)
+        p_cam = cam_mat.T @ (point_world - cam_pos)
 
         # Everything in front of the camera has negative z in MuJoCo
         if p_cam[2] >= 0:
@@ -301,6 +303,60 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         v = (-p_cam[1] / -p_cam[2] ) * f + cy
 
         return u, v
+    
+    def _draw_waypoints(self, env: gym.Env, waypoints: List[np.ndarray], ax: Axes):
+        # Prepare a colormap over the trajectory length
+        norm = plt.Normalize(0, self.config.horizon - 1)
+        cmap = plt.get_cmap("turbo")
+        
+        pixel_points: List[Tuple[float, float]] = []
+        for point_3d in waypoints:
+            try:
+                u_px, v_px = self._project_world_point_to_pixels(
+                    env.unwrapped.sim.model,
+                    env.unwrapped.sim.data,
+                    point_3d,
+                    camera_name="frontview",
+                    img_width=256,
+                    img_height=256
+                )
+                pixel_points.append((u_px, v_px))
+            except ValueError:
+                # If a waypoint is behind the camera, skip plotting it
+                continue
+
+        if len(pixel_points) < 2:
+            # Cannot form a line segment with fewer than 2 points
+            return
+        
+        # Build line segments between consecutive projected points
+        segments = [
+            [pixel_points[i], pixel_points[i + 1]]
+            for i in range(len(pixel_points) - 1)
+        ]
+        line_collection = LineCollection(
+            segments,
+            cmap=cmap,
+            norm=norm,
+            linewidths=2,
+            linestyles="solid",
+        )
+
+        # Color each segment by its timestep index
+        line_collection.set_array(np.arange(self.config.horizon - 1))
+        ax.add_collection(line_collection)
+
+        # Mark the final waypoint with a filled circle
+        final_u_px, final_v_px = pixel_points[-1]
+        ax.scatter(
+            final_u_px,
+            final_v_px,
+            c=[cmap(1.0)],
+            s=30,
+            edgecolors="k",
+            linewidths=0.5,
+            zorder=3,
+        )
 
     def _create_aloha_action_seq_image(self, env: gym.Env, actions: Tensor) -> plt.Figure:
         """
@@ -361,63 +417,71 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         ax.set_aspect("equal")
         ax.axis("off")
 
-        # Prepare a colormap over the trajectory length
-        norm = plt.Normalize(0, self.config.horizon - 1)
-        cmap = plt.get_cmap("turbo")
-
-        def _draw_waypoints(waypoints: List[np.ndarray]):
-            pixel_points: list[Tuple[float, float]] = []
-            for point_3d in waypoints:
-                try:
-                    u_px, v_px = self._project_world_point_to_pixels(
-                        physics.model,
-                        physics.data,
-                        point_3d,
-                        camera_name="top",
-                        img_width=640,
-                        img_height=480
-                    )
-                    pixel_points.append((u_px, v_px))
-                except ValueError:
-                    # If a waypoint is behind the camera, skip plotting it
-                    continue
-
-            if len(pixel_points) < 2:
-                # Cannot form a line segment with fewer than 2 points
-                return
-            
-            # Build line segments between consecutive projected points
-            segments = [
-                [pixel_points[i], pixel_points[i + 1]]
-                for i in range(len(pixel_points) - 1)
-            ]
-            line_collection = LineCollection(
-                segments,
-                cmap=cmap,
-                norm=norm,
-                linewidths=2,
-                linestyles="solid",
-            )
-            # Color each segment by its timestep index
-            line_collection.set_array(np.arange(self.config.horizon - 1))
-            ax.add_collection(line_collection)
-
-            # Mark the final waypoint with a filled circle
-            final_u_px, final_v_px = pixel_points[-1]
-            ax.scatter(
-                final_u_px,
-                final_v_px,
-                c=[cmap(1.0)],
-                s=30,
-                edgecolors="k",
-                linewidths=0.5,
-                zorder=3,
-            )
-
         # For each sequence, project 3D waypoints to pixel coords and draw
         for waypoints_left, waypoints_right in zip(all_waypoints_left, all_waypoints_right):
-            _draw_waypoints(waypoints_left)
-            _draw_waypoints(waypoints_right)           
+            self._draw_waypoints(env=env, waypoints=waypoints_left, ax=ax)
+            self._draw_waypoints(env=env, waypoints=waypoints_right, ax=ax)           
+
+        plt.tight_layout(pad=0)
+
+        if was_interactive:
+            plt.ion()
+
+        return fig
+
+    def _create_libero_action_seq_image(self, env: gym.Env, actions: Tensor) -> plt.Figure:
+        """
+        Render action trajectories on top of a LIBERO Gym environment frame.
+        """
+        was_interactive = plt.isinteractive()
+        plt.ioff()
+
+        # Save the initial MuJoCo state (qpos + qvel) so we can restore later
+        initial_state = env.unwrapped.get_sim_state()
+
+        # Render the current camera image (RGB), using the "top" camera
+        frame = env.unwrapped.render(camera_name="frontview")
+
+        # Prepare to store 3D waypoints for each action sequence
+        all_waypoints: List[List[np.ndarray]] = []
+
+        for seq_idx in range(actions.shape[0]):
+            # Restore the saved state before simulating this sequence
+            env.reset()
+            env.unwrapped.set_state(initial_state)
+            env.unwrapped.sim.forward()
+            env.unwrapped.check_success()
+            env.unwrapped.post_process()
+            env.unwrapped.update_observables(force=True)
+            
+            seq_waypoints: List[np.ndarray] = []
+
+            action_seq = actions[seq_idx].cpu().numpy()
+            for action_step in range(self.config.horizon):
+                obs, _, _, _, _ = env.unwrapped.step(action_seq[action_step])
+                end_effector_pos = obs["agent_pos"][:3]
+                seq_waypoints.append(end_effector_pos)
+
+            all_waypoints.append(seq_waypoints)
+
+        env.reset()
+        env.unwrapped.set_state(initial_state)
+        env.unwrapped.sim.forward()
+        env.unwrapped.check_success()
+        env.unwrapped.post_process()
+        env.unwrapped.update_observables(force=True)
+
+        # Create a Matplotlib figure and axis with the same extents as the image
+        fig, ax = plt.subplots(figsize=(2.56, 2.56), dpi=100)
+        ax.imshow(frame)
+        ax.set_xlim(0, 256)
+        ax.set_ylim(256, 0)  # invert y-axis so that v increases downward
+        ax.set_aspect("equal")
+        ax.axis("off")
+
+        # For each sequence, project 3D waypoints to pixel coords and draw
+        for waypoints in all_waypoints:
+            self._draw_waypoints(env=env, waypoints=waypoints, ax=ax)
 
         plt.tight_layout(pad=0)
 
@@ -674,7 +738,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         u, v, w = [velocity_vectors[..., i].flatten().cpu() for i in range(3)]
         
         # Color arrows by time
-        times_grid = time_grid.repeat(num_paths).cpu().numpy()
+        times_grid = time_grid[:-1].repeat(num_paths).cpu().numpy()
         times_min, times_max = times_grid.min(), times_grid.max()
         time_norm = (times_grid - times_min) / (times_max - times_min)
         cmap = cm.get_cmap('viridis')
@@ -1027,7 +1091,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_velocities, y_velocities, z_velocities,
             array=norms,
             cmap='viridis',
-            norm=Normalize(vmin=0.0, vmax=max_velocity_norm),
+            norm=plt.Normalize(vmin=0.0, vmax=max_velocity_norm),
             length=0.025,
             normalize=False,
             linewidth=0.7,
@@ -1099,7 +1163,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_positions, y_positions,
             x_velocities, y_velocities,
             norms, cmap='viridis',
-            norm=Normalize(vmin=0.0, vmax=max_velocity_norm),
+            norm=plt.Normalize(vmin=0.0, vmax=max_velocity_norm),
             angles='xy', scale=40,
             scale_units='xy', width=0.004,
         )
