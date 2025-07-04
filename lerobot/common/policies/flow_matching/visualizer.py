@@ -571,10 +571,10 @@ class FlowVisualizer(FlowMatchingVisualizer):
         )
         
         # Create time grid
-        time_grid = torch.arange(0.0, 1.0, 0.05, device=device)
+        time_grid = torch.linspace(0.0, 1.0, steps=11, device=device)
 
         # Sample paths from the ODE
-        paths = ode_solver.sample(
+        ode_states = ode_solver.sample(
             x_0=noise_sample,
             global_cond=global_cond.repeat(self.num_paths, 1),
             step_size=self.config.ode_step_size,
@@ -583,8 +583,12 @@ class FlowVisualizer(FlowMatchingVisualizer):
             rtol=self.config.rtol,
             time_grid=time_grid,
             return_intermediate_states=True,
-        ).transpose(0, 1)  # Shape: (num_paths, timesteps, horizon, action_dim)
+        ) # Shape: (timesteps, num_paths, horizon, action_dim)
 
+        # Extract the final sampled action sequences and the flow paths from the ODE states
+        final_sample = ode_states[-1] # Shape: (num_paths, horizon, action_dim)
+        paths = ode_states[:-1].transpose(0, 1) # Shape: (num_paths, timesteps-1, horizon, action_dim)
+        
         # Compute vector field (velocity at each position)
         vector_field = torch.empty_like(paths)
         for p in range(self.num_paths):
@@ -592,41 +596,45 @@ class FlowVisualizer(FlowMatchingVisualizer):
             with torch.no_grad():
                 path_velocities = self.velocity_model(
                     path,
-                    time_grid,
-                    global_cond.repeat(len(time_grid), 1)
+                    time_grid[:-1],
+                    global_cond.repeat(len(time_grid[:-1]), 1)
                 )
             vector_field[p] = path_velocities
         
         # Select the specific action step and dimensions
-        positions = paths[..., self.action_dims]
+        sample_position = final_sample[..., self.action_dims]
+        path_positions = paths[..., self.action_dims]
         velocity_vectors = vector_field[..., self.action_dims]
         
         # Compute global axis limits to create plots of equal size
         if self.axis_limits is None:
             self.axis_limits = []
             for i in range(len(self.action_dims)):
-                coords = positions[..., i]           # (num_paths, t, steps)
+                coords = path_positions[..., i]           # (num_paths, t, steps)
                 coord_min, coord_max = coords.min().cpu(), coords.max().cpu()
                 margin = 0.05 * (coord_max - coord_min)
                 self.axis_limits.append((coord_min - margin, coord_max + margin))
 
         # Create a separate figure for each action step
         for action_step in self.action_steps:
-            positions_single_action = positions[:, :, action_step, :]
+            sample_position_single_action = sample_position[:, action_step, :]
+            path_positions_single_action = path_positions[:, :, action_step, :]
             velocity_vectors_single_action = velocity_vectors[:, :, action_step, :]
 
             if len(self.action_dims) == 2:
                 fig = self._plot_flows_2d(
-                    positions=positions_single_action,
+                    path_positions=path_positions_single_action,
                     velocity_vectors=velocity_vectors_single_action,
+                    sample_position=sample_position_single_action,
                     time_grid=time_grid,
                     num_paths=self.num_paths,
                     action_step=action_step,
                 )
             else:
                 fig = self._plot_flows_3d(
-                    positions=positions_single_action,
+                    path_positions=path_positions_single_action,
                     velocity_vectors=velocity_vectors_single_action,
+                    sample_position=sample_position_single_action,
                     time_grid=time_grid,
                     num_paths=self.num_paths,
                     action_step=action_step,
@@ -647,8 +655,9 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
     def _plot_flows_3d(
         self,
-        positions: Tensor,
+        path_positions: Tensor,
         velocity_vectors: Tensor,
+        sample_position: Tensor,
         time_grid: Tensor,
         num_paths: int,
         action_step: int,
@@ -660,7 +669,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         plt.ioff()
 
         # Extract x-, y- and z-coordinates and velocities
-        x, y, z = [positions[..., i].flatten().cpu() for i in range(3)]
+        x, y, z = [path_positions[..., i].flatten().cpu() for i in range(3)]
         u, v, w = [velocity_vectors[..., i].flatten().cpu() for i in range(3)]
         
         # Color arrows by time
@@ -687,6 +696,16 @@ class FlowVisualizer(FlowMatchingVisualizer):
             arrow_length_ratio=0.25,
             normalize=False,
             color=colors
+        )
+
+        # Add red dots for sample positions
+        sample_x = sample_position[:, 0].cpu()
+        sample_y = sample_position[:, 1].cpu()
+        sample_z = sample_position[:, 2].cpu()
+        ax.scatter(
+            sample_x, sample_y, sample_z,
+            color='red', s=10, depthshade=True, zorder=3,
+            label='Sample Positions'
         )
 
         # Set consistent axis limits so the plots of all action steps have same size
@@ -725,8 +744,9 @@ class FlowVisualizer(FlowMatchingVisualizer):
     
     def _plot_flows_2d(
         self,
-        positions: Tensor,
+        path_positions: Tensor,
         velocity_vectors: Tensor,
+        sample_position: Tensor,
         time_grid: Tensor,
         num_paths: int,
         action_step: int,
@@ -738,8 +758,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
         plt.ioff() 
         
         # Extract x- and y-coordinates and velocities
-        x = positions[..., 0].flatten().cpu()
-        y = positions[..., 1].flatten().cpu()
+        x = path_positions[..., 0].flatten().cpu()
+        y = path_positions[..., 1].flatten().cpu()
         u = velocity_vectors[..., 0].flatten().cpu()
         v = velocity_vectors[..., 1].flatten().cpu()
 
@@ -747,10 +767,15 @@ class FlowVisualizer(FlowMatchingVisualizer):
         fig, ax = plt.subplots(figsize=(10, 10))
         fig.canvas.manager.set_window_title("Visualization of Flows")
         quiv = ax.quiver(
-            x, y, u, v, time_grid.repeat(num_paths).cpu(),
-            angles='xy', scale=len(time_grid),
+            x, y, u, v, time_grid[:-1].repeat(num_paths).cpu(),
+            angles='xy', scale=len(time_grid[:-1]),
             scale_units='xy', width=0.004, cmap='viridis'
         )
+
+        # Add red dots for sample positions
+        sample_x = sample_position[:, 0].cpu()
+        sample_y = sample_position[:, 1].cpu()
+        ax.scatter(sample_x, sample_y, color='red', s=10, label='Sample Positions', zorder=3)
 
         # Set consistent axis limits so the plots of all action steps have same size
         ax.set_xlim(*self.axis_limits[0])
@@ -842,7 +867,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         self.max_action = max_action
         self.grid_size = grid_size
         # Default time_grid is list [0.05, 0.1, ..., 1.0]
-        self.time_grid = list(np.linspace(0, 1, 21)) if time_grid is None else time_grid
+        self.time_grid = list(np.linspace(0, 1, 31)) if time_grid is None else time_grid
         self.vis_type = "vector_field"
     
     def visualize(self, global_cond: Tensor, **kwargs):
@@ -890,8 +915,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
 
         # Always visualize at least the cube [-3, +3] as a reasonable range
         # for the Gaussian noise samples
-        min_lim = min(self.min_action, -3.0)
-        max_lim = max(self.max_action,  3.0)
+        min_lim = min(self.min_action, -1.0)
+        max_lim = max(self.max_action,  1.0)
 
         # Build a 1-D lin-space once and reuse it for every axis we need
         axis_lin = np.linspace(min_lim, max_lim, self.grid_size)

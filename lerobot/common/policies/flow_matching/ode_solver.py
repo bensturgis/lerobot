@@ -78,7 +78,7 @@ class ODESolver():
             - If return_intermediate_vels = True, additionally the velocities at the intermediate evaluation
             points specified in time_grid.
         """
-        if time_grid[0] != 0.0 and time_grid[-1] == 1.0:
+        if time_grid[0] != 0.0 or time_grid[-1] != 1.0:
             raise ValueError(f"Time grid must start at 0.0 and end at 1.0. Got {time_grid}.")
         
         # Ensure all tensors are on the same device

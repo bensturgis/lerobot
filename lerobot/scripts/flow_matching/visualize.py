@@ -135,6 +135,8 @@ def main(cfg: VisualizePipelineConfig):
 
     logging.info(f"Finished in {time.time() - start_time:.1f}s")
 
+    env.close()
+
     # Close the live visualization
     if cfg.show:
         live_view.close()

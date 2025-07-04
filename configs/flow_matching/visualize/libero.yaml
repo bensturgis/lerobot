@@ -1,0 +1,26 @@
+env:
+  type: libero
+  task: LiberoEnv-v0
+  benchmark: libero_spatial
+
+policy:
+  type: flow_matching
+  device: cuda
+
+vis:
+  vis_types: [flows]
+  action_dims: [1, 2]
+  action_dim_names: ["ee_pos_x", "ee_pos_y", "ee_pos_z",
+                     "ee_rot_x", "ee_rot_y", "ee_rot_z",
+                     "gripper_open"]
+  show: false
+
+  # Parameters for flows visualization
+  axis_limits: [[-1, 1], [-1, 1]]
+  
+  # Parameters for vector field visualization
+  # grid_size: 20
+
+show: False
+  
+# python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/040000/pretrained_model
