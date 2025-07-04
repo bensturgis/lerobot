@@ -304,7 +304,7 @@ class FlowMatchingUncertaintySampler(ABC):
             Shape: (batch_size,).
         """
         if scoring_metric in [
-            "intermediate_vel_norm",  "terminal_vel_norm", "intermediate_vel_diff"
+            "intermediate_vel_norm", "intermediate_vel_diff"
         ]:
             # Map each configured evaluation time to its index in the solver's time grid
             matched_indices = []
@@ -348,7 +348,7 @@ class FlowMatchingUncertaintySampler(ABC):
             sampled_action_seq = ode_states[-1]
             # Evaluate velocity on the final sampled sequence at times close to t=1
             terminal_vel_norms = []
-            for time in selected_grid_times:
+            for time in velocity_eval_times:
                 time_batch = torch.full(
                     (sampled_action_seq.shape[0],), time, device=self.device, dtype=self.dtype
                 )
@@ -768,6 +768,9 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
         # Time grid used to estimate the log-likelihood
         self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()
+        # Times at which to evaluate the velocity field for the velocity based scoring metrics
+        self.velocity_eval_times = cfg.velocity_eval_times
+        
         # Store the action sequence and conditioning vector from the previous action
         # sequence generation
         self.prev_action_sequence = None
@@ -847,6 +850,7 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
                 scorer_velocity_model=self.scorer_flow_matching_model.unet,
                 scorer_global_cond=self.prev_scorer_global_cond,
                 ode_states=composed_action_seq.unsqueeze(0),
+                velocity_eval_times=self.velocity_eval_times,
                 exact_divergence=self.exact_divergence,
                 lik_ode_solver_cfg=self.lik_ode_solver_cfg,
             )
