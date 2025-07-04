@@ -55,7 +55,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 from pprint import pformat
-from typing import Callable
+from typing import Callable, Dict, Optional
 
 import einops
 import gymnasium as gym
@@ -68,6 +68,7 @@ from tqdm import trange
 from lerobot.common.envs import EnvConfig
 from lerobot.common.envs.factory import make_env
 from lerobot.common.envs.utils import add_envs_task, check_env_attributes_and_types, preprocess_observation
+from lerobot.common.envs.wrappers import PerturbationWrapper
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.utils import get_device_from_parameters
@@ -281,11 +282,31 @@ def eval_policy(
         if n_episodes_rendered >= max_episodes_rendered:
             return
         n_to_render_now = min(max_episodes_rendered - n_episodes_rendered, env.num_envs)
-        if isinstance(env, gym.vector.SyncVectorEnv):
-            ep_frames.append(np.stack([env.envs[i].render() for i in range(n_to_render_now)]))  # noqa: B023
-        elif isinstance(env, gym.vector.AsyncVectorEnv):
-            # Here we must render all frames and discard any we don't need.
-            ep_frames.append(np.stack(env.call("render")[:n_to_render_now]))
+        if camera_names is None:
+            if isinstance(env, gym.vector.SyncVectorEnv):
+                ep_frames.append(np.stack([env.envs[i].render() for i in range(n_to_render_now)]))  # noqa: B023
+            elif isinstance(env, gym.vector.AsyncVectorEnv):
+                # Here we must render all frames and discard any we don't need.
+                ep_frames.append(np.stack(env.call("render")[:n_to_render_now]))
+        else:
+            for camera in camera_names:
+                if isinstance(env, gym.vector.SyncVectorEnv):
+                    if isinstance(env.envs[0], PerturbationWrapper):
+                        frames = [
+                            env.envs[i].render(camera_name=camera) for i in range(n_to_render_now)
+                        ]
+                    else:
+                        frames = [env.envs[i].unwrapped.render(camera_name=camera) for i in range(n_to_render_now)]
+                    ep_frames[camera].append(np.stack(frames))  # noqa: B023
+                elif isinstance(env, gym.vector.AsyncVectorEnv):
+                    # Here we must render all frames and discard any we don't need.
+                    if isinstance(env.envs[0], PerturbationWrapper):
+                        render_envs = env[:n_to_render_now]
+                    else:
+                        render_envs = env.call("unwrapped")[:n_to_render_now]
+                    ep_frames[camera].append(np.stack(
+                        render_envs[i].render(camera_name=camera) for i in range(n_to_render_now)
+                    ))
 
         # Live visualization of first environment
         if live_vis:
@@ -307,11 +328,17 @@ def eval_policy(
             n_envs=batch_size,
             use_async_envs=use_async_envs,
         )
+        camera_names: list[str] | None = getattr(env.envs[0], "camera_names", None)
         
         # Cache frames for rendering videos. Each item will be (b, h, w, c), and the list indexes the rollout
         # step.
         if max_episodes_rendered > 0:
-            ep_frames: list[np.ndarray] = []
+            if camera_names is not None:
+                ep_frames: Dict[str, list[np.ndarray]] = {
+                    cam: [] for cam in camera_names
+                }
+            else:
+                ep_frames: list[np.ndarray] = []
 
         if start_seed is None:
             seeds = None
@@ -367,28 +394,55 @@ def eval_policy(
                 episode_data = {k: torch.cat([episode_data[k], this_episode_data[k]]) for k in episode_data}
 
         # Maybe render video for visualization.
-        if max_episodes_rendered > 0 and len(ep_frames) > 0:
-            batch_stacked_frames = np.stack(ep_frames, axis=1)  # (b, t, *)
-            for stacked_frames, done_index in zip(
-                batch_stacked_frames, done_indices.flatten().tolist(), strict=False
-            ):
-                if n_episodes_rendered >= max_episodes_rendered:
-                    break
+        def write_video_for_episode(stacked_frames: np.ndarray, done_idx: int, camera: Optional[str]):
+            camera_dir = (videos_dir / camera) if camera is not None else videos_dir
+            camera_dir.mkdir(parents=True, exist_ok=True)
+            video_path = camera_dir / f"eval_episode_{n_episodes_rendered}.mp4"
+            video_paths.append(str(video_path))
 
-                videos_dir.mkdir(parents=True, exist_ok=True)
-                video_path = videos_dir / f"eval_episode_{n_episodes_rendered}.mp4"
-                video_paths.append(str(video_path))
-                thread = threading.Thread(
-                    target=write_video,
-                    args=(
-                        str(video_path),
-                        stacked_frames[: done_index + 1],  # + 1 to capture the last observation
-                        env.unwrapped.metadata["render_fps"],
-                    ),
-                )
-                thread.start()
-                threads.append(thread)
-                n_episodes_rendered += 1
+            thread = threading.Thread(
+                target=write_video,
+                args=(
+                    str(video_path),
+                    stacked_frames[: done_idx + 1],          # include final obs
+                    env.unwrapped.metadata["render_fps"],
+                ),
+            )
+            thread.start()
+            threads.append(thread)
+
+        if max_episodes_rendered > 0:
+            num_episodes_in_batch = done_indices.numel()
+            
+            if isinstance(ep_frames, list):
+                batch_stacked_frames = np.stack(ep_frames, axis=1)  # (b, t, *)
+                for ep in range(num_episodes_in_batch):
+                    if n_episodes_rendered >= max_episodes_rendered:
+                        break
+
+                    write_video_for_episode(
+                        stacked_frames=batch_stacked_frames[ep],
+                        done_idx=done_indices[ep].item(),
+                        file_suffix="",
+                    )
+                    n_episodes_rendered += 1
+            elif isinstance(ep_frames, dict):
+                stacked_by_cam = {
+                    cam: np.stack(frames, axis=1)                    # (B, T, H, W, C)
+                    for cam, frames in ep_frames.items()
+                }
+
+                for ep in range(num_episodes_in_batch):
+                    if n_episodes_rendered >= max_episodes_rendered:
+                        break
+
+                    for camera, stacked in stacked_by_cam.items():
+                        write_video_for_episode(
+                            stacked_frames=stacked[ep],
+                            done_idx=done_indices[ep].item(),
+                            camera=camera,
+                        )
+                    n_episodes_rendered += 1
 
         progbar.set_postfix(
             {"running_success_rate": f"{np.mean(all_successes[:n_episodes]).item() * 100:.1f}%"}

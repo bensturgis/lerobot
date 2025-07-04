@@ -110,10 +110,6 @@ class PerturbationWrapper(gym.Wrapper):
         Returns:
             The patched image.
         """
-        if self.patch_frac is None or not self.static:
-            # Initialize the patch region using the first image
-            self._reset_patch_fraction()
-
         height, width = img.shape[:2]
         top_frac, left_frac, patch_height_frac, patch_width_frac = self.patch_frac
         
@@ -146,20 +142,28 @@ class PerturbationWrapper(gym.Wrapper):
         return observation
 
     # Gym API overrides
-    def reset(self, *, seed: Optional[int] = None, **kwargs):
+    def reset(self, seed: Optional[int] = None, **kwargs):
         # Call env.reset(...), then patch the returned obs
         if seed is not None:
             self.seed(seed)
+
+        if self.patch_frac is None or not self.static:
+            # Initialize the patch region using the first image
+            self._reset_patch_fraction()
+
         obs, info = super().reset(seed=seed, **kwargs)
         return self._patch_obs(obs), info
 
     def step(self, action):
         # Call env.step(...), then patch the returned obs
+        if not self.static:
+            self._reset_patch_fraction()
+
         obs, rew, term, trunc, info = super().step(action)
         return self._patch_obs(obs), rew, term, trunc, info
 
     def render(self, *args, **kwargs):
-        frame = super().render(*args, **kwargs)
+        frame = self.unwrapped.render(*args, **kwargs)
         if frame is None:
             warnings.warn(
                 "PerturbationWrapper: render() produced no image. "

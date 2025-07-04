@@ -26,7 +26,7 @@ import time
 from collections import defaultdict
 from dataclasses import replace
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Union
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -36,6 +36,7 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
+from lerobot.common.envs.wrappers import PerturbationWrapper
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
@@ -199,7 +200,12 @@ def rollout(
     device = get_device_from_parameters(policy)
 
     ep_uncertainties = []
-    ep_frames = []
+    if env.camera_names is not None:
+        ep_frames: Dict[str, list[np.ndarray]] = {
+            cam: [] for cam in env.camera_names
+        }
+    else:
+        ep_frames: list[np.ndarray] = []
     success = False
 
     start_time = time.time() 
@@ -208,7 +214,14 @@ def rollout(
     policy.reset()
     observation, _ = env.reset(seed=seed)
 
-    ep_frames.append(env.render())
+    if env.camera_names is not None:
+        for camera in env.camera_names:
+            if isinstance(env, PerturbationWrapper):
+                ep_frames[camera].append(env.render(camera_name=camera))
+            else:
+                ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
+    else:
+        ep_frames.append(env.render())
     
     max_episode_steps = env.spec.max_episode_steps
     # max_episode_steps = 30
@@ -236,7 +249,14 @@ def rollout(
 
         # Apply the next action
         observation, _, terminated, truncated, info = env.step(action[0].cpu().numpy())
-        ep_frames.append(env.render())
+        if env.camera_names is not None:
+            for camera in env.camera_names:
+                if isinstance(env, PerturbationWrapper):
+                    ep_frames[camera].append(env.render(camera_name=camera))
+                else:
+                    ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
+        else:
+            ep_frames.append(env.render())
 
         if info is not None and "is_success" in info:
             success = bool(info["is_success"])
@@ -277,6 +297,36 @@ def choose_seed(failure_pool: list[int]) -> int:
         return seed
 
     return random.randrange(2**31 - 1)
+
+
+def save_episode_video(
+    ep_frames: Union[List[np.ndarray], Dict[str, List[np.ndarray]]],
+    out_root: Path,
+    episode_idx: int,
+    fps: int,
+) -> None:
+    ep_str = f"rollout_ep{episode_idx:03d}.mp4"
+
+    if isinstance(ep_frames, list):
+        out_root.mkdir(parents=True, exist_ok=True)
+        write_video(
+            str(out_root / ep_str),
+            np.stack(ep_frames, axis=0),           # (T, H, W, C)
+            fps=fps,
+        )
+
+    elif isinstance(ep_frames, dict):
+        for cam, frames in ep_frames.items():
+            cam_dir = out_root / cam
+            cam_dir.mkdir(parents=True, exist_ok=True)
+            write_video(
+                str(cam_dir / ep_str),
+                np.stack(frames, axis=0),
+                fps=fps,
+            )
+
+    else:
+        raise TypeError(f"ep_frames must be list or dict, got {type(ep_frames)}")
 
 
 @parser.wrap()
@@ -351,21 +401,19 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             
             if id_ep_info["success"]:
                 all_uncertainties[uncert_est_method]["id_success"].append(id_ep_info["ep_uncertainties"])
-                id_success_output_dir = cfg.output_dir / uncert_est_method / "id_success"
-                id_success_output_dir.mkdir(parents=True, exist_ok=True)
-                write_video(
-                    str(id_success_output_dir / f"rollout_ep{(episode + 1):03d}.mp4"),
-                    np.stack(id_ep_info["ep_frames"], axis=0),
-                    fps=id_env.metadata["render_fps"]
+                save_episode_video(
+                    ep_frames=id_ep_info["ep_frames"],
+                    out_root=cfg.output_dir / uncert_est_method / "id_success",
+                    episode_idx=episode + 1,
+                    fps=id_env.metadata["render_fps"],
                 )
             else:
                 all_uncertainties[uncert_est_method]["id_failure"].append(id_ep_info["ep_uncertainties"])
-                id_failure_output_dir = cfg.output_dir / uncert_est_method / "id_failure"
-                id_failure_output_dir.mkdir(parents=True, exist_ok=True)
-                write_video(
-                    str(id_failure_output_dir / f"rollout_ep{(episode + 1):03d}.mp4"),
-                    np.stack(id_ep_info["ep_frames"], axis=0),
-                    fps=id_env.metadata["render_fps"]
+                save_episode_video(
+                    ep_frames=id_ep_info["ep_frames"],
+                    out_root=cfg.output_dir / uncert_est_method / "id_failure",
+                    episode_idx=episode + 1,
+                    fps=id_env.metadata["render_fps"],
                 )
             # -----------------------------------------
 
@@ -385,21 +433,19 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 
             if ood_ep_info["success"]:
                 all_uncertainties[uncert_est_method]["ood_success"].append(ood_ep_info["ep_uncertainties"])
-                ood_success_output_dir = cfg.output_dir / uncert_est_method / "ood_success"
-                ood_success_output_dir.mkdir(parents=True, exist_ok=True)
-                write_video(
-                    str(ood_success_output_dir / f"rollout_ep{(episode + 1):03d}.mp4"),
-                    np.stack(ood_ep_info["ep_frames"], axis=0),
-                    fps=ood_env.metadata["render_fps"]
+                save_episode_video(
+                    ep_frames=ood_ep_info["ep_frames"],
+                    out_root=cfg.output_dir / uncert_est_method / "ood_success",
+                    episode_idx=episode + 1,
+                    fps=ood_env.metadata["render_fps"],
                 )
             else:
                 all_uncertainties[uncert_est_method]["ood_failure"].append(ood_ep_info["ep_uncertainties"])
-                ood_failure_output_dir = cfg.output_dir / uncert_est_method / "ood_failure"
-                ood_failure_output_dir.mkdir(parents=True, exist_ok=True)
-                write_video(
-                    str(ood_failure_output_dir / f"rollout_ep{(episode + 1):03d}.mp4"),
-                    np.stack(ood_ep_info["ep_frames"], axis=0),
-                    fps=ood_env.metadata["render_fps"]
+                save_episode_video(
+                    ep_frames=ood_ep_info["ep_frames"],
+                    out_root=cfg.output_dir / uncert_est_method / "ood_failure",
+                    episode_idx=episode + 1,
+                    fps=ood_env.metadata["render_fps"],
                 )
 
             if cfg.eval_uncert_est.collapse_success_failure:

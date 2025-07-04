@@ -1,0 +1,32 @@
+dataset:
+  repo_id: lerobot/libero_spatial_one_bowl
+
+env:
+  type: libero
+  task: LiberoEnv-v0
+  benchmark: libero_spatial
+
+eval_uncert_est:
+  n_episodes: 80
+  uncert_est_methods: [cross_ensemble]
+  perturbation_config:
+    enable: True
+    static: False
+    patch_color: [0, 0, 0]
+
+uncertainty_sampler:
+  composed_cross_ensemble_sampler:
+    scorer_model_path: outputs/train/flow_matching_libero_spatial_02/checkpoints/035000/pretrained_model
+    scoring_metric: terminal_vel_norm
+    velocity_eval_times: [0.5, 0.7, 0.9]
+  cross_ensemble_sampler:
+    scorer_model_path: outputs/train/flow_matching_libero_spatial/checkpoints/040000/pretrained_model
+    scoring_metric: terminal_vel_norm
+    velocity_eval_times: [0.5, 0.7, 0.9]
+  composed_sequence_sampler:
+    scoring_metric: terminal_vel_norm
+    velocity_eval_times: [0.5, 0.7, 0.9]
+
+job_name: terminal_vel_norm_libero
+
+# python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/040000/pretrained_model

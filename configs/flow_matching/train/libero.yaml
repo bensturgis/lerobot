@@ -19,10 +19,10 @@ policy:
 
 output_dir: outputs/train/flow_matching_libero_spatial_02
 batch_size: 32
-steps: 300000
+steps: 100000
 eval_freq: 5000
 save_freq: 5000
-seed: 221100
+seed: 22
 wandb:
   enable: true
 

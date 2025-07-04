@@ -62,7 +62,7 @@ class ComposedCrossLaplaceSamplerConfig:
     likelihood_ode_solver_cfg: LikelihoodODESolverConfig = field(
         default_factory=LikelihoodODESolverConfig
     )
-    velocity_eval_times: Sequence[float] = field(
+    velocity_eval_times: tuple = field(
         default_factory=lambda: (0.92, 0.95, 0.97)
     )
 
@@ -96,7 +96,7 @@ class CrossLaplaceSamplerConfig:
     likelihood_ode_solver_cfg: LikelihoodODESolverConfig = field(
         default_factory=LikelihoodODESolverConfig
     )
-    velocity_eval_times: Sequence[float] = field(
+    velocity_eval_times: tuple = field(
         default_factory=lambda: (0.92, 0.95, 0.97)
     )
 
@@ -128,7 +128,7 @@ class ComposedCrossEnsembleSamplerConfig:
     likelihood_ode_solver_cfg: LikelihoodODESolverConfig = field(
         default_factory=LikelihoodODESolverConfig
     )
-    velocity_eval_times: Sequence[float] = field(
+    velocity_eval_times: tuple = field(
         default_factory=lambda: (0.92, 0.95, 0.97)
     )
 
@@ -150,7 +150,7 @@ class CrossEnsembleSamplerConfig:
     likelihood_ode_solver_cfg: LikelihoodODESolverConfig = field(
         default_factory=LikelihoodODESolverConfig
     )
-    velocity_eval_times: Sequence[float] = field(
+    velocity_eval_times: tuple = field(
         default_factory=lambda: (0.92, 0.95, 0.97)
     )
 
@@ -172,7 +172,7 @@ class ComposedSequenceSamplerConfig:
     likelihood_ode_solver_cfg: LikelihoodODESolverConfig = field(
         default_factory=LikelihoodODESolverConfig
     )
-    velocity_eval_times: Sequence[float] = field(
+    velocity_eval_times: tuple = field(
         default_factory=lambda: (0.92, 0.95, 0.97)
     )
     
