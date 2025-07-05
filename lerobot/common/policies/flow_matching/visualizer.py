@@ -442,12 +442,15 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         # Render the current camera image (RGB), using the "top" camera
         frame = env.unwrapped.render(camera_name="frontview")
 
+        # Tell the LIBERO/robosuite wrapper to ignore the “episode done” flag,
+        # so we can keep stepping through from the same sim state without triggering a reset.
+        env.unwrapped.env.ignore_done = True
+
         # Prepare to store 3D waypoints for each action sequence
         all_waypoints: List[List[np.ndarray]] = []
 
         for seq_idx in range(actions.shape[0]):
             # Restore the saved state before simulating this sequence
-            env.reset()
             env.unwrapped.set_state(initial_state)
             env.unwrapped.sim.forward()
             env.unwrapped.check_success()
@@ -464,7 +467,6 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
 
             all_waypoints.append(seq_waypoints)
 
-        env.reset()
         env.unwrapped.set_state(initial_state)
         env.unwrapped.sim.forward()
         env.unwrapped.check_success()
