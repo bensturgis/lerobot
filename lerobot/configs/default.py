@@ -121,22 +121,7 @@ class EvalUncertEstConfig:
                 )
 
 @dataclass
-class VisConfig:
-    """Options that control what we draw and how we save/show it."""
-    # Which visualizers to run (you can pick one or more)
-    vis_types: list[str] = field(
-        default_factory=lambda: ["action_seq", "flows", "vector_field"]
-    )
-
-    # Number of total rollouts to visualize
-    num_rollouts: int = 10
-
-    # If set, start drawing only after this environment step
-    start_step: Optional[int] = None
-
-    # Hard cap on how many env steps to visualize
-    max_steps: Optional[int] = None
-
+class FlowVisConfig:
     # Two or three indices indicating which action dimensions to visualize
     action_dims: list[int] = (0,1)
 
@@ -149,15 +134,57 @@ class VisConfig:
     # Whether to display plots live
     show: bool = False
 
+    # Custom axis limits for each plotted dimension as a list of (min, max) tuples
+    axis_limits: Optional[list[tuple[float, float]]] = None
+
+    # Number of trajectory samples to draw when visualizing multiple action sequences
+    num_paths: int = 50
+
+@dataclass
+class VectorFieldVisConfig:
+    # Two or three indices indicating which action dimensions to visualize
+    action_dims: list[int] = (0,1)
+
+    # Names of the action dimensions to visualize
+    action_dim_names: Optional[list[str]] = None
+
+    # Time‐step indices (horizon steps) at which to generate visualizations
+    action_steps: Optional[list[int]] = None
+
+    # Whether to display plots live
+    show: bool = False
+
+    # Minimum value of the action space (default −1.0 after normalization)
+    min_action: float = -1.0
+
+    # Maximum value of the action space (default +1.0 after normalization)
+    max_action: float = 1.0
+
+    # Number of grid points per axis when sampling the action space for the quiver plot
+    grid_size: int = 50
+
+    # List of time values (between 0 and 1) at which to compute and draw the vector field
+    time_grid: Optional[list[float]] = None
+
+@dataclass
+class ActionSeqVisConfig:
+    # Whether to display plots live
+    show: bool = False
+
     # Parameters for action sequence visualization
     num_action_seq: int = 30
 
-    # Parameters for flows visualization
-    axis_limits: Optional[list[tuple[float, float]]] = None
-    num_paths: int = 50
+@dataclass
+class VisConfig:
+    """Options that control what we draw and how we save/show it."""
+    # Number of total rollouts to visualize
+    num_rollouts: int = 10
 
-    # Parameters for vector field visualization
-    min_action: float = -1.0
-    max_action: float = 1.0
-    grid_size: int = 50
-    time_grid: Optional[list[float]] = None
+    # If set, start drawing only after this environment step
+    start_step: Optional[int] = None
+
+    # Hard cap on how many env steps to visualize
+    max_steps: Optional[int] = None
+
+    # Names of the action dimensions to visualize
+    action_dim_names: Optional[list[str]] = None

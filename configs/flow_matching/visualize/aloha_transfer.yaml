@@ -1,3 +1,7 @@
+# Choose from "action_seq", "flows" and "vector_field"
+vis_types: [action_seq]
+show: False
+
 env:
   type: aloha
   task: AlohaTransferCube-v0
@@ -7,22 +11,19 @@ policy:
   device: cuda
 
 vis:
-  vis_types: [action_seq]
-  action_dims: [7, 8, 9]
-  action_dim_names: [left_waist, left_shoulder, left_elbow,
-                     left_forearm_roll, left_wrist_angle, left_wrist_rotate,
-                     left_gripper, right_waist, right_shoulder, 
-                     right_elbow, right_forearm_roll, right_wrist_angle,
-                     right_wrist_rotate, right_gripper]
-  show: false
+  num_rollouts: 20
 
-  # Parameters for flows visualization
-  axis_limits: [[-1, 1], [-1, 1], [-1, 1]]
-  
-  # Parameters for vector field visualization
-  grid_size: 20
+  action_dim_names: ["ee_pos_x", "ee_pos_y", "ee_pos_z",
+                     "ee_rot_x", "ee_rot_y", "ee_rot_z",
+                     "gripper_open"]
 
-seed: 42
-show: True
-  
+flows:
+  action_dims: [1, 2]
+  axis_limits: [[-1, 1], [-1, 1]]
+
+vector_field:
+  action_dims: [1, 2]
+  # grid_size: 20
+
+
 # python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/aloha_transfer.yaml --policy.path=outputs/train/flow_matching_aloha_transfer/checkpoints/040000/pretrained_model

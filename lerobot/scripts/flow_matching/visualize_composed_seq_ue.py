@@ -25,23 +25,17 @@ import torch
 from tqdm import trange
 
 from lerobot.configs import parser
-from lerobot.configs.visualize import VisualizePipelineConfig
+from lerobot.configs.visualize import VisualizeComposedSeqPipelineConfig
+from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizers
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
-from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.visualizer import (
-    FlowMatchingVisualizer,
-    ActionSeqVisualizer,
-    FlowVisualizer,
-    VectorFieldVisualizer,
-)
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.live_window import LiveWindow
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 
 @parser.wrap()
-def main(cfg: VisualizePipelineConfig): 
+def main(cfg: VisualizeComposedSeqPipelineConfig): 
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
@@ -90,35 +84,13 @@ def main(cfg: VisualizePipelineConfig):
         ep_dir.mkdir(parents=True, exist_ok=True)
 
         # Prepare visualisers
-        visualizers: list[FlowMatchingVisualizer] = []
-        if "action_seq" in cfg.vis_types:
-            visualizers.append(
-                ActionSeqVisualizer(
-                    cfg=cfg.action_seq,
-                    flow_matching_cfg=policy.config,
-                    velocity_model=policy.flow_matching.unet,
-                    unnormalize_outputs=policy.unnormalize_outputs,
-                    output_root=ep_dir,
-                )
-            )
-        if "flows" in cfg.vis_types:
-            visualizers.append(
-                FlowVisualizer(
-                    cfg=cfg.flows,
-                    flow_matching_cfg=policy.config,
-                    velocity_model=policy.flow_matching.unet,
-                    output_root=ep_dir,
-                )
-            )
-        if "vector_field" in cfg.vis_types:
-            visualizers.append(
-                VectorFieldVisualizer(
-                    cfg=cfg.vector_field,
-                    flow_matching_cfg=policy.config,
-                    velocity_model=policy.flow_matching.unet,
-                    output_root=ep_dir,
-                )
-            )
+        visualizers = make_flow_matching_visualizers(
+            vis_cfg=cfg.vis,
+            model_cfg=policy.config,
+            velocity_model=policy.flow_matching.unet,
+            output_root=ep_dir,
+            unnormalize_outputs=policy.unnormalize_outputs,
+        )
 
         # Roll through one episode
         max_episode_steps = env.spec.max_episode_steps

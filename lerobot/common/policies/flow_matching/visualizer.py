@@ -12,11 +12,17 @@ from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from pathlib import Path
 from torch import nn, Tensor
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
+from lerobot.configs.default import (
+    ActionSeqVisConfig,
+    FlowVisConfig,
+    VectorFieldVisConfig,
+)
+
 
 class FlowMatchingVisualizer(ABC):
     """
@@ -24,10 +30,8 @@ class FlowMatchingVisualizer(ABC):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        flow_matching_cfg: FlowMatchingConfig,
         velocity_model: nn.Module,
-        action_dim_names: Optional[Sequence[str]],
-        show: bool,
         save: bool,
         output_root: Optional[Union[Path, str]],
         create_gif: bool,
@@ -35,19 +39,16 @@ class FlowMatchingVisualizer(ABC):
     ):
         """
         Args:
-            config: Configuration object for Flow Matching settings.
+            flow_matching_cfg: Configuration object for Flow Matching settings.
             velocity_model: The learned flow matching velocity model.
-            action_dim_names: Optional names for action dimensions (used for axis labels).
             show: If True, display the plots.
             save: If True, save the plots to disk.
             output_root: Optional output directory for saving figures.
             create_gif: If True, create a GIF from the saved figures.
             verbose: If True, print status messages.
         """
-        self.config = config
+        self.flow_matching_cfg = flow_matching_cfg
         self.velocity_model = velocity_model
-        self.action_dim_names = action_dim_names
-        self.show = show
         self.save = save
         self.output_root = output_root
         self.create_gif = create_gif
@@ -158,13 +159,11 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        cfg: ActionSeqVisConfig,
+        flow_matching_cfg: FlowMatchingConfig,
         velocity_model: nn.Module,
         unnormalize_outputs: nn.Module,
-        num_action_seq: int,
-        action_dim_names: Optional[Sequence[str]],
         output_root: Optional[Union[Path, str]],
-        show: bool = False,
         save: bool = True,
         create_gif: bool = False,
         verbose: bool = False,
@@ -176,17 +175,16 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             num_action_seq: Number of action sequences to plot.
         """
         super().__init__(
-            config=config,
+            flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
-            action_dim_names=action_dim_names,
-            show=show,
             save=save,
             output_root=output_root,
             create_gif=create_gif,
             verbose=verbose,
         )
-        self.num_action_seq = num_action_seq
+        self.num_action_seq = cfg.num_action_seq
         self.unnormalize_outputs = unnormalize_outputs
+        self.show = cfg.show
         self.vis_type = "action_seq"
         self.run_dir = self._update_run_dir()
         
@@ -225,7 +223,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         
         # Sample noise from prior
         noise_sample = torch.randn(
-            size=(self.num_action_seq, self.config.horizon, self.config.action_feature.shape[0]),
+            size=(self.num_action_seq, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
             dtype=dtype,
             device=device,
         )
@@ -234,10 +232,10 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         actions = ode_solver.sample(
             x_0=noise_sample,
             global_cond=global_cond.repeat(self.num_action_seq, 1),
-            step_size=self.config.ode_step_size,
-            method=self.config.ode_solver_method,
-            atol=self.config.atol,
-            rtol=self.config.rtol,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
         )
 
         # Convert the model-predicted actions from the network’s normalised space
@@ -306,7 +304,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
     
     def _draw_waypoints(self, env: gym.Env, waypoints: List[np.ndarray], ax: Axes):
         # Prepare a colormap over the trajectory length
-        norm = plt.Normalize(0, self.config.horizon - 1)
+        norm = plt.Normalize(0, self.flow_matching_cfg.horizon - 1)
         cmap = plt.get_cmap("turbo")
         
         pixel_points: List[Tuple[float, float]] = []
@@ -343,7 +341,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         )
 
         # Color each segment by its timestep index
-        line_collection.set_array(np.arange(self.config.horizon - 1))
+        line_collection.set_array(np.arange(self.flow_matching_cfg.horizon - 1))
         ax.add_collection(line_collection)
 
         # Mark the final waypoint with a filled circle
@@ -388,7 +386,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             seq_waypoints_right: List[np.ndarray] = []
             action_seq = actions[seq_idx].cpu().numpy()
 
-            for action_step in range(self.config.horizon):
+            for action_step in range(self.flow_matching_cfg.horizon):
                 env.step(action_seq[action_step])
         
                 # After stepping, get fingertip positions for left arm
@@ -460,7 +458,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             seq_waypoints: List[np.ndarray] = []
 
             action_seq = actions[seq_idx].cpu().numpy()
-            for action_step in range(self.config.horizon):
+            for action_step in range(self.flow_matching_cfg.horizon):
                 obs, _, _, _, _ = env.unwrapped.step(action_seq[action_step])
                 end_effector_pos = obs["agent_pos"][:3]
                 seq_waypoints.append(end_effector_pos)
@@ -511,14 +509,14 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         ax.axis("off")
     
         # Prepare a colormap over the trajectory length
-        norm = plt.Normalize(0, self.config.horizon - 1)
+        norm = plt.Normalize(0, self.flow_matching_cfg.horizon - 1)
         cmap = plt.get_cmap("turbo")
     
         # Draw each action sequence as a colourful line strip
         for action_seq in actions:
             segments = [
                 [tuple(action_seq[i]), tuple(action_seq[i+1])]
-                for i in range(self.config.horizon - 1)
+                for i in range(self.flow_matching_cfg.horizon - 1)
             ]
             lc = LineCollection(
                 segments,
@@ -529,7 +527,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             )
             # Assign each segment its action step index as the “value”
             # for the colour mapping
-            lc.set_array(np.arange(self.config.horizon - 1))
+            lc.set_array(np.arange(self.flow_matching_cfg.horizon - 1))
             ax.add_collection(lc)
 
             # Mark the final action target with a filled circle
@@ -553,55 +551,48 @@ class FlowVisualizer(FlowMatchingVisualizer):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        cfg: FlowVisConfig,
+        flow_matching_cfg: FlowMatchingConfig,
         velocity_model: nn.Module,
-        action_dims: Sequence[int],
-        axis_limits: Optional[Sequence[Tuple[float, float]]],
-        action_steps: Optional[Union[Sequence[int], int]],
-        num_paths: int,
-        action_dim_names: Optional[Sequence[str]],
         output_root: Optional[Union[Path, str]],
-        show: bool = False,
         save: bool = True,
         create_gif: bool = True,
         verbose: bool = False,
     ):
         """
         Args:
-            action_dims: Two action dimensions to plot.
-            action_steps: Steps to visualize; defaults to all.
-            num_paths: Number of trajectories per step.
+            cfg: Visualizer-specific settings.
         """
         super().__init__(
-            config=config,
+            flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
-            action_dim_names=action_dim_names,
-            show=show,
             save=save,
             output_root=output_root,
             create_gif=create_gif,
             verbose=verbose,
         )
-        if not isinstance(action_dims, (list, tuple)) or len(action_dims) not in (2, 3):
+        if not isinstance(cfg.action_dims, (list, tuple)) or len(cfg.action_dims) not in (2, 3):
             raise ValueError(
                 "'action_dims' must be a list or tuple of length 2 or 3, "
-                f"but got {action_dims}"
+                f"but got {cfg.action_dims}"
             )
 
-        if axis_limits is not None and len(action_dims) != len(axis_limits):
+        if cfg.axis_limits is not None and len(cfg.action_dims) != len(cfg.axis_limits):
             raise ValueError(
-                f"'axis_limits' length ({len(axis_limits)}) must match 'action_dims' length "
-                f"({len(action_dims)})."
+                f"'axis_limits' length ({len(cfg.axis_limits)}) must match 'action_dims' length "
+                f"({len(cfg.action_dims)})."
             )
 
-        self.action_dims = action_dims
-        self.axis_limits = axis_limits
+        self.action_dims = cfg.action_dims
+        self.action_dim_names = cfg.action_dim_names
+        self.axis_limits = cfg.axis_limits
         # Visualize all action steps by default
-        if action_steps is None:
-            self.action_steps = list(range(self.config.horizon))
+        if cfg.action_steps is None:
+            self.action_steps = list(range(self.flow_matching_cfg.horizon))
         else:
-            self.action_steps = action_steps
-        self.num_paths = num_paths
+            self.action_steps = cfg.action_steps
+        self.num_paths = cfg.num_paths
+        self.show = cfg.show
         self.vis_type = "flows"
 
     def visualize(self, global_cond: Tensor, **kwargs):
@@ -632,7 +623,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         
         # Sample noise from prior
         noise_sample = torch.randn(
-            size=(self.num_paths, self.config.horizon, self.config.action_feature.shape[0]),
+            size=(self.num_paths, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
             dtype=dtype,
             device=device,
         )
@@ -644,10 +635,10 @@ class FlowVisualizer(FlowMatchingVisualizer):
         ode_states = ode_solver.sample(
             x_0=noise_sample,
             global_cond=global_cond.repeat(self.num_paths, 1),
-            step_size=self.config.ode_step_size,
-            method=self.config.ode_solver_method,
-            atol=self.config.atol,
-            rtol=self.config.rtol,
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
             time_grid=time_grid,
             return_intermediate_states=True,
         ) # Shape: (timesteps, num_paths, horizon, action_dim)
@@ -784,7 +775,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Colorbar and title
         cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
         cbar.ax.set_ylabel('Time', fontsize=12)
-        ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.config.horizon})",
+        ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
                      fontsize=16)
 
         # Axis labels
@@ -852,7 +843,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Colorbar and title
         cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
         cbar.ax.set_ylabel('Time', fontsize=12)
-        ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.config.horizon})",
+        ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
                      fontsize=16)
 
         # Axis labels
@@ -881,60 +872,44 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
     """
     def __init__(
         self,
-        config: FlowMatchingConfig,
+        cfg: VectorFieldVisConfig,
+        flow_matching_cfg: FlowMatchingConfig,
         velocity_model: nn.Module,
-        action_dims: Sequence[int],
-        action_steps: Optional[Sequence[int]],
-        min_action: float,
-        max_action: float,
-        grid_size: int,
-        time_grid: Optional[Sequence[float]],
-        action_dim_names: Optional[Sequence[str]],
         output_root: Optional[Union[Path, str]],
-        show: bool = False,
         save: bool = True,
         create_gif: bool = True,
         verbose: bool = False,
     ):
         """
         Args:
-            action_dims: Indices of the action-vector dimensions to visualize.
-                Must be length 2 (for 2D) or 3 (for 3D).
-            action_steps: Randomly choose one of these action steps along the entire action
-                sequence horizon to create the vector field visualization for. If None,
-                defaults to [0, 1, ..., horizon - 1].
-            min_action: Scalar lower bound for each plotted axis.
-            max_action: Scalar upper bound for each plotted axis.
-            grid_size: Number of grid points per axis.
-            time_grid: A sequence of float values in [0.0, 1.0] indicating the time steps
-                at which the vector field is evaluated. If None, defaults to [0.0, 0.05, ..., 1.0].
+            cfg: Visualizer-specific settings.
         """
         super().__init__(
-            config=config,
+            flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
-            action_dim_names=action_dim_names,
-            show=show,
             save=save,
             output_root=output_root,
             create_gif=create_gif,
             verbose=verbose,
         )
-        if len(action_dims) not in (2, 3):
+        if len(cfg.action_dims) not in (2, 3):
             raise ValueError(
                 "The vector-field visualisation supports 2D and 3D only, "
-                f"(got action_dims = {action_dims}."
+                f"(got action_dims = {cfg.action_dims}."
             )
 
-        self.action_dims = action_dims
-        if action_steps is None:
-            self.action_steps = list(range(self.config.horizon))
+        self.action_dims = cfg.action_dims
+        self.action_dim_names = cfg.action_dim_names
+        if cfg.action_steps is None:
+            self.action_steps = list(range(self.flow_matching_cfg.horizon))
         else:
-            self.action_steps = action_steps
-        self.min_action = min_action
-        self.max_action = max_action
-        self.grid_size = grid_size
+            self.action_steps = cfg.action_steps
+        self.min_action = cfg.min_action
+        self.max_action = cfg.max_action
+        self.grid_size = cfg.grid_size
         # Default time_grid is list [0.05, 0.1, ..., 1.0]
-        self.time_grid = list(np.linspace(0, 1, 31)) if time_grid is None else time_grid
+        self.time_grid = list(np.linspace(0, 1, 31)) if cfg.time_grid is None else cfg.time_grid
+        self.show = cfg.show
         self.vis_type = "vector_field"
     
     def visualize(self, global_cond: Tensor, **kwargs):
@@ -963,30 +938,39 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         # Initialize ODE solver
         ode_solver = ODESolver(self.velocity_model)
         
-        # Sample single noise vector from prior
+        visualize_actions: bool = kwargs.get("visualize_actions", True)
+        action_data = kwargs.get("actions", {})
+        if visualize_actions and not action_data:
+            # If no actions for visualization were passed in, sample some
+            num_samples = 50 if len(self.action_dims) == 2 else 100
+        else:
+            # Only sample a single action sequence to create the vector field
+            num_samples = 1
+
+        # Sample noise vectors from prior
         noise_sample = torch.randn(
-            size=(1, self.config.horizon, self.config.action_feature.shape[0]),
+            size=(num_samples, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
             dtype=dtype,
             device=device,
         )
 
-        # Sample a single action sequence
-        actions = ode_solver.sample(
+        # Sample action sequences
+        action_samples = ode_solver.sample(
             x_0=noise_sample,
-            global_cond=global_cond.repeat(1, 1),
-            step_size=self.config.ode_step_size,
-            method=self.config.ode_solver_method,
-            atol=self.config.atol,
-            rtol=self.config.rtol,
+            global_cond=global_cond.repeat(num_samples, 1),
+            step_size=self.flow_matching_cfg.ode_step_size,
+            method=self.flow_matching_cfg.ode_solver_method,
+            atol=self.flow_matching_cfg.atol,
+            rtol=self.flow_matching_cfg.rtol,
         )
 
-        # Always visualize at least the cube [-3, +3] as a reasonable range
-        # for the Gaussian noise samples
-        min_lim = min(self.min_action, -1.0)
-        max_lim = max(self.max_action,  1.0)
+        if visualize_actions:
+            if not action_data:
+                action_data["action_samples"] = action_samples[1:]
+            action_data["base_action"] = action_samples[0].unsqueeze(0)
 
         # Build a 1-D lin-space once and reuse it for every axis we need
-        axis_lin = np.linspace(min_lim, max_lim, self.grid_size)
+        axis_lin = np.linspace(self.min_action, self.max_action, self.grid_size)
 
         # Create the grids
         if len(self.action_dims) == 2:
@@ -997,7 +981,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_dim, y_dim, z_dim = self.action_dims
 
         action_step = random.choice(self.action_steps)
-        positions = actions.repeat(x_grid.size, 1, 1)
+        positions = action_samples[0].repeat(x_grid.size, 1, 1)
         positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
         positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)
         if len(self.action_dims) == 3:
@@ -1031,7 +1015,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     y_positions=y_grid.reshape(-1),
                     x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
                     y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
-                    limits=(min_lim, max_lim),
+                    limits=(self.min_action, self.max_action),
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm
@@ -1044,10 +1028,17 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
                     y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
                     z_velocities=velocities[:, action_step, z_dim].cpu().numpy(),
-                    limits=(min_lim, max_lim),
+                    limits=(self.min_action, self.max_action),
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm
+                )
+
+            if visualize_actions:
+                self._add_actions(
+                    ax=fig.axes[0],
+                    action_data=action_data,
+                    action_step=action_step,
                 )
 
             if self.show:
@@ -1200,3 +1191,49 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             plt.ion()
 
         return fig
+    
+    def _add_actions(
+        self,
+        ax: Axes,
+        action_data: Dict[str, Tensor],
+        action_step: int,
+    ) -> plt.Figure:
+        """
+        Overlay action samples on a vector field plot.
+        """
+        color_palette = ["red", "orange", "green", "purple", "magenta", "brown"]
+        
+        # Figure out which dims to plot
+        if len(self.action_dims) == 2:
+            x_dim, y_dim = self.action_dims
+            is_3d = False
+        else:
+            x_dim, y_dim, z_dim = self.action_dims
+            is_3d = True
+
+        # Plot each action sequence
+        for idx, (name, actions) in enumerate(action_data.items()):
+            # always force base_action to green
+            if name == "base_action":
+                color = "cyan"
+            else:
+                color = color_palette[idx % len(color_palette)]
+            # Actions shape: (num_samples, horizon, action_dim)
+            x_positions = actions[:, action_step, x_dim].cpu().numpy()
+            y_positions = actions[:, action_step, y_dim].cpu().numpy()
+            label = name.title().replace("_", " ")
+            if is_3d:
+                z_positions = actions[:, action_step, z_dim].cpu().numpy()
+                ax.scatter(
+                    x_positions, y_positions, z_positions, label=label,
+                    color=color, s=10, zorder=3,
+                )
+            else:
+                ax.scatter(
+                    x_positions, y_positions, label=label,
+                    color=color, s=10, zorder=3,    
+                )
+
+        # Draw legend using the prettified names
+        ax.legend()
+        return ax.get_figure()

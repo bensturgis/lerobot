@@ -5,12 +5,7 @@ from pathlib import Path
 
 from lerobot.common import envs, policies
 from lerobot.configs import parser
-from lerobot.configs.default import (
-    ActionSeqVisConfig,
-    FlowVisConfig,
-    VectorFieldVisConfig,
-    VisConfig
-)
+from lerobot.configs.default import VisConfig
 from lerobot.configs.policies import PreTrainedConfig
 
 
@@ -19,19 +14,10 @@ class VisualizePipelineConfig:
     env: envs.EnvConfig
     policy: PreTrainedConfig | None = None
     vis: VisConfig = field(default_factory=VisConfig)
-    action_seq: ActionSeqVisConfig = field(default_factory=ActionSeqVisConfig)
-    flows: FlowVisConfig = field(default_factory=FlowVisConfig)
-    vector_field: VectorFieldVisConfig = field(default_factory=VectorFieldVisConfig)
 
-    # Which visualizers to run (you can pick one or more)
-    vis_types: list[str] = field(
-        default_factory=lambda: ["action_seq", "flows", "vector_field"]
-    )
-    
     seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None
-
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
 
@@ -50,12 +36,6 @@ class VisualizePipelineConfig:
             logging.warning(
                 "No pretrained path was provided, visualized policy will be built from scratch (random weights)."
             )
-
-        if "flows" in self.vis_types and self.flows.action_dim_names is None:
-            self.flows.action_dim_names = self.vis.action_dim_names
-
-        if "vector_field" in self.vis_types and self.vector_field.action_dim_names is None:
-            self.vector_field.action_dim_names = self.vis.action_dim_names
 
         if not self.job_name:
             if self.env is None:
@@ -78,15 +58,9 @@ class VisualizePipelineConfig:
     def validate(self):
         # vis_types check
         allowed_vis = {"flows", "vector_field", "action_seq"}
-        for v in self.vis_types:
+        for v in self.vis.vis_types:
             if v not in allowed_vis:
                 raise ValueError(
                     f"Unknown visualization type '{v}'. "
                     f"Allowed: {sorted(allowed_vis)}"
                 )
-            
-        if (
-            {"flows", "vector_field"}.issubset(self.vis_types) and 
-            self.flows.action_dims != self.vector_field.action_dims
-        ):
-            logging.warning("Visualizing different action dimensions for the flow and vector field plot.")
