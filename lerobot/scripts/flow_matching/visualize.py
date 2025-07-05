@@ -50,103 +50,108 @@ def main(cfg: VisualizePipelineConfig):
     policy = make_policy(cfg.policy, env_cfg=cfg.env).to(device)
     policy.eval()
 
-    logging.info("Creating environment")
-    env = make_single_env(cfg.env)
-    
-    reset_kwargs: dict = {}
-    if cfg.start_state is not None and cfg.env.type == "pusht":
-        logging.info(f"Resetting to provided start_state {cfg.start_state}")
-        reset_kwargs["options"] = {"reset_to_state": cfg.start_state}
+    num_rollouts = cfg.vis.num_rollouts
+    for ep in range(num_rollouts):
+        logging.info("Creating environment")
+        env = make_single_env(cfg.env)
+        
+        reset_kwargs: dict = {}
+        if cfg.start_state is not None and cfg.env.type == "pusht":
+            logging.info(f"Resetting to provided start_state {cfg.start_state}")
+            reset_kwargs["options"] = {"reset_to_state": cfg.start_state}
 
-    observation, _ = env.reset(seed=cfg.seed, **reset_kwargs)
-    
-    # Callback for visualization.
-    def render_frame(env: gym.Env) -> np.ndarray:
-        rgb_frame = env.render()
-        video_frames.append(rgb_frame)
+        observation, _ = env.reset(seed=cfg.seed, **reset_kwargs)
+        
+        # Callback for visualization.
+        def render_frame(env: gym.Env) -> np.ndarray:
+            rgb_frame = env.render()
+            video_frames.append(rgb_frame)
 
-        # Live visualization
+            # Live visualization
+            if cfg.show:
+                live_view.enqueue_frame(rgb_frame[..., ::-1])
+            
+            return rgb_frame
+
+        # Cache frames for creating video
+        video_frames: list[np.ndarray] = []
+        # Setup for live visualization
         if cfg.show:
-            live_view.enqueue_frame(rgb_frame[..., ::-1])
-        
-        return rgb_frame
-
-    # Cache frames for creating video
-    video_frames: list[np.ndarray] = []
-    # Setup for live visualization
-    if cfg.show:
-        live_view = LiveWindow("Live Visualization")
-    render_frame(env)
-
-    # Prepare visualisers
-    visualizers = make_flow_matching_visualizers(
-        vis_cfg=cfg.vis,
-        model_cfg=policy.config,
-        velocity_model=policy.flow_matching.unet,
-        output_root=cfg.output_dir,
-        unnormalize_outputs=policy.unnormalize_outputs,
-    )
-
-    # Roll through one episode
-    max_episode_steps = env.spec.max_episode_steps
-    max_vis_steps = (max_episode_steps if cfg.vis.max_steps is None
-                     else min(max_episode_steps, cfg.vis.max_steps))
-
-    start_time = time.time() 
-
-    progbar = trange(
-        max_vis_steps,
-        desc=f"Running rollout with at most {max_vis_steps} steps"
-    )   
-    for step_idx in progbar:
-        # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
-        observation = preprocess_observation(observation)
-        observation = {
-            key: observation[key].to(device, non_blocking=device.type == "cuda") for key in observation
-        }
-        
-        # Decide whether a new sequence will be generated
-        new_action_gen = len(policy._queues["action"]) == 0
-        
-        with torch.no_grad():
-            action = policy.select_action(observation)
-
-        if new_action_gen and (cfg.vis.start_step is None or step_idx >= cfg.vis.start_step):
-            # Stack the history of observations
-            batch = {
-                k: torch.stack(list(policy._queues[k]), dim=1)
-                for k in policy._queues
-                if k != "action"
-            }
-
-            # build global-conditioning with the policy's helper
-            global_cond = policy.flow_matching.prepare_global_conditioning(batch)
-
-            for visualizer in visualizers:
-                visualizer.visualize(global_cond=global_cond, env=env)                
-
-        # Apply the next action
-        observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())
+            live_view = LiveWindow("Live Visualization")
         render_frame(env)
 
-        # Stop early if environment terminates
-        if terminated:
-            break
+        ep_dir = cfg.output_dir / f"rollout_{ep:03d}"
+        ep_dir.mkdir(parents=True, exist_ok=True)
 
-    logging.info(f"Finished in {time.time() - start_time:.1f}s")
+        # Prepare visualisers
+        visualizers = make_flow_matching_visualizers(
+            vis_cfg=cfg.vis,
+            model_cfg=policy.config,
+            velocity_model=policy.flow_matching.unet,
+            output_root=ep_dir,
+            unnormalize_outputs=policy.unnormalize_outputs,
+        )
 
-    env.close()
+        # Roll through one episode
+        max_episode_steps = env.spec.max_episode_steps
+        max_vis_steps = (max_episode_steps if cfg.vis.max_steps is None
+                        else min(max_episode_steps, cfg.vis.max_steps))
 
-    # Close the live visualization
-    if cfg.show:
-        live_view.close()
+        start_time = time.time() 
 
-    # Save the buffered video
-    write_video(
-        str(cfg.output_dir / "rollout.mp4"),
-        np.stack(video_frames, axis=0),
-        fps=env.metadata["render_fps"]
-    )
+        progbar = trange(
+            max_vis_steps,
+            desc=f"[Episode {ep+1}/{num_rollouts}]: Running rollout with at most {max_vis_steps} steps"
+        )   
+        for step_idx in progbar:
+            # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
+            observation = preprocess_observation(observation)
+            observation = {
+                key: observation[key].to(device, non_blocking=device.type == "cuda") for key in observation
+            }
+            
+            # Decide whether a new sequence will be generated
+            new_action_gen = len(policy._queues["action"]) == 0
+            
+            with torch.no_grad():
+                action = policy.select_action(observation)
+
+            if new_action_gen and (cfg.vis.start_step is None or step_idx >= cfg.vis.start_step):
+                # Stack the history of observations
+                batch = {
+                    k: torch.stack(list(policy._queues[k]), dim=1)
+                    for k in policy._queues
+                    if k != "action"
+                }
+
+                # build global-conditioning with the policy's helper
+                global_cond = policy.flow_matching.prepare_global_conditioning(batch)
+
+                for visualizer in visualizers:
+                    visualizer.visualize(global_cond=global_cond, env=env)                
+
+            # Apply the next action
+            observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())
+            render_frame(env)
+
+            # Stop early if environment terminates
+            if terminated:
+                break
+
+        logging.info(f"Finished in {time.time() - start_time:.1f}s")
+
+        env.close()
+
+        # Close the live visualization
+        if cfg.show:
+            live_view.close()
+
+        # Save the buffered video
+        write_video(
+            str(ep_dir / "rollout.mp4"),
+            np.stack(video_frames, axis=0),
+            fps=env.metadata["render_fps"]
+        )
 
 
 if __name__ == "__main__":

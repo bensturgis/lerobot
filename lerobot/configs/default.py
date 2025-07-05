@@ -128,6 +128,9 @@ class VisConfig:
         default_factory=lambda: ["action_seq", "flows", "vector_field"]
     )
 
+    # Number of total rollouts to visualize
+    num_rollouts: int = 10
+
     # If set, start drawing only after this environment step
     start_step: Optional[int] = None
 
