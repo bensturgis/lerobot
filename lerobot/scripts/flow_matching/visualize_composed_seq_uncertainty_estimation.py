@@ -32,7 +32,10 @@ from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedSequenceSampler
-from lerobot.common.policies.flow_matching.visualizer import VectorFieldVisualizer
+from lerobot.common.policies.flow_matching.visualizer import (
+    ActionSeqVisualizer,
+    VectorFieldVisualizer
+)
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.live_window import LiveWindow
 from lerobot.common.utils.random_utils import set_seed
@@ -95,13 +98,20 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
         )
         
         # Prepare visualizers
+        action_seq_visualizer = ActionSeqVisualizer(
+            cfg.action_seq,
+            flow_matching_cfg=policy.config,
+            velocity_model=policy.flow_matching.unet,
+            unnormalize_outputs=policy.unnormalize_outputs,
+            output_root=ep_dir,
+        )
         vector_field_visualizer = VectorFieldVisualizer(
             cfg=cfg.vector_field,
             flow_matching_cfg=policy.config,
             velocity_model=policy.flow_matching.unet,
             output_root=ep_dir,
         )
-
+        
         # Only visualize the action steps that come from the next observation
         prev_action_seq_end = (
             policy.config.n_obs_steps - 1 + policy.config.n_action_steps
@@ -176,7 +186,10 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                         visualize_actions=True,
                         actions=action_data,
                         mean_uncertainty=mean_uncertainty,
-                    )                
+                    )
+
+                # Visualize action sequence batch
+                action_seq_visualizer.visualize(global_cond=global_cond, env=env)
 
                 # Set the previous global conditioning vector and the previous action sequences to compose with
                 prev_global_cond = global_cond

@@ -6,7 +6,11 @@ from pathlib import Path
 from lerobot.common import envs, policies
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import ComposedSequenceSamplerConfig
 from lerobot.configs import parser
-from lerobot.configs.default import VectorFieldVisConfig, VisConfig
+from lerobot.configs.default import (
+    ActionSeqVisConfig,
+    VectorFieldVisConfig,
+    VisConfig
+)
 from lerobot.configs.policies import PreTrainedConfig
 
 
@@ -16,6 +20,7 @@ class VisualizeComposedSeqPipelineConfig:
     policy: PreTrainedConfig | None = None
     composed_seq_sampler: ComposedSequenceSamplerConfig = field(default_factory=ComposedSequenceSamplerConfig)
     vis: VisConfig = field(default_factory=VisConfig)
+    action_seq: ActionSeqVisConfig = field(default_factory=ActionSeqVisConfig)
     vector_field: VectorFieldVisConfig = field(default_factory=VectorFieldVisConfig)
 
     seed: int | None = None
