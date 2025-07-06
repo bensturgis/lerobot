@@ -4,20 +4,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lerobot.common import envs, policies
+from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import ComposedSequenceSamplerConfig
 from lerobot.configs import parser
-from lerobot.configs.default import VisConfig
+from lerobot.configs.default import VectorFieldVisConfig, VisConfig
 from lerobot.configs.policies import PreTrainedConfig
 
 
 @dataclass
-class VisualizePipelineConfig:
+class VisualizeComposedSeqPipelineConfig:
     env: envs.EnvConfig
     policy: PreTrainedConfig | None = None
+    composed_seq_sampler: ComposedSequenceSamplerConfig = field(default_factory=ComposedSequenceSamplerConfig)
     vis: VisConfig = field(default_factory=VisConfig)
+    vector_field: VectorFieldVisConfig = field(default_factory=VectorFieldVisConfig)
 
     seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None
+    
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
 
@@ -37,6 +41,9 @@ class VisualizePipelineConfig:
                 "No pretrained path was provided, visualized policy will be built from scratch (random weights)."
             )
 
+        if self.vector_field.action_dim_names is None:
+            self.vector_field.action_dim_names = self.vis.action_dim_names
+
         if not self.job_name:
             if self.env is None:
                 self.job_name = f"{self.policy.type}"
@@ -46,21 +53,9 @@ class VisualizePipelineConfig:
         if not self.output_dir:
             now = dt.datetime.now()
             vis_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
-            self.output_dir = Path("outputs/visualizations") / vis_dir
-
-        self.validate()
+            self.output_dir = Path("outputs/composed_seq_visualizations") / vis_dir
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:
         """This enables the parser to load config from the policy using `--policy.path=local/dir`"""
         return ["policy"]
-
-    def validate(self):
-        # vis_types check
-        allowed_vis = {"flows", "vector_field", "action_seq"}
-        for v in self.vis.vis_types:
-            if v not in allowed_vis:
-                raise ValueError(
-                    f"Unknown visualization type '{v}'. "
-                    f"Allowed: {sorted(allowed_vis)}"
-                )

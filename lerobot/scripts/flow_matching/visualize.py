@@ -9,7 +9,7 @@ Stream the policy rollout live and create flow trajectory and generated action s
 batch visualizations.
 
 ```
-python lerobot/scripts/visualize_flow_matching.py \
+python lerobot/scripts/flow_matching/visualize.py \
     --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
     --policy.device=cuda \
     --env.type=pusht \

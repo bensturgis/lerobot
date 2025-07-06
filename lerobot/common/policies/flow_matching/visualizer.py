@@ -719,7 +719,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         time_grid: Tensor,
         num_paths: int,
         action_step: int,
-    ):
+    ) -> plt.Figure:
         """
         Draw a 3D quiver plot for the flow of a single action step.
         """
@@ -908,7 +908,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         self.max_action = cfg.max_action
         self.grid_size = cfg.grid_size
         # Default time_grid is list [0.05, 0.1, ..., 1.0]
-        self.time_grid = list(np.linspace(0, 1, 31)) if cfg.time_grid is None else cfg.time_grid
+        self.time_grid = list(np.linspace(0, 1, 21)) if cfg.time_grid is None else cfg.time_grid
         self.show = cfg.show
         self.vis_type = "vector_field"
     
@@ -1018,7 +1018,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     limits=(self.min_action, self.max_action),
                     action_step=action_step,
                     time=time,
-                    max_velocity_norm=max_velocity_norm
+                    max_velocity_norm=max_velocity_norm,
+                    mean_uncertainty=kwargs.get("mean_uncertainty", None)
                 )
             else:
                 fig = self._create_vector_field_plot_3d(
@@ -1031,7 +1032,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     limits=(self.min_action, self.max_action),
                     action_step=action_step,
                     time=time,
-                    max_velocity_norm=max_velocity_norm
+                    max_velocity_norm=max_velocity_norm,
+                    mean_uncertainty=kwargs.get("mean_uncertainty", None)
                 )
 
             if visualize_actions:
@@ -1063,6 +1065,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
+        mean_uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
         Draw a 3D quiver plot for the vector field of a three action dimensions in a single
@@ -1117,6 +1120,21 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         ax.set_ylabel(y_label, fontsize=14, labelpad=8)
         ax.set_zlabel(z_label, fontsize=14, labelpad=8)
 
+        if mean_uncertainty:
+            ax.text2D(
+                0.02, 0.98,
+                f"Mean Uncertainty: {mean_uncertainty:.2f}",
+                transform=ax.transAxes,
+                fontsize=12,
+                verticalalignment="top",
+                bbox=dict(
+                    boxstyle="round,pad=0.3",
+                    facecolor="white",
+                    edgecolor="none",
+                    alpha=0.8
+                ),
+            )
+
         ax.tick_params(axis='both', labelsize=12)
         ax.grid(True)
         plt.tight_layout()
@@ -1136,6 +1154,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
+        mean_uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
         Draw a 2D quiver plot for the vector field of a two action dimensions in a single
@@ -1182,6 +1201,21 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             y_label = f"Action dimension {self.action_dims[1]}"
         ax.set_xlabel(x_label, fontsize=14)
         ax.set_ylabel(y_label, fontsize=14)
+
+        if mean_uncertainty:
+            ax.text(
+                0.02, 0.98,
+                f"Mean uncertainty: {mean_uncertainty:.2f}",
+                transform=ax.transAxes,
+                fontsize=12,
+                verticalalignment="top",
+                bbox=dict(
+                    boxstyle="round,pad=0.3",
+                    facecolor="white",
+                    edgecolor="none",
+                    alpha=0.8
+                ),
+            )
 
         ax.tick_params(axis='both', labelsize=12)
         ax.grid(True)

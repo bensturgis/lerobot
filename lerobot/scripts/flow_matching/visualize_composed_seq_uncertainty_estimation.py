@@ -1,19 +1,18 @@
 #!/usr/bin/env python
 """
-Visualize different aspects of a Flow Matching policy rollout such as 
-flow trajectories, vector fields, and generated action sequence batches.
+Visualize the composed action sequence uncertainty estimation method by creating a vector field
+plot overlaid by the composed action sequences.
 
 Usage example:
 
-Stream the policy rollout live and create flow trajectory and generated action sequence
-batch visualizations.
+Stream the policy rollout live and create the composed action sequence visualization for the Push-T
+task.
 
 ```
-python lerobot/scripts/visualize_flow_matching.py \
+python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimation.py \
     --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
     --policy.device=cuda \
     --env.type=pusht \
-    --vis.vis_types='["flows", "action_seq"]' \
     --show=true
 ``` 
 """
@@ -22,13 +21,18 @@ import logging
 import numpy as np
 import time
 import torch
-from tqdm import trange
+
+from torch import Tensor
+from tqdm import trange, tqdm
+from typing import Dict
 
 from lerobot.configs import parser
-from lerobot.configs.visualize import VisualizeComposedSeqPipelineConfig
-from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizers
+from lerobot.configs.visualize_composed_seq import VisualizeComposedSeqPipelineConfig
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
+from lerobot.common.policies.factory import make_policy
+from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedSequenceSampler
+from lerobot.common.policies.flow_matching.visualizer import VectorFieldVisualizer
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.live_window import LiveWindow
 from lerobot.common.utils.random_utils import set_seed
@@ -83,14 +87,37 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
         ep_dir = cfg.output_dir / f"rollout_{ep:03d}"
         ep_dir.mkdir(parents=True, exist_ok=True)
 
-        # Prepare visualisers
-        visualizers = make_flow_matching_visualizers(
-            vis_cfg=cfg.vis,
-            model_cfg=policy.config,
+        # Prepare composed action sequence uncertainty sampler
+        composed_seq_sampler = ComposedSequenceSampler(
+            flow_matching_cfg=policy.config, 
+            cfg=cfg.composed_seq_sampler,
+            velocity_model=policy.flow_matching.unet
+        )
+        
+        # Prepare visualizers
+        vector_field_visualizer = VectorFieldVisualizer(
+            cfg=cfg.vector_field,
+            flow_matching_cfg=policy.config,
             velocity_model=policy.flow_matching.unet,
             output_root=ep_dir,
-            unnormalize_outputs=policy.unnormalize_outputs,
         )
+
+        # Only visualize the action steps that come from the next observation
+        prev_action_seq_end = (
+            policy.config.n_obs_steps - 1 + policy.config.n_action_steps
+        )
+        horizon = policy.config.horizon
+        attached_action_steps = list(range(prev_action_seq_end, horizon))
+        if vector_field_visualizer.action_steps not in attached_action_steps:
+            vector_field_visualizer.action_steps = list(range(prev_action_seq_end, horizon))
+
+        # Initialize the dictionary of actions to visualize in the vector field plot
+        action_data: Dict[str, Tensor] = {}
+
+        # At the beginning of an epsiode we don't have previous actions to compose with
+        prev_global_cond: Tensor | None = None
+        prev_actions: Tensor | None = None
+        composed_seq_sampler.prev_action_sequence = None
 
         # Roll through one episode
         max_episode_steps = env.spec.max_episode_steps
@@ -124,11 +151,37 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                     if k != "action"
                 }
 
-                # build global-conditioning with the policy's helper
+                # Build global-conditioning with the policy's helper
                 global_cond = policy.flow_matching.prepare_global_conditioning(batch)
 
-                for visualizer in visualizers:
-                    visualizer.visualize(global_cond=global_cond, env=env)                
+                # Get the newly sampled actions
+                new_actions, uncertainties = composed_seq_sampler.conditional_sample_with_uncertainty(
+                    global_cond=global_cond
+                )
+                tqdm.write(f"Compsed sequence sampler uncertainty scores: {uncertainties}")
+                mean_uncertainty = float(uncertainties.mean().item())
+
+                # Compose actions
+                if prev_actions is not None:
+                    composed_actions = composed_seq_sampler.compose_action_seqs(
+                        prev_action_seq=prev_actions,
+                        new_action_seq=new_actions
+                    )
+                    action_data["action_samples"] = prev_actions
+                    action_data["composed_actions"] = composed_actions
+
+                    # Visualize vector field with composed action sequences
+                    vector_field_visualizer.visualize(
+                        global_cond=prev_global_cond,
+                        visualize_actions=True,
+                        actions=action_data,
+                        mean_uncertainty=mean_uncertainty,
+                    )                
+
+                # Set the previous global conditioning vector and the previous action sequences to compose with
+                prev_global_cond = global_cond
+                prev_actions = new_actions
+                composed_seq_sampler.prev_action_sequence = new_actions
 
             # Apply the next action
             observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())

@@ -107,7 +107,7 @@ class FlowMatchingUncertaintySampler(ABC):
         # repeat batch‐dim
         return global_cond.repeat(self.num_action_seq_samples, 1)
     
-    def _compose_action_seqs(
+    def compose_action_seqs(
         self,
         prev_action_seq: Tensor,
         new_action_seq: Tensor   
@@ -544,7 +544,7 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
         else:
             # Compose full action sequences from stored prefix and newly sampled
             # action sequences
-            composed_action_seq = self._compose_action_seqs(
+            composed_action_seq = self.compose_action_seqs(
                 prev_action_seq=self.prev_action_sequence,
                 new_action_seq=new_action_seq  
             )
@@ -839,7 +839,7 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         else:
             # Compose full action sequences from stored prefix and newly sampled
             # action sequences
-            composed_action_seq = self._compose_action_seqs(
+            composed_action_seq = self.compose_action_seqs(
                 prev_action_seq=self.prev_action_sequence,
                 new_action_seq=new_action_seq  
             )
@@ -1086,7 +1086,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             )
         else:
             # Compose full action sequences from stored prefix and newly sampled action sequences
-            composed_action_seq = self._compose_action_seqs(
+            composed_action_seq = self.compose_action_seqs(
                 prev_action_seq=self.prev_action_sequence,
                 new_action_seq=new_action_seq  
             )
