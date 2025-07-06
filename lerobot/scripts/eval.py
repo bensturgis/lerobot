@@ -414,8 +414,8 @@ def eval_policy(
         if max_episodes_rendered > 0:
             num_episodes_in_batch = done_indices.numel()
             
-            if isinstance(ep_frames, list):
-                batch_stacked_frames = np.stack(ep_frames, axis=1)  # (b, t, *)
+            if isinstance(ep_frames, list) and len(ep_frames) > 0:
+                batch_stacked_frames = np.stack(ep_frames, axis=1)
                 for ep in range(num_episodes_in_batch):
                     if n_episodes_rendered >= max_episodes_rendered:
                         break
@@ -426,9 +426,9 @@ def eval_policy(
                         file_suffix="",
                     )
                     n_episodes_rendered += 1
-            elif isinstance(ep_frames, dict):
+            elif isinstance(ep_frames, dict) and len(next(iter(ep_frames.values()))) > 0:
                 stacked_by_cam = {
-                    cam: np.stack(frames, axis=1)                    # (B, T, H, W, C)
+                    cam: np.stack(frames, axis=1)
                     for cam, frames in ep_frames.items()
                 }
 

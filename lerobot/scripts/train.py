@@ -329,7 +329,7 @@ def train(cfg: TrainPipelineConfig):
                     cfg.eval.batch_size,
                     cfg.eval.use_async_envs,
                     videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
-                    max_episodes_rendered=4,
+                    max_episodes_rendered=10,
                     start_seed=cfg.seed,
                 )
 
@@ -354,10 +354,7 @@ def train(cfg: TrainPipelineConfig):
                 wandb_logger.log_dict(wandb_log_dict, step, mode="eval")
                 wandb_logger.log_video(eval_info["video_paths"][0], step, mode="eval")
 
-    if eval_env:
-        eval_env.close()
     logging.info("End of training")
-
 
 if __name__ == "__main__":
     init_logging()
