@@ -43,7 +43,6 @@ class FlowMatchingUncertaintySampler(ABC):
         num_action_seq_samples: int,
         scoring_metric: Optional[str] = None,
         velocity_eval_times: Optional[Sequence[float]] = None,
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
@@ -56,7 +55,6 @@ class FlowMatchingUncertaintySampler(ABC):
         self.velocity_model = velocity_model
         self.sampling_ode_solver = ODESolver(velocity_model)
         self.num_action_seq_samples = num_action_seq_samples
-        self.generator = generator
         self.horizon = self.flow_matching_cfg.horizon
         self.action_dim = self.flow_matching_cfg.action_feature.shape[0]
         self.device = get_device_from_parameters(velocity_model)
@@ -245,6 +243,7 @@ class FlowMatchingUncertaintySampler(ABC):
     def conditional_sample_with_uncertainty(
         self,
         global_cond: Tensor,
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Sample `num_action_seq_samples` many action sequences and compute their
@@ -253,6 +252,7 @@ class FlowMatchingUncertaintySampler(ABC):
         Args:
             global_cond: Single conditioning feature vector for the velocity
                 model. Shape: [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
 
         Returns:
             - Action sequences samples. Shape: [num_action_seq_samples, horizon, action_dim].
@@ -270,6 +270,7 @@ class FlowMatchingUncertaintySampler(ABC):
         exact_divergence: bool,
         lik_ode_solver_cfg: LikelihoodODESolverConfig,
         sampler_global_cond: Optional[Tensor] = None,
+        generator: Optional[torch.Generator] = None
     ) -> Tensor:
         """
         Compute an uncertainty score for a batch of action sequence samples
@@ -298,6 +299,7 @@ class FlowMatchingUncertaintySampler(ABC):
                 Needed for "intermediate_vel_diff".
             exact_divergence: Whether to compute exact divergence in the reverse-time ODE.
                 Needed for "likelihood".
+            generator: PyTorch random number generator.
 
         Returns:
             Uncertainty scores per sample where larger values indicate higher uncertainty.
@@ -398,7 +400,7 @@ class FlowMatchingUncertaintySampler(ABC):
                 atol=lik_ode_solver_cfg.atol,
                 rtol=lik_ode_solver_cfg.rtol,
                 exact_divergence=exact_divergence,
-                generator=self.generator,
+                generator=generator,
             )
 
             # Use negative log-likelihood as uncertainty score
@@ -428,7 +430,6 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
         flow_matching_model: nn.Module,
         laplace_calib_loader: DataLoader,
         laplace_path: Union[str, Path],
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Initializes the composed sequence cross laplace sampler.
@@ -449,7 +450,6 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
             velocity_eval_times=cfg.velocity_eval_times,
-            generator=generator,
         )
         self.method_name = "composed_cross_laplace"
         # Whether to compute exact divergence for log-likelihood
@@ -483,7 +483,8 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
 
     def conditional_sample_with_uncertainty(
         self,
-        observation: Dict[str, Tensor]
+        observation: Dict[str, Tensor],
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Composes previous and current action sequence and evaluates the result
@@ -499,6 +500,7 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
                     AND/OR
                 "observation.environment_state": (B, environment_dim)
                 }
+            generator: PyTorch random number generator.
 
         Returns:
             - sampled_action_seqs: Action sequences drawn from the MAP model.
@@ -518,7 +520,7 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Solve ODE forward from noise to sample action sequences
@@ -567,7 +569,7 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
         laplace_flow_matching_model = draw_laplace_flow_matching_model(
             laplace_posterior=self.laplace_posterior,
             flow_matching_model=self.flow_matching_model,
-            generator=self.generator
+            generator=generator
         )
 
         # Store conditioning vector of the scoring model from the previous action sampling step
@@ -593,7 +595,6 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
         flow_matching_model: nn.Module,
         laplace_calib_loader: DataLoader,
         laplace_path: Union[str, Path],
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
@@ -612,7 +613,6 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
             velocity_eval_times=cfg.velocity_eval_times,
-            generator=generator,
         )
         self.method_name = "cross_laplace"
         # Whether to compute exact divergence for log-likelihood
@@ -636,7 +636,8 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
 
     def conditional_sample_with_uncertainty(
         self,
-        observation: Dict[str, Tensor]
+        observation: Dict[str, Tensor],
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Generates action sequences using the MAP flow matching model, then scores these
@@ -652,6 +653,7 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
                     AND/OR
                 "observation.environment_state": (B, environment_dim)
                 }
+            generator: PyTorch random number generator.
 
         Returns:
             - sampled_action_seqs: Action sequences drawn from the MAP model.
@@ -659,17 +661,9 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             - uncertainty_scores: Uncertainty scores where a higher value means more
                 uncertain. Shape: [num_action_seq_samples,].      
         """
-        # Draw flow matching model from the Laplace posterior
-        laplace_flow_matching_model = draw_laplace_flow_matching_model(
-            laplace_posterior=self.laplace_posterior,
-            flow_matching_model=self.flow_matching_model,
-            generator=self.generator
-        )
-
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation) # (B, global_cond_dim)
-        laplace_global_cond = laplace_flow_matching_model.prepare_global_conditioning(observation)  # (B, global_cond_dim)
 
         # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
@@ -680,7 +674,7 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Solve ODE forward from noise to sample action sequences
@@ -697,6 +691,14 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
         # Store sampled action sequences for logging
         sampled_action_seqs = ode_states[-1]
         self.latest_action_candidates = sampled_action_seqs
+
+        # Draw flow matching model from the Laplace posterior and create the flow matching conditioning vector
+        laplace_flow_matching_model = draw_laplace_flow_matching_model(
+            laplace_posterior=self.laplace_posterior,
+            flow_matching_model=self.flow_matching_model,
+            generator=generator
+        )
+        laplace_global_cond = laplace_flow_matching_model.prepare_global_conditioning(observation)  # (B, global_cond_dim)
 
         # Compute uncertainty based on selected metric
         uncertainty_scores = self.score_sample(
@@ -732,7 +734,6 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         cfg: ComposedCrossEnsembleSamplerConfig,
         sampler_flow_matching_model: nn.Module,
         scorer_flow_matching_model: nn.Module,
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Initializes the composed sequence cross ensemble sampler.
@@ -749,7 +750,6 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
             velocity_eval_times=cfg.velocity_eval_times,
-            generator=generator,
         )
         self.method_name = "composed_cross_ensemble"
         # Save models for sampling and scoring
@@ -778,7 +778,8 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
 
     def conditional_sample_with_uncertainty(
         self,
-        observation: Dict[str, Tensor]
+        observation: Dict[str, Tensor],
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Composes previous and current action sequence and evaluates the result
@@ -794,6 +795,7 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
                     AND/OR
                 "observation.environment_state": (B, environment_dim)
                 }
+            generator: PyTorch random number generator.
 
         Returns:
             - sampled_action_seqs: Action sequences drawn from the sampler model.
@@ -813,7 +815,7 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Solve ODE forward from noise to sample action sequences
@@ -877,7 +879,6 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
         cfg: CrossEnsembleSamplerConfig,
         sampler_flow_matching_model: nn.Module,
         scorer_flow_matching_model: nn.Module,
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Initializes the cross ensemble sampler.
@@ -893,7 +894,6 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
             velocity_eval_times=cfg.velocity_eval_times,
-            generator=generator,
         )
         self.method_name = "cross_ensemble"
         # Save models for sampling and scoring
@@ -912,7 +912,8 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
         
     def conditional_sample_with_uncertainty(
         self,
-        observation: Dict[str, Tensor]
+        observation: Dict[str, Tensor],
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Samples candidate action sequences and evaluates uncertainty under separate
@@ -928,6 +929,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
                     AND/OR
                 "observation.environment_state": (B, environment_dim)
                 }
+            generator: PyTorch random number generator.
 
         Returns:
             - sampled_action_seqs: Action sequences drawn from the sampler model.
@@ -949,7 +951,7 @@ class CrossEnsembleSampler(FlowMatchingUncertaintySampler):
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Solve ODE forward from noise to sample action sequences
@@ -999,7 +1001,6 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         flow_matching_cfg: FlowMatchingConfig,
         cfg: ComposedSequenceSamplerConfig,
         velocity_model: nn.Module,
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
@@ -1011,7 +1012,6 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             scoring_metric=cfg.scoring_metric,
             velocity_eval_times=cfg.velocity_eval_times,
-            generator=generator,
         )
         self.method_name = "composed_sequence"
         # Whether to compute exact divergence for log-likelihood
@@ -1038,6 +1038,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
     def conditional_sample_with_uncertainty(
         self,
         global_cond: Tensor,
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Samples `num_action_seq_samples` many new action sequences and computes
@@ -1047,6 +1048,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         Args:
             global_cond: Single conditioning feature vector for the velocity
                 model. Shape: [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
 
         Returns:
             - Action sequence samples. Shape: [num_action_seq_samples, horizon, action_dim].
@@ -1061,7 +1063,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Solve ODE forward from noise to sample action sequences
@@ -1123,7 +1125,6 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
         flow_matching_cfg: FlowMatchingConfig,
         cfg: LikSamplerConfig,
         velocity_model: nn.Module,
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
@@ -1133,7 +1134,6 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
             flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
-            generator=generator,
         )
         self.method_name = "likelihood"
         self.exact_divergence = cfg.exact_divergence
@@ -1145,6 +1145,7 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
     def conditional_sample_with_uncertainty(
         self,
         global_cond: Tensor,
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Samples `num_action_seq_samples` many action sequences x_1 and computes their
@@ -1155,6 +1156,7 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
         Args:
             global_cond: Single conditioning feature vector for the velocity
                 model. Shape: [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
 
         Returns:
             - Action sequences samples. Shape: [num_action_seq_samples, horizon, action_dim].
@@ -1177,7 +1179,7 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Noise distribution is an isotropic Gaussian.
@@ -1200,7 +1202,7 @@ class LikelihoodSampler(FlowMatchingUncertaintySampler):
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
             exact_divergence=self.exact_divergence,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Uncertainty score is given by -log(p_1(x_1))
@@ -1223,7 +1225,6 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
         flow_matching_cfg: FlowMatchingConfig,
         cfg: EpsilonBallSamplerConfig,
         velocity_model: nn.Module,
-        generator: Optional[torch.Generator] = None,
     ):
         """
         Args:
@@ -1233,7 +1234,6 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
             flow_matching_cfg=flow_matching_cfg,
             velocity_model=velocity_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
-            generator=generator,
         )
         self.epsilon = cfg.epsilon
         self.num_eps_ball_samples = cfg.num_eps_ball_samples
@@ -1242,6 +1242,7 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
     def conditional_sample_with_uncertainty(
         self,
         global_cond: Tensor,
+        generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
         Samples `num_action_seq_samples` many action sequences and computes their
@@ -1256,6 +1257,7 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
         Args:
             global_cond: Single conditioning feature vector for the velocity
                 model. Shape: [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
 
         Returns:
             - Action sequences samples. Shape: [num_action_seq_samples, horizon, action_dim].
@@ -1277,7 +1279,7 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
-            generator=self.generator,
+            generator=generator,
         )
 
         # Initialize tensors to store the action sequences and expansion factors.
@@ -1299,7 +1301,7 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
                 self.action_dim,
                 device=self.device,
                 dtype=self.dtype,
-                generator=self.generator,
+                generator=generator,
             )
             
             # Normalize each direction to unit length.
@@ -1311,7 +1313,7 @@ class EpsilonBallSampler(FlowMatchingUncertaintySampler):
                 self.num_eps_ball_samples,
                 device=self.device,
                 dtype=self.dtype,
-                generator=self.generator,
+                generator=generator,
             ) ** (1.0/(self.horizon*self.action_dim))
             radii = radii.view(self.num_eps_ball_samples, 1, 1) * self.epsilon                         # (N,1,1)
             

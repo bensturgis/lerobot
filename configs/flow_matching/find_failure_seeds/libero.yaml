@@ -1,0 +1,16 @@
+env:
+  type: libero
+  task: LiberoEnv-v0
+  benchmark: libero_spatial
+  perturbation:
+    enable: False
+    static: False
+    patch_color: [0, 0, 0]
+
+eval:
+  batch_size: 3
+  n_episodes: 10
+
+num_failure_seeds: 100
+
+# python lerobot/scripts/find_failure_seeds.py --config=configs/flow_matching/find_failure_seeds/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

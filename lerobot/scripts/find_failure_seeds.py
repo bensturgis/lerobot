@@ -19,6 +19,7 @@ from termcolor import colored
 from torch import Tensor, nn
 from tqdm import trange
 
+from lerobot.common.envs import EnvConfig
 from lerobot.common.envs.factory import make_env
 from lerobot.common.envs.utils import add_envs_task, check_env_attributes_and_types, preprocess_observation
 from lerobot.common.policies.factory import make_policy
@@ -78,6 +79,15 @@ def rollout(
     assert isinstance(policy, nn.Module), "Policy must be a PyTorch nn module."
     device = get_device_from_parameters(policy)
 
+    # Initialize random number generators to select generate actions
+    if seeds is not None:
+        generators = [
+            torch.Generator(device=device).manual_seed(seed)
+            for seed in seeds
+        ]
+    else:
+        generators = None
+
     # Reset the policy and environments.
     policy.reset()
     observation, info = env.reset(seed=seeds)
@@ -116,7 +126,7 @@ def rollout(
         observation = add_envs_task(env, observation)
 
         with torch.no_grad():
-            action = policy.select_action(observation)
+            action = policy.select_action(observation, generators)
 
         # Convert to CPU / numpy.
         action = action.to("cpu").numpy()
@@ -176,9 +186,11 @@ def rollout(
 
 # TODO: Make it compatible with Libero environments
 def eval_policy(
-    env: gym.vector.VectorEnv,
+    env_cfg: EnvConfig,
     policy: PreTrainedPolicy,
     n_episodes: int,
+    batch_size: int,
+    use_async_envs: bool,
     max_episodes_rendered: int = 0,
     videos_dir: Path | None = None,
     live_vis: bool = False,
@@ -213,7 +225,7 @@ def eval_policy(
 
     # Determine how many batched rollouts we need to get n_episodes. Note that if n_episodes is not evenly
     # divisible by env.num_envs we end up discarding some data in the last batch.
-    n_batches = n_episodes // env.num_envs + int((n_episodes % env.num_envs) != 0)
+    n_batches = n_episodes // batch_size + int((n_episodes % batch_size) != 0)
 
     # Keep track of some metrics.
     sum_rewards = []
@@ -252,7 +264,7 @@ def eval_policy(
 
     # we dont want progress bar when we use slurm, since it clutters the logs
     progbar = trange(n_batches, desc="Stepping through eval batches", disable=inside_slurm())
-    for batch_ix in progbar:
+    for batch_ix in progbar:       
         # Cache frames for rendering videos. Each item will be (b, h, w, c), and the list indexes the rollout
         # step.
         if max_episodes_rendered > 0:
@@ -262,8 +274,16 @@ def eval_policy(
             seeds = None
         else:
             seeds = range(
-                start_seed + (batch_ix * env.num_envs), start_seed + ((batch_ix + 1) * env.num_envs)
+                start_seed + (batch_ix * batch_size), start_seed + ((batch_ix + 1) * batch_size)
             )
+        
+        logging.info("Making environment.")
+        env = make_env(
+            env_cfg,
+            n_envs=batch_size,
+            use_async_envs=use_async_envs,
+            seeds=seeds,
+        )
         rollout_data = rollout(
             env,
             policy,
@@ -434,13 +454,6 @@ def main(cfg: FindFailureSeedsConfig):
     logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
-    logging.info("Making environment.")
-    env = make_env(
-        cfg.env,
-        n_envs=cfg.eval.batch_size,
-        use_async_envs=cfg.eval.use_async_envs,
-    )
-
     logging.info("Making policy.")
     policy = make_policy(
         cfg=cfg.policy,
@@ -456,9 +469,11 @@ def main(cfg: FindFailureSeedsConfig):
 
         with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():
             cur_eval_info = eval_policy(
-                env,
-                policy,
-                cfg.eval.n_episodes,
+                env_cfg=cfg.env,
+                policy=policy,
+                n_episodes=cfg.eval.n_episodes,
+                batch_size=cfg.eval.batch_size,
+                use_async_envs=cfg.eval.use_async_envs,
                 max_episodes_rendered=10,
                 videos_dir=Path(cfg.output_dir) / "videos",
                 live_vis=cfg.show,

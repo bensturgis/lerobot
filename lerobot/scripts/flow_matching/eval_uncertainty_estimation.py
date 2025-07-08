@@ -199,6 +199,12 @@ def rollout(
 ) -> Dict[str, np.ndarray | bool]:
     device = get_device_from_parameters(policy)
 
+    # Initialize random number generator to deterministically select actions
+    if seed is not None:
+        generator = torch.Generator(device=device).manual_seed(seed)
+    else:
+        generator = None
+
     ep_uncertainties = []
     if env.camera_names is not None:
         ep_frames: Dict[str, list[np.ndarray]] = {
@@ -229,7 +235,7 @@ def rollout(
         max_episode_steps,
         desc=f"Running rollout with at most {max_episode_steps} steps."
     ) 
-    for step_idx in progbar:
+    for _ in progbar:
         # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
         observation = preprocess_observation(observation)
         observation = {
@@ -240,7 +246,7 @@ def rollout(
         new_action_gen = len(policy._queues["action"]) == 0
 
         with torch.no_grad():
-            action = policy.select_action(observation)
+            action = policy.select_action(observation, generator)
 
         if new_action_gen:
             uncertainty = policy.uncertainty_sampler.latest_uncertainties.detach().cpu().mean().item()
@@ -284,19 +290,19 @@ def load_failure_seeds(path: Path) -> list[int]:
     return [int(s) for s in data.get("failure_seeds", [])]
 
 
-def choose_seed(failure_pool: list[int]) -> int:
+def choose_seed(failure_pool: list[int], rng: Optional[random.Random] = None) -> int:
     """
     50% chance to use a failure seed, otherwise return a fresh
     32-bit random seed. The chosen failure seed is removed from the
     pool so it isn't reused again in this run.
     """
-    use_failure = bool(failure_pool) and random.random() < 0.5
+    use_failure = bool(failure_pool) and rng.random() < 0.5
     if use_failure:
-        seed = random.choice(failure_pool)
+        seed = rng.choice(failure_pool)
         failure_pool.remove(seed)
         return seed
 
-    return random.randrange(2**31 - 1)
+    return rng.randrange(2**31 - 1)
 
 
 def save_episode_video(
@@ -334,6 +340,9 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
+
+    # Random number generator to choose seeds for the single runs
+    rng = random.Random(cfg.seed)
     
     if cfg.policy.type != "flow_matching":
         raise ValueError(
@@ -390,9 +399,9 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
 
             # ------------ ID Case ------------------
             logging.info(f"Creating ID environment.")
-            seed = choose_seed(id_failure_pool)
+            seed = choose_seed(id_failure_pool, rng)
             cfg.env.perturbation.enable = False
-            id_env = make_single_env(cfg.env)
+            id_env = make_single_env(cfg.env, seed)
             id_ep_info = rollout(
                 env=id_env,
                 policy=policy,
@@ -421,9 +430,10 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
 
             # ------------ OoD Case ------------------
             logging.info(f"Creating OoD environment.")
-            seed = choose_seed(ood_failure_pool)
+            seed = choose_seed(ood_failure_pool, rng)
             ood_env = make_single_env(
                 replace(cfg.env, perturbation=cfg.eval_uncert_est.perturbation_config),
+                seed
             )
             ood_ep_info = rollout(
                 env=ood_env,
