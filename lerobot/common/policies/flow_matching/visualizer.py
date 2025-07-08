@@ -84,9 +84,9 @@ class FlowMatchingVisualizer(ABC):
             return vis_type_dir
         else:
             run_idx = 1
-            while (vis_type_dir / f"{run_idx:04d}").exists():
+            while (vis_type_dir / f"{run_idx:03d}").exists():
                 run_idx += 1
-            run_dir = vis_type_dir / f"{run_idx:04d}"
+            run_dir = vis_type_dir / f"{run_idx:03d}"
             run_dir.mkdir(parents=True, exist_ok=True)
             return run_dir
     
@@ -138,23 +138,28 @@ class FlowMatchingVisualizer(ABC):
         # Read each frame
         frames = [imageio.imread(str(fp)) for fp in filepaths]
 
-        # Write out the GIF
+        # Get the path where the GIF will be saved
+        vis_type_dir = self.output_root / self.vis_type
+
+        # Get the path of the GIF file based on the visualization type and run index
         if self.vis_type == "flows":
-            gif_name = "flow_animation.gif"
+            gif_name_base = "flow_animation"
         elif self.vis_type == "vector_field":
-            gif_name = "vector_field_animation.gif"
+            gif_name_base = "vector_field_animation"
         else:
             raise ValueError(
                 f"Invalid vis_type '{self.vis_type}'. Expected 'flows' or 'vector_field'."
             )
-        gif_path = self.run_dir / gif_name
-        if gif_path.exists():
-            if self.verbose:
-                print(f"Warning: File {gif_path} already exists. Skipping save.")
-        else:
-            imageio.mimsave(str(gif_path), frames, duration=duration)
-            if self.verbose:
-                print(f"Saved GIF to {gif_path}")
+
+        run_idx = 1
+        while (vis_type_dir / f"{gif_name_base}_{run_idx:03d}.gif").exists():
+            run_idx += 1
+        gif_path = vis_type_dir / f"{gif_name_base}_{run_idx:03d}.gif"
+
+        # Save the GIF
+        imageio.mimsave(str(gif_path), frames, duration=duration)
+        if self.verbose:
+            print(f"Saved GIF to {gif_path}")
 
 
 # TODO: Add action sequence visualization to live stream and video of policy rollout
