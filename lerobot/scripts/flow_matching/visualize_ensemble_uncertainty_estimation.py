@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """
-Visualize the composed action sequence uncertainty estimation method by creating a vector field
-plot overlaid by the composed action sequences.
+Visualize the ensembling uncertainty estimation method by creating a vector field 
+plot of the scorer model overlaid by the actions from the sampler model.
 
 Usage example:
 
-Create the composed action sequence visualization for the Push-T task.
+Create the ensembling uncertainty estimation visualization for the Push-T task.
 
 ```
 python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimation.py \
@@ -25,11 +25,11 @@ from tqdm import trange, tqdm
 from typing import Dict
 
 from lerobot.configs import parser
-from lerobot.configs.visualize_composed_seq import VisualizeComposedSeqPipelineConfig
+from lerobot.configs.visualize_ensemble import VisualizeEnsemblePipelineConfig
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedSequenceSampler
+from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossEnsembleSampler
 from lerobot.common.policies.flow_matching.visualizer import (
     ActionSeqVisualizer,
     VectorFieldVisualizer
@@ -40,7 +40,7 @@ from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 
 @parser.wrap()
-def main(cfg: VisualizeComposedSeqPipelineConfig): 
+def main(cfg: VisualizeEnsemblePipelineConfig): 
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
@@ -52,8 +52,21 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
             f"but got policy type '{cfg.policy.type}'."
         )
     device = get_safe_torch_device(cfg.policy.device, log=True)
-    policy = make_policy(cfg.policy, env_cfg=cfg.env).to(device)
+    policy = make_policy(
+        cfg.policy,
+        env_cfg=cfg.env,
+        uncertainty_sampler_cfg=cfg.uncertainty_sampler
+    ).to(device)
     policy.eval()
+
+    # Initialize the cross ensemble uncertainty sampler
+    policy._init_uncertainty_sampler()
+
+    # Get cross ensemble uncertainty sampler
+    cross_ensemble_sampler = policy.uncertainty_sampler
+    scorer_flow_matching_model = policy.scorer
+    policy.uncertainty_sampler = None
+    policy.scorer = None
 
     num_rollouts = cfg.vis.num_rollouts
     for ep in range(num_rollouts):
@@ -87,45 +100,31 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
         ep_dir = cfg.output_dir / f"rollout_{ep:03d}"
         ep_dir.mkdir(parents=True, exist_ok=True)
-
-        # Prepare composed action sequence uncertainty sampler
-        composed_seq_sampler = ComposedSequenceSampler(
-            flow_matching_cfg=policy.config, 
-            cfg=cfg.composed_seq_sampler,
-            velocity_model=policy.flow_matching.unet
-        )
         
         # Prepare visualizers
-        action_seq_visualizer = ActionSeqVisualizer(
+        sampler_action_seq_visualizer = ActionSeqVisualizer(
             cfg.action_seq,
             flow_matching_cfg=policy.config,
             velocity_model=policy.flow_matching.unet,
             unnormalize_outputs=policy.unnormalize_outputs,
             output_root=ep_dir,
         )
+        scorer_action_seq_visualizer = ActionSeqVisualizer(
+            cfg.action_seq,
+            flow_matching_cfg=policy.config,
+            velocity_model=scorer_flow_matching_model.unet,
+            unnormalize_outputs=policy.unnormalize_outputs,
+            output_root=ep_dir,
+        )
         vector_field_visualizer = VectorFieldVisualizer(
             cfg=cfg.vector_field,
             flow_matching_cfg=policy.config,
-            velocity_model=policy.flow_matching.unet,
+            velocity_model=scorer_flow_matching_model.unet,
             output_root=ep_dir,
         )
-        
-        # Only visualize the action steps that come from the next observation
-        prev_action_seq_end = (
-            policy.config.n_obs_steps - 1 + policy.config.n_action_steps
-        )
-        horizon = policy.config.horizon
-        attached_action_steps = list(range(prev_action_seq_end, horizon))
-        if vector_field_visualizer.action_steps not in attached_action_steps:
-            vector_field_visualizer.action_steps = list(range(prev_action_seq_end, horizon))
 
         # Initialize the dictionary of actions to visualize in the vector field plot
         action_data: Dict[str, Tensor] = {}
-
-        # At the beginning of an epsiode we don't have previous actions to compose with
-        prev_global_cond: Tensor | None = None
-        prev_actions: Tensor | None = None
-        composed_seq_sampler.prev_action_sequence = None
 
         # Roll through one episode
         max_episode_steps = env.spec.max_episode_steps
@@ -153,46 +152,47 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
             if new_action_gen and (cfg.vis.start_step is None or step_idx >= cfg.vis.start_step):
                 # Stack the history of observations
-                batch = {
+                obs_batch = {
                     k: torch.stack(list(policy._queues[k]), dim=1)
                     for k in policy._queues
                     if k != "action"
                 }
 
                 # Build global-conditioning with the policy's helper
-                global_cond = policy.flow_matching.prepare_global_conditioning(batch)
+                global_cond = policy.flow_matching.prepare_global_conditioning(obs_batch)
 
-                # Get the newly sampled actions
-                new_actions, uncertainties = composed_seq_sampler.conditional_sample_with_uncertainty(
-                    global_cond=global_cond
+                # Sample actions and get their uncertainties based on the scorer model
+                sampler_actions, uncertainties = cross_ensemble_sampler.conditional_sample_with_uncertainty(
+                    observation=obs_batch
                 )
-                tqdm.write(f"Compsed sequence sampler uncertainty scores: {uncertainties}")
+                tqdm.write(f"Cross ensemble sampler uncertainty scores: {uncertainties}")
                 mean_uncertainty = float(uncertainties.mean().item())
+                
+                # Sample actions with the scorer model to compare with the sampler actions
+                num_samples = cfg.ensemble_sampler.num_action_seq_samples
+                scorer_actions = scorer_flow_matching_model.conditional_sample(
+                    batch_size=num_samples, global_cond=global_cond.repeat(num_samples, 1)
+                )
 
-                # Compose actions
-                if prev_actions is not None:
-                    composed_actions = composed_seq_sampler.compose_action_seqs(
-                        prev_action_seq=prev_actions,
-                        new_action_seq=new_actions
-                    )
-                    action_data["action_samples"] = prev_actions
-                    action_data["composed_actions"] = composed_actions
+                # Store the action samples to overlay them in the vector field plot
+                action_data["scorer_actions"] = scorer_actions
+                action_data["sampler_actions"] = sampler_actions
 
-                    # Visualize vector field with composed action sequences
-                    vector_field_visualizer.visualize(
-                        global_cond=prev_global_cond,
-                        visualize_actions=True,
-                        actions=action_data,
-                        mean_uncertainty=mean_uncertainty,
-                    )
+                # Visualize scorer vector field with sampler action sequences
+                vector_field_visualizer.visualize(
+                    global_cond=global_cond,
+                    visualize_actions=True,
+                    actions=action_data,
+                    mean_uncertainty=mean_uncertainty,
+                )
 
-                # Visualize action sequence batch
-                action_seq_visualizer.visualize(global_cond=global_cond, env=env)
-
-                # Set the previous global conditioning vector and the previous action sequences to compose with
-                prev_global_cond = global_cond
-                prev_actions = new_actions
-                composed_seq_sampler.prev_action_sequence = new_actions
+                # Visualize action sequence batch of sampler and scorer model
+                sampler_action_seq_visualizer.visualize(
+                    global_cond=global_cond, env=env, dir_name="sampler_action_seq"
+                )
+                scorer_action_seq_visualizer.visualize(
+                    global_cond=global_cond, env=env, dir_name="scorer_action_seq"
+                )
 
             # Apply the next action
             observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())

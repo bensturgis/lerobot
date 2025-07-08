@@ -66,14 +66,19 @@ class FlowMatchingVisualizer(ABC):
         """
         pass
 
-    def _update_run_dir(self) -> Path:
+    def _update_run_dir(
+        self, vis_type_dir_name: Optional[str] = None
+    ) -> Path:
         """
         Create a new, empty folder and return its path.
         """
         if self.output_root is None:
             self.output_root = Path("outputs/visualizations/")
         
-        vis_type_dir = self.output_root / self.vis_type
+        if vis_type_dir_name is None:
+            vis_type_dir = self.output_root / self.vis_type
+        else:
+            vis_type_dir = self.output_root / vis_type_dir_name
         vis_type_dir.mkdir(parents=True, exist_ok=True)
         if self.vis_type == "action_seq":
             return vis_type_dir
@@ -186,7 +191,6 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         self.unnormalize_outputs = unnormalize_outputs
         self.show = cfg.show
         self.vis_type = "action_seq"
-        self.run_dir = self._update_run_dir()
         
     def visualize(self, global_cond: Tensor, **kwargs):
         """
@@ -214,6 +218,9 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
                 f"Expected global_cond to contain exactly one feature vector "
                 f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
             )
+        
+        dir_name = kwargs.get("dir_name", None)
+        self.run_dir = self._update_run_dir(vis_type_dir_name=dir_name)
 
         device = get_device_from_parameters(self.velocity_model)
         dtype = get_dtype_from_parameters(self.velocity_model)
