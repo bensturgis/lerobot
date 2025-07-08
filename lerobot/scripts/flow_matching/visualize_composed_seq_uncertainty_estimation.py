@@ -44,6 +44,9 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
+        rollout_seeds = list(range(cfg.seed, cfg.seed + cfg.vis.num_rollouts))
+    else:
+        rollout_seeds = None
     
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":
@@ -57,15 +60,22 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
     num_rollouts = cfg.vis.num_rollouts
     for ep in range(num_rollouts):
+        generator = torch.Generator(device=device)
+        if rollout_seeds is None:
+            seed = None
+        else:
+            seed = rollout_seeds[ep]
+            generator.manual_seed(seed)
+        
         logging.info("Creating environment")
-        env = make_single_env(cfg.env)
+        env = make_single_env(cfg.env, seed)
         
         reset_kwargs: dict = {}
         if cfg.start_state is not None and cfg.env.type == "pusht":
             logging.info(f"Resetting to provided start_state {cfg.start_state}")
             reset_kwargs["options"] = {"reset_to_state": cfg.start_state}
 
-        observation, _ = env.reset(seed=cfg.seed, **reset_kwargs)
+        observation, _ = env.reset(seed=seed, **reset_kwargs)
         
         # Callback for visualization.
         def render_frame(env: gym.Env) -> np.ndarray:
@@ -164,7 +174,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
                 # Get the newly sampled actions
                 new_actions, uncertainties = composed_seq_sampler.conditional_sample_with_uncertainty(
-                    global_cond=global_cond
+                    global_cond=global_cond, generator=generator
                 )
                 tqdm.write(f"Compsed sequence sampler uncertainty scores: {uncertainties}")
                 mean_uncertainty = float(uncertainties.mean().item())
@@ -184,10 +194,11 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                         visualize_actions=True,
                         actions=action_data,
                         mean_uncertainty=mean_uncertainty,
+                        generator=generator
                     )
 
                 # Visualize action sequence batch
-                action_seq_visualizer.visualize(global_cond=global_cond, env=env)
+                action_seq_visualizer.visualize(global_cond=global_cond, env=env, generator=generator)
 
                 # Set the previous global conditioning vector and the previous action sequences to compose with
                 prev_global_cond = global_cond

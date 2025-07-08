@@ -142,8 +142,6 @@ class LiberoEnv(EnvConfig):
             self.task_ids = all_task_ids
         chosen_task_id = self.task_id_rng.choice(self.task_ids)
 
-        print(f"Chosen task ID: {chosen_task_id}")
-
         if chosen_task_id not in all_task_ids:
             raise ValueError(
                 f"Task ID {chosen_task_id} is invalid for benchmark '{self.benchmark}' "

@@ -55,13 +55,16 @@ class FlowMatchingVisualizer(ABC):
         self.verbose = verbose
 
     @abstractmethod
-    def visualize(self, global_cond: Tensor, **kwargs):
+    def visualize(
+        self, global_cond: Tensor, generator: Optional[torch.Generator], **kwargs
+    ):
         """
         Run the visualization using the provided conditioning vector.
 
         Args:
             global_cond: Single conditioning feature vector for the velocity model.
             Shape [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
             **kwargs: Visualiser-specific keyword arguments.
         """
         pass
@@ -197,13 +200,16 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         self.show = cfg.show
         self.vis_type = "action_seq"
         
-    def visualize(self, global_cond: Tensor, **kwargs):
+    def visualize(
+        self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
+    ):
         """
         Visualize a batch of action sequences onto the current frame.
 
         Args:
             global_cond: Single conditioning feature vector for the velocity model.
                 Shape: [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
             **kwargs: Must contain argument `env` which is the Gym environment whose
                 rendered RGB frame will be drawn on.
         """
@@ -238,6 +244,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             size=(self.num_action_seq, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
             dtype=dtype,
             device=device,
+            generator=generator,
         )
 
         # Sample a batch of action sequences
@@ -607,13 +614,16 @@ class FlowVisualizer(FlowMatchingVisualizer):
         self.show = cfg.show
         self.vis_type = "flows"
 
-    def visualize(self, global_cond: Tensor, **kwargs):
+    def visualize(
+        self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
+    ):
         """
         Visualize flow trajectories for specified action steps and dimensions.
 
         Args:
             global_cond: Single conditioning feature vector for the velocity model.
                 Shape [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
         """
         if global_cond.dim() == 1: # shape = (cond_dim,)
             global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
@@ -638,6 +648,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             size=(self.num_paths, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
             dtype=dtype,
             device=device,
+            generator=generator
         )
         
         # Create time grid
@@ -924,13 +935,16 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         self.show = cfg.show
         self.vis_type = "vector_field"
     
-    def visualize(self, global_cond: Tensor, **kwargs):
+    def visualize(
+        self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
+    ):
         """
         Visualize the 2D action vector field produced by a flow matching policy at a given time.
 
         Args:
             global_cond: Single conditioning feature vector for the velocity model.
                 Shape [cond_dim,] or [1, cond_dim].
+            generator: PyTorch random number generator.
         """
         if global_cond.dim() == 1: # shape = (cond_dim,)
             global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
@@ -964,6 +978,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             size=(num_samples, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
             dtype=dtype,
             device=device,
+            generator=generator,
         )
 
         # Sample action sequences
@@ -992,7 +1007,14 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_grid, y_grid, z_grid = np.meshgrid(axis_lin, axis_lin, axis_lin, indexing="xy")
             x_dim, y_dim, z_dim = self.action_dims
 
-        action_step = random.choice(self.action_steps)
+        action_steps_idx = torch.randint(
+            low=0,
+            high=len(self.action_steps),
+            size=(1,),
+            generator=generator,
+            device=device,
+        ).item()
+        action_step = self.action_steps[action_steps_idx]
         positions = action_samples[0].repeat(x_grid.size, 1, 1)
         positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
         positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)

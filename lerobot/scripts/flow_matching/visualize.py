@@ -45,6 +45,9 @@ def main(cfg: VisualizePipelineConfig):
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
+        rollout_seeds = list(range(cfg.seed, cfg.seed + cfg.vis.num_rollouts))
+    else:
+        rollout_seeds = None
     
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":
@@ -58,15 +61,22 @@ def main(cfg: VisualizePipelineConfig):
 
     num_rollouts = cfg.vis.num_rollouts
     for ep in range(num_rollouts):
+        generator = torch.Generator(device=device)
+        if rollout_seeds is None:
+            seed = None
+        else:
+            seed = rollout_seeds[ep]
+            generator.manual_seed(seed)
+
         logging.info("Creating environment")
-        env = make_single_env(cfg.env)
+        env = make_single_env(cfg.env, seed)
         
         reset_kwargs: dict = {}
         if cfg.start_state is not None and cfg.env.type == "pusht":
             logging.info(f"Resetting to provided start_state {cfg.start_state}")
             reset_kwargs["options"] = {"reset_to_state": cfg.start_state}
 
-        observation, _ = env.reset(seed=cfg.seed, **reset_kwargs)
+        observation, _ = env.reset(seed=seed, **reset_kwargs)
         
         # Callback for visualization.
         def render_frame(env: gym.Env) -> np.ndarray:
@@ -142,7 +152,7 @@ def main(cfg: VisualizePipelineConfig):
             new_action_gen = len(policy._queues["action"]) == 0
             
             with torch.no_grad():
-                action = policy.select_action(observation)
+                action = policy.select_action(observation, generator)
 
             if new_action_gen and (cfg.vis.start_step is None or step_idx >= cfg.vis.start_step):
                 # Stack the history of observations
@@ -156,7 +166,7 @@ def main(cfg: VisualizePipelineConfig):
                 global_cond = policy.flow_matching.prepare_global_conditioning(batch)
 
                 for visualizer in visualizers:
-                    visualizer.visualize(global_cond=global_cond, env=env)                
+                    visualizer.visualize(global_cond=global_cond, env=env, generator=generator)                
 
             # Apply the next action
             observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())

@@ -44,6 +44,9 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
+        rollout_seeds = list(range(cfg.seed, cfg.seed + cfg.vis.num_rollouts))
+    else:
+        rollout_seeds = None
     
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":
@@ -70,15 +73,22 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
 
     num_rollouts = cfg.vis.num_rollouts
     for ep in range(num_rollouts):
+        generator = torch.Generator(device=device)
+        if rollout_seeds is None:
+            seed = None
+        else:
+            seed = rollout_seeds[ep]
+            generator.manual_seed(seed)
+
         logging.info("Creating environment")
-        env = make_single_env(cfg.env)
+        env = make_single_env(cfg.env, seed)
         
         reset_kwargs: dict = {}
         if cfg.start_state is not None and cfg.env.type == "pusht":
             logging.info(f"Resetting to provided start_state {cfg.start_state}")
             reset_kwargs["options"] = {"reset_to_state": cfg.start_state}
 
-        observation, _ = env.reset(seed=cfg.seed, **reset_kwargs)
+        observation, _ = env.reset(seed=seed, **reset_kwargs)
         
         # Callback for visualization.
         def render_frame(env: gym.Env) -> np.ndarray:
@@ -163,7 +173,7 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
 
                 # Sample actions and get their uncertainties based on the scorer model
                 sampler_actions, uncertainties = cross_ensemble_sampler.conditional_sample_with_uncertainty(
-                    observation=obs_batch
+                    global_cond=global_cond, generator=generator
                 )
                 tqdm.write(f"Cross ensemble sampler uncertainty scores: {uncertainties}")
                 mean_uncertainty = float(uncertainties.mean().item())
@@ -171,7 +181,7 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                 # Sample actions with the scorer model to compare with the sampler actions
                 num_samples = cfg.ensemble_sampler.num_action_seq_samples
                 scorer_actions = scorer_flow_matching_model.conditional_sample(
-                    batch_size=num_samples, global_cond=global_cond.repeat(num_samples, 1)
+                    batch_size=num_samples, global_cond=global_cond.repeat(num_samples, 1), generator=generator
                 )
 
                 # Store the action samples to overlay them in the vector field plot
@@ -184,14 +194,15 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                     visualize_actions=True,
                     actions=action_data,
                     mean_uncertainty=mean_uncertainty,
+                    generator=generator
                 )
 
                 # Visualize action sequence batch of sampler and scorer model
                 sampler_action_seq_visualizer.visualize(
-                    global_cond=global_cond, env=env, dir_name="sampler_action_seq"
+                    global_cond=global_cond, env=env, dir_name="sampler_action_seq", generator=generator
                 )
                 scorer_action_seq_visualizer.visualize(
-                    global_cond=global_cond, env=env, dir_name="scorer_action_seq"
+                    global_cond=global_cond, env=env, dir_name="scorer_action_seq", generator=generator
                 )
 
             # Apply the next action

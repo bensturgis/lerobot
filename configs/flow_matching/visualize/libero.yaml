@@ -1,6 +1,7 @@
 # Choose from "action_seq", "flows" and "vector_field"
-vis_types: [action_seq]
+vis_types: [action_seq, flows]
 show: False
+seed: 42
 
 env:
   type: libero
