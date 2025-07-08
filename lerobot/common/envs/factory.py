@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
+import random
 
 import gymnasium as gym
 
@@ -34,7 +35,7 @@ def make_env_config(env_type: str, **kwargs) -> EnvConfig:
         raise ValueError(f"Policy type '{env_type}' is not available.")
 
 def make_single_env(
-    cfg: EnvConfig,
+    cfg: EnvConfig, seed: int | None = None
 ) -> gym.Env:
     package_name = f"gym_{cfg.type}"
     
@@ -46,6 +47,10 @@ def make_single_env(
     
     gym_handle = f"{package_name}/{cfg.task}"
     
+    # Set the random number generator of the Libero env to deterministically choose a task ID
+    if cfg.task == "LiberoEnv-v0":
+        cfg.set_task_sampling_seed(seed)
+
     env = gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs)
     if cfg.perturbation.enable:
         env = PerturbationWrapper(
@@ -62,6 +67,7 @@ def make_env(
     cfg: EnvConfig,
     n_envs: int = 1,
     use_async_envs: bool = False,
+    seeds: list[int] | None = None
 ) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the config.
 
@@ -80,6 +86,11 @@ def make_env(
     """
     if n_envs < 1:
         raise ValueError("`n_envs must be at least 1")
+    
+    if seeds is not None and len(seeds) != n_envs:
+        raise ValueError(
+            f"Length of seed list must equal n_envs ({n_envs}), but got length {len(seeds)}."
+        )
 
     package_name = f"gym_{cfg.type}"
 
@@ -91,8 +102,15 @@ def make_env(
     
     # batched version of the env that returns an observation of shape (b, c)
     env_cls = gym.vector.AsyncVectorEnv if use_async_envs else gym.vector.SyncVectorEnv
-    env = env_cls(
-        [lambda cfg=cfg: make_single_env(cfg) for _ in range(n_envs)]
-    )
+    if seeds is None:    
+        env_fns = [
+            lambda cfg=cfg: make_single_env(cfg) for _ in range(n_envs)
+        ]
+    else:
+        env_fns = [
+            lambda cfg=cfg, seed=seeds[i]: make_single_env(cfg, seed=seed)
+                for i in range(n_envs)
+        ]
+    env = env_cls(env_fns)
 
     return env

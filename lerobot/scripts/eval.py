@@ -125,6 +125,15 @@ def rollout(
     assert isinstance(policy, nn.Module), "Policy must be a PyTorch nn module."
     device = get_device_from_parameters(policy)
 
+    # Initialize random number generators to deterministically select actions
+    if seeds is not None:
+        generators = [
+            torch.Generator(device=device).manual_seed(seed)
+            for seed in seeds
+        ]
+    else:
+        generators = None
+
     # Reset the policy and environments.
     policy.reset()
     observation, info = env.reset(seed=seeds)
@@ -163,7 +172,7 @@ def rollout(
         observation = add_envs_task(env, observation)
 
         with torch.no_grad():
-            action = policy.select_action(observation)
+            action = policy.select_action(observation, generators)
 
         # Convert to CPU / numpy.
         action = action.to("cpu").numpy()
@@ -322,14 +331,22 @@ def eval_policy(
     # we dont want progress bar when we use slurm, since it clutters the logs
     progbar = trange(n_batches, desc="Stepping through eval batches", disable=inside_slurm())
     for batch_ix in progbar:
+        if start_seed is None:
+            seeds = None
+        else:
+            seeds = range(
+                start_seed + (batch_ix * batch_size), start_seed + ((batch_ix + 1) * batch_size)
+            )
+
         logging.info("Making environment.")
         env = make_env(
             env_cfg,
             n_envs=batch_size,
             use_async_envs=use_async_envs,
+            seeds=seeds,
         )
+
         camera_names: list[str] | None = getattr(env.envs[0], "camera_names", None)
-        
         # Cache frames for rendering videos. Each item will be (b, h, w, c), and the list indexes the rollout
         # step.
         if max_episodes_rendered > 0:
@@ -340,12 +357,6 @@ def eval_policy(
             else:
                 ep_frames: list[np.ndarray] = []
 
-        if start_seed is None:
-            seeds = None
-        else:
-            seeds = range(
-                start_seed + (batch_ix * env.num_envs), start_seed + ((batch_ix + 1) * env.num_envs)
-            )
         rollout_data = rollout(
             env,
             policy,
@@ -566,11 +577,11 @@ def eval_main(cfg: EvalPipelineConfig):
 
     with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():
         info = eval_policy(
-            cfg.env,
-            policy,
-            cfg.eval.n_episodes,
-            cfg.eval.batch_size,
-            cfg.eval.use_async_envs,
+            env_cfg=cfg.env,
+            policy=policy,
+            n_episodes=cfg.eval.n_episodes,
+            batch_size=cfg.eval.batch_size,
+            use_async_envs=cfg.eval.use_async_envs,
             max_episodes_rendered=100,
             videos_dir=Path(cfg.output_dir) / "videos",
             live_vis=cfg.show,

@@ -92,6 +92,8 @@ class LiberoEnv(EnvConfig):
     benchmark: str = "libero_90"
     task: str = "LiberoEnv-v0"
     task_ids: List[int] = field(default_factory=list)
+    task_sample_seed: int | None = None
+    task_id_rng: random.Random = field(init=False, repr=False)
     fps: int = 20
     episode_length: int = 500
     # Camera and simulation settings
@@ -122,6 +124,14 @@ class LiberoEnv(EnvConfig):
         }
     )
 
+    def __post_init__(self):
+        self.task_id_rng = random.Random(self.task_sample_seed)
+
+    def set_task_sampling_seed(self, seed: int) -> None:
+        """Seed the RNG that picks a Libero task ID."""
+        self.task_sample_seed = seed
+        self.task_id_rng = random.Random(seed)
+
     @property
     def gym_kwargs(self) -> dict:
         benchmark = lb_bench.get_benchmark_dict()[self.benchmark]()
@@ -130,7 +140,9 @@ class LiberoEnv(EnvConfig):
         all_task_ids = list(range(benchmark.get_num_tasks()))
         if not self.task_ids:
             self.task_ids = all_task_ids
-        chosen_task_id = random.choice(self.task_ids)
+        chosen_task_id = self.task_id_rng.choice(self.task_ids)
+
+        print(f"Chosen task ID: {chosen_task_id}")
 
         if chosen_task_id not in all_task_ids:
             raise ValueError(
