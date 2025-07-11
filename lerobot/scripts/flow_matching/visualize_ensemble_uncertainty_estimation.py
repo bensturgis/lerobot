@@ -143,11 +143,12 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
 
         start_time = time.time() 
 
+        action_generation_iter = 0
         progbar = trange(
             max_vis_steps,
             desc=f"[Episode {ep+1}/{num_rollouts}]: Running rollout with at most {max_vis_steps} steps"
         )   
-        for step_idx in progbar:
+        for step_idx in progbar:            
             # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
             observation = preprocess_observation(observation)
             observation = {
@@ -161,6 +162,9 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                 action = policy.select_action(observation)
 
             if new_action_gen and (cfg.vis.start_step is None or step_idx >= cfg.vis.start_step):
+                action_generation_iter += 1
+                tqdm.write(f"-----------------------Action Generation Iteration {action_generation_iter}---------------------")
+                
                 # Stack the history of observations
                 obs_batch = {
                     k: torch.stack(list(policy._queues[k]), dim=1)
@@ -169,41 +173,47 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                 }
 
                 # Build global-conditioning with the policy's helper
-                global_cond = policy.flow_matching.prepare_global_conditioning(obs_batch)
+                sampler_global_cond = policy.flow_matching.prepare_global_conditioning(obs_batch)
+                scorer_global_cond = scorer_flow_matching_model.prepare_global_conditioning(obs_batch)
 
+                # Visualize action sequence batch of sampler and scorer model
+                sampler_action_seq_visualizer.visualize(
+                    global_cond=sampler_global_cond, env=env, dir_name="sampler_action_seq", generator=generator
+                )
+                scorer_action_seq_visualizer.visualize(
+                    global_cond=scorer_global_cond, env=env, dir_name="scorer_action_seq", generator=generator
+                )
+                
                 # Sample actions and get their uncertainties based on the scorer model
                 sampler_actions, uncertainties = cross_ensemble_sampler.conditional_sample_with_uncertainty(
-                    global_cond=global_cond, generator=generator
+                    observation=obs_batch, generator=generator
                 )
                 tqdm.write(f"Cross ensemble sampler uncertainty scores: {uncertainties}")
                 mean_uncertainty = float(uncertainties.mean().item())
-                
+
                 # Sample actions with the scorer model to compare with the sampler actions
                 num_samples = cfg.ensemble_sampler.num_action_seq_samples
                 scorer_actions = scorer_flow_matching_model.conditional_sample(
-                    batch_size=num_samples, global_cond=global_cond.repeat(num_samples, 1), generator=generator
+                    batch_size=num_samples, global_cond=scorer_global_cond.repeat(num_samples, 1), generator=generator
                 )
 
                 # Store the action samples to overlay them in the vector field plot
                 action_data["scorer_actions"] = scorer_actions
-                action_data["sampler_actions"] = sampler_actions
-
+                action_data["sampler_actions"] = sampler_actions[1:]
+                
+                # Choose an action which will be used to generate the vector field plot
+                action_data["base_action"] = sampler_actions[1].unsqueeze(0)                
+                
                 # Visualize scorer vector field with sampler action sequences
                 vector_field_visualizer.visualize(
-                    global_cond=global_cond,
+                    global_cond=scorer_global_cond,
                     visualize_actions=True,
                     actions=action_data,
                     mean_uncertainty=mean_uncertainty,
                     generator=generator
                 )
 
-                # Visualize action sequence batch of sampler and scorer model
-                sampler_action_seq_visualizer.visualize(
-                    global_cond=global_cond, env=env, dir_name="sampler_action_seq", generator=generator
-                )
-                scorer_action_seq_visualizer.visualize(
-                    global_cond=global_cond, env=env, dir_name="scorer_action_seq", generator=generator
-                )
+                
 
             # Apply the next action
             observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())
