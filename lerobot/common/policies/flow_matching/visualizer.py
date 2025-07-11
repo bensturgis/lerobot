@@ -994,6 +994,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         if visualize_actions:
             if not action_data:
                 action_data["action_samples"] = action_samples[1:]
+        
+        if "base_action" not in action_data:
             action_data["base_action"] = action_samples[0].unsqueeze(0)
 
         # Build a 1-D lin-space once and reuse it for every axis we need
@@ -1015,7 +1017,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             device=device,
         ).item()
         action_step = self.action_steps[action_steps_idx]
-        positions = action_samples[0].repeat(x_grid.size, 1, 1)
+        positions = action_data["base_action"].repeat(x_grid.size, 1, 1)
         positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
         positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)
         if len(self.action_dims) == 3:
@@ -1139,7 +1141,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         cbar.ax.set_ylabel('Velocity Norm', fontsize=12)
 
         # Title
-        ax.set_title(f"Vector Field of Action Step {action_step} at t={time:.2f}", fontsize=16)
+        ax.set_title(f"Vector Field of Action Step {action_step+1} at t={time:.2f}", fontsize=16)
 
         # Axis labels
         if self.action_dim_names:
@@ -1224,7 +1226,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         cbar.ax.set_ylabel('Velocity Norm', fontsize=12)
         
         # Title
-        ax.set_title(f"Vector Field of Action Step {action_step} at t={time:.2f}", fontsize=16)
+        ax.set_title(f"Vector Field of Action Step {action_step+1} at t={time:.2f}", fontsize=16)
 
         # Axis labels
         if self.action_dim_names:

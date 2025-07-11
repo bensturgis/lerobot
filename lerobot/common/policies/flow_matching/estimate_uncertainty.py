@@ -30,6 +30,7 @@ from lerobot.common.policies.flow_matching.ode_solver import (
 )
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
+torch.set_printoptions(precision=3, sci_mode=False)
 
 class FlowMatchingUncertaintySampler(ABC):
     """
@@ -282,11 +283,14 @@ class FlowMatchingUncertaintySampler(ABC):
                 - "intermediate_vel_norm": For all passed intermediate ODE states, evaluate
                 the scorer's velocity field and compute the average L2 norm.
                 - "terminal_vel_norm": Evaluate the scorer velocity only on the final sampled
-                action sequence but at several times close to t=1 and compute the average L2 norm.
+                action sequence but at several evaluation times and compute the average L2 norm.
                 - "intermediate_vel_diff": At each intermediate state compare the sampler and scorer
                 velocities, ||v_sampler(x_t) - v_scorer(x_t)||, and average them.
                 - "likelihood": Run a reverse-time ODE under the scorer model to compute the log-
                 likelihood of the final sample; the score is the negative log-likelihood.
+                - "mode_distance": Proxy "distance-from-mode" score computed by averaging 
+                (1 - t) * ‖v(t)‖ of the scorer's velocity at the final sampled action sequence
+                across the specified evaluation times.
             scorer_velocity_model: Flow matching velocity model to compute the velocities field for
                 scoring.
             scorer_global_cond: Conditioning vector used for the scorer model.
@@ -348,8 +352,8 @@ class FlowMatchingUncertaintySampler(ABC):
         elif scoring_metric == "terminal_vel_norm":
             # The sampled action sequence corresponds to the final state of the ODE
             sampled_action_seq = ode_states[-1]
-            # Evaluate velocity on the final sampled sequence at times close to t=1
-            terminal_vel_norms = []
+            # Evaluate velocity on the final sampled sequence at evaluation times
+            terminal_vel_norms: list[float] = []
             for time in velocity_eval_times:
                 time_batch = torch.full(
                     (sampled_action_seq.shape[0],), time, device=self.device, dtype=self.dtype
@@ -364,6 +368,29 @@ class FlowMatchingUncertaintySampler(ABC):
 
             # Use average velocity norm as uncertainty score 
             return torch.stack(terminal_vel_norms, dim=0).mean(dim=0)
+        elif scoring_metric == "mode_distance":
+            # The sampled action sequence corresponds to the final state of the ODE
+            sampled_action_seq = ode_states[-1]
+            distances: list[float] = []
+            # Loop over each time in [0, 1) at which we want to probe the velocity field
+            for time in velocity_eval_times:
+                time_batch = torch.full(
+                    (sampled_action_seq.shape[0],), time, device=self.device, dtype=self.dtype
+                )
+                # Query the scorer’s velocity field at the sampled action sequence and this time
+                velocity = scorer_velocity_model(
+                    sampled_action_seq,
+                    time_batch,
+                    scorer_global_cond,
+                )
+                # L2 norm across time and action dims gives velocity magnitude
+                velocity_norm = torch.norm(velocity, dim=(1, 2))
+                # Scale by (1 - time) as a simple proxy for “distance from the mode”
+                # (i.e. how far a particle would still travel under constant velocity)
+                distance = (1 - time) * velocity_norm
+                distances.append(distance)
+
+            return torch.stack(distances, dim=0).mean(dim=0)
         elif scoring_metric == "intermediate_vel_diff":
             # Evaluate difference between sampler and scorer velocity field at each
             # intermediate time point
@@ -409,7 +436,7 @@ class FlowMatchingUncertaintySampler(ABC):
             raise ValueError(
                 f"Unsupported scoring_metric '{scoring_metric}'. "
                 "Expected one of: 'intermediate_vel_norm', 'terminal_vel_norm', "
-                "'intermediate_vel_diff', 'likelihood'."
+                "'intermediate_vel_diff', 'likelihood', 'mode_distance'."
             )
 
 
@@ -456,10 +483,10 @@ class ComposedCrossLaplaceSampler(FlowMatchingUncertaintySampler):
         self.exact_divergence = cfg.exact_divergence
         # Choice of scoring metric
         self.scoring_metric = cfg.scoring_metric
-        if self.scoring_metric not in ("likelihood", "terminal_vel_norm"):
+        if self.scoring_metric not in ("likelihood", "mode_distance", "terminal_vel_norm"):
             raise ValueError(
                 f"Unsupported scoring_metric '{self.scoring_metric}'. "
-                "Expected one of: 'likelihood', 'terminal_vel_norm'."
+                "Expected one of: 'likelihood', 'mode_distance', 'terminal_vel_norm'."
             )
         # Configuration of ODE solver to score samples via a likelihood estimate
         self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
@@ -759,10 +786,10 @@ class ComposedCrossEnsembleSampler(FlowMatchingUncertaintySampler):
         self.exact_divergence = cfg.exact_divergence
         # Choice of scoring metric
         self.scoring_metric = cfg.scoring_metric
-        if self.scoring_metric not in ("likelihood", "terminal_vel_norm"):
+        if self.scoring_metric not in ("likelihood", "mode_distance", "terminal_vel_norm"):
             raise ValueError(
                 f"Unsupported scoring_metric '{self.scoring_metric}'. "
-                "Expected one of: 'likelihood', 'terminal_vel_norm'."
+                "Expected one of: 'likelihood', 'mode_distance', 'terminal_vel_norm'."
             )
         # Configuration of ODE solver to score samples via a likelihood estimate
         self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
@@ -1019,10 +1046,10 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg
         # Choice of scoring metric
         self.scoring_metric = cfg.scoring_metric
-        if self.scoring_metric not in ("likelihood", "terminal_vel_norm"):
+        if self.scoring_metric not in ("likelihood", "mode_distance", "terminal_vel_norm"):
             raise ValueError(
                 f"Unsupported scoring_metric '{self.scoring_metric}'. "
-                "Expected one of: 'likelihood', 'terminal_vel_norm'."
+                "Expected one of: 'likelihood', 'mode_distance', 'terminal_vel_norm'."
             )
         # Configuration of ODE solver to score samples via a likelihood estimate
         self.lik_ode_solver_cfg = cfg.likelihood_ode_solver_cfg

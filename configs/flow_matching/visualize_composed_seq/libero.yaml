@@ -14,7 +14,7 @@ vis:
                      "gripper_open"]
 
 vector_field:
-  action_dims: [1, 2]
+  action_dims: [0, 1]
   # grid_size: 20
 
 composed_seq_sampler:
@@ -23,6 +23,6 @@ composed_seq_sampler:
   velocity_eval_times: [0.5, 0.7, 0.8]
 
 show: False
-seed: 42
+seed: 6
 
 # python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimation.py --config=configs/flow_matching/visualize_composed_seq/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

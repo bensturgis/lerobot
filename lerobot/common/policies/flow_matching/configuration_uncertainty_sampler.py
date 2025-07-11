@@ -12,11 +12,14 @@ Explanation of shared uncertainy sampler attributes:
     trace estimator when computing the log-likelihood for an action sequence sample.
 - scoring_metric: Which uncertainty metric to use.
     - "likelihood": Negative log-likelihood of the action sequence.
-    - "intermediate_vel_norm": average L2 norm of the velocity field over intermediate
+    - "mode_distance": Proxy "distance-from-mode" score computed by averaging 
+        (1 - t) * ‖v(t)‖ of the scorer's velocity at the final sampled action sequence
+        across the specified evaluation times.
+    - "intermediate_vel_norm": Average L2 norm of the velocity field over intermediate
         evaluation points of the ODE.
-    - "terminal_vel_norm": average L2-norm of the velocity field evaluated only for the
-        final state of the ODE at times close to t=1.0.
-    - "intermediate_vel_diff": average L2 norm of the velocity differences between the
+    - "terminal_vel_norm": Average L2-norm of the velocity field evaluated only for the
+        final state of the ODE at the specified evaluation times.
+    - "intermediate_vel_diff": Average L2 norm of the velocity differences between the
         scorer and sampler ODE over intermediate evaluation points of the ODE.
 - likelihood_ode_solver_cfg: When scoring with "likelihood", these are the ODE-solver settings
     used to compute the log-probability.
@@ -80,7 +83,7 @@ class ComposedCrossLaplaceSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric,
             allowed=(
-                "likelihood", "terminal_vel_norm",
+                "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
@@ -114,7 +117,8 @@ class CrossLaplaceSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric,
             allowed=(
-                "likelihood", "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff",
+                "likelihood", "mode_distance", "intermediate_vel_norm",
+                "terminal_vel_norm", "intermediate_vel_diff",
             ),
         )
 
@@ -137,7 +141,7 @@ class ComposedCrossEnsembleSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric,
             allowed=(
-                "likelihood", "terminal_vel_norm",
+                "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
@@ -159,7 +163,8 @@ class CrossEnsembleSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric,
             allowed=(
-                "likelihood", "intermediate_vel_norm", "terminal_vel_norm", "intermediate_vel_diff",
+                "likelihood", "mode_distance", "intermediate_vel_norm",
+                "terminal_vel_norm", "intermediate_vel_diff",
             ),
         )
 
@@ -181,7 +186,7 @@ class ComposedSequenceSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric,
             allowed=(
-                "likelihood", "terminal_vel_norm",
+                "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
