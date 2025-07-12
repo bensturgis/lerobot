@@ -202,7 +202,7 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                 action_data["sampler_actions"] = sampler_actions[1:]
                 
                 # Choose an action which will be used to generate the vector field plot
-                action_data["base_action"] = sampler_actions[1].unsqueeze(0)                
+                action_data["base_action"] = sampler_actions[0].unsqueeze(0)                
                 
                 # Visualize scorer vector field with sampler action sequences
                 vector_field_visualizer.visualize(

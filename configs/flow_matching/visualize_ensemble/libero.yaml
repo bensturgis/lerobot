@@ -9,14 +9,14 @@ policy:
 
 vis:
   num_rollouts: 1
-  # start_step: 68
+  # start_step: 60
   action_dim_names: ["ee_pos_x", "ee_pos_y", "ee_pos_z",
                      "ee_rot_x", "ee_rot_y", "ee_rot_z",
                      "gripper_open"]
 
 vector_field:
   action_dims: [0, 1]
-  action_steps: [10]
+  action_steps: [0]
   # grid_size: 20
 
 ensemble_sampler:

@@ -9,20 +9,22 @@ policy:
 
 vis:
   num_rollouts: 5
+  # start_step: 330
   action_dim_names: ["ee_pos_x", "ee_pos_y", "ee_pos_z",
                      "ee_rot_x", "ee_rot_y", "ee_rot_z",
                      "gripper_open"]
 
 vector_field:
   action_dims: [0, 1]
+  action_steps: [31]
   # grid_size: 20
 
 composed_seq_sampler:
   num_action_seq_samples: 25
-  scoring_metric: "terminal_vel_norm"
-  velocity_eval_times: [0.5, 0.7, 0.8]
+  scoring_metric: "mode_distance"
+  velocity_eval_times: [0.0, 0.1, 0.2]
 
 show: False
 seed: 6
 
-# python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimation.py --config=configs/flow_matching/visualize_composed_seq/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model
+# python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimation.py --config=configs/flow_matching/visualize_composed_seq_16_action_steps/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

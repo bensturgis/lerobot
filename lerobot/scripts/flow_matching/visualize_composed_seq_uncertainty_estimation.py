@@ -126,7 +126,11 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
         )
         horizon = policy.config.horizon
         attached_action_steps = list(range(prev_action_seq_end, horizon))
-        if vector_field_visualizer.action_steps not in attached_action_steps:
+        vector_field_visualizer.action_steps = [
+            step for step in vector_field_visualizer.action_steps
+            if step in attached_action_steps
+        ]
+        if len( vector_field_visualizer.action_steps) == 0:
             vector_field_visualizer.action_steps = list(range(prev_action_seq_end, horizon))
 
         # Initialize the dictionary of actions to visualize in the vector field plot
@@ -144,6 +148,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
         start_time = time.time() 
 
+        action_generation_iter = 0
         progbar = trange(
             max_vis_steps,
             desc=f"[Episode {ep+1}/{num_rollouts}]: Running rollout with at most {max_vis_steps} steps"
@@ -162,6 +167,12 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                 action = policy.select_action(observation)
 
             if new_action_gen and (cfg.vis.start_step is None or step_idx >= cfg.vis.start_step):
+                action_generation_iter += 1
+                tqdm.write(f"-----------------------Action Generation Iteration {action_generation_iter}---------------------")
+                
+                # Clear action data dictionary
+                action_data.clear()
+                
                 # Stack the history of observations
                 batch = {
                     k: torch.stack(list(policy._queues[k]), dim=1)
@@ -186,7 +197,10 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                         new_action_seq=new_actions
                     )
                     action_data["action_samples"] = prev_actions
-                    action_data["composed_actions"] = composed_actions
+                    action_data["composed_actions"] = composed_actions[1:]
+                
+                    # Choose an action which will be used to generate the vector field plot
+                    action_data["base_action"] = composed_actions[0].unsqueeze(0) 
 
                     # Visualize vector field with composed action sequences
                     vector_field_visualizer.visualize(
