@@ -95,7 +95,7 @@ class LiberoEnv(EnvConfig):
     task_sample_seed: int | None = None
     task_id_rng: random.Random = field(init=False, repr=False)
     fps: int = 20
-    episode_length: int = 500
+    episode_length: int = 250
     # Camera and simulation settings
     robots: list[str] = field(default_factory=lambda: ["Panda"])
     camera_heights: int = 256
