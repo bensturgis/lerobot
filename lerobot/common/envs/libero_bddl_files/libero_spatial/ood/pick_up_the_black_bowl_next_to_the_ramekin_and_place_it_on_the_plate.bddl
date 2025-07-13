@@ -1,11 +1,11 @@
 (define (problem LIBERO_Tabletop_Manipulation)
   (:domain robosuite)
-  (:language Pick the akita black bowl between the plate and the ramekin and place it on the plate)
+  (:language Pick the akita black bowl next to the ramekin and place it on the plate)
     (:regions
       (plate_region
           (:target main_table)
           (:ranges (
-              (0.06 0.19 0.07 0.21)
+              (0.05 0.19 0.07 0.21)
             )
           )
       )
@@ -19,28 +19,28 @@
       (box_region
           (:target main_table)
           (:ranges (
-              (0.06 0.02 0.08 0.04)
+              (-0.04 0.02 -0.03 0.04)
             )
           )
       )
       (next_to_box_region
           (:target main_table)
           (:ranges (
-              (0.12 -0.08 0.14 -0.06)
+              (0.12 -0.05 0.14 -0.03)
             )
           )
       )
       (between_plate_ramekin_region
           (:target main_table)
           (:ranges (
-              (-0.07 0.19 -0.06 0.21)
+              (-0.06 0.19 -0.04 0.21)
             )
           )
       )
       (ramekin_region
           (:target main_table)
           (:ranges (
-              (-0.21 0.19 -0.19 0.21)
+              (-0.12 0.16 -0.10 0.18)
             )
           )
       )
@@ -68,7 +68,7 @@
       (cabinet_region
           (:target main_table)
           (:ranges (
-              (0.02 -0.28 0.04 -0.26)
+              (0.02 -0.24 0.04 -0.22)
             )
           )
           (:yaw_rotation (
@@ -79,7 +79,7 @@
       (stove_region
           (:target main_table)
           (:ranges (
-              (-0.42 -0.15 -0.4 -0.13)
+              (-0.42 -0.08 -0.4 -0.06)
             )
           )
       )
@@ -119,8 +119,8 @@
   )
 
   (:init
-    (On akita_black_bowl_1 main_table_between_plate_ramekin_region)
-    (On glazed_rim_porcelain_ramekin_2 main_table_next_to_ramekin_region)
+    (On akita_black_bowl_1 main_table_next_to_ramekin_region)
+    (On glazed_rim_porcelain_ramekin_2 main_table_next_to_box_region)
     (On plate_1 main_table_plate_region)
     (On cookies_1 main_table_box_region)
     (On glazed_rim_porcelain_ramekin_1 main_table_ramekin_region)

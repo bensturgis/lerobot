@@ -19,7 +19,7 @@
       (box_region
           (:target main_table)
           (:ranges (
-              (0.06 0.02 0.08 0.04)
+              (0.09 -0.1 0.11 -0.08)
             )
           )
       )
@@ -33,21 +33,21 @@
       (between_plate_ramekin_region
           (:target main_table)
           (:ranges (
-              (-0.07 0.19 -0.06 0.21)
+              (-0.09 0.19 -0.07 0.21)
             )
           )
       )
       (ramekin_region
           (:target main_table)
           (:ranges (
-              (-0.21 0.19 -0.19 0.21)
+              (-0.21 0.1 -0.19 0.12)
             )
           )
       )
       (next_to_ramekin_region
           (:target main_table)
           (:ranges (
-              (-0.19 0.31 -0.17 0.33)
+              (-0.02 0.31 0 0.33)
             )
           )
       )
@@ -68,7 +68,7 @@
       (cabinet_region
           (:target main_table)
           (:ranges (
-              (0.02 -0.28 0.04 -0.26)
+              (0.02 -0.24 0.04 -0.22)
             )
           )
           (:yaw_rotation (
@@ -79,7 +79,7 @@
       (stove_region
           (:target main_table)
           (:ranges (
-              (-0.42 -0.15 -0.4 -0.13)
+              (-0.42 -0.08 -0.4 -0.06)
             )
           )
       )

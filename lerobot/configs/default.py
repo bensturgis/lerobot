@@ -23,7 +23,6 @@ from lerobot.common import (
 )
 from lerobot.common.datasets.transforms import ImageTransformsConfig
 from lerobot.common.datasets.video_utils import get_safe_default_codec
-from lerobot.common.envs.configs import PerturbationConfig
 
 
 @dataclass
@@ -90,12 +89,6 @@ class EvalUncertEstConfig:
             "likelihood",
             "epsilon_ball",
         ]
-    )
-
-    # Perturbation config to create OoD scenarios
-    perturbation_config: PerturbationConfig = PerturbationConfig(
-        enable=True,
-        static=False
     )
 
     # Paths to ID and OoD failure seeds to balance success and failure cases

@@ -6,6 +6,7 @@ from pathlib import Path
 from torch import nn, Tensor
 from torch.distributions import Independent, Normal
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
@@ -352,7 +353,8 @@ class FlowMatchingUncertaintySampler(ABC):
         elif scoring_metric == "terminal_vel_norm":
             # The sampled action sequence corresponds to the final state of the ODE
             sampled_action_seq = ode_states[-1]
-            # Evaluate velocity on the final sampled sequence at evaluation times
+            # tqdm.write(f"Sampled actions: {sampled_action_seq[0]}")
+            # Evaluate velocity on the final sampled sequence at times close to t=1
             terminal_vel_norms: list[float] = []
             for time in velocity_eval_times:
                 time_batch = torch.full(
@@ -362,6 +364,14 @@ class FlowMatchingUncertaintySampler(ABC):
                     sampled_action_seq,
                     time_batch,
                     scorer_global_cond,
+                )
+                tqdm.write(f"---------------Time: {time}-------------------")
+                tqdm.write(f"Velocities: {velocity[0]}")
+                debug_vel_norm = velocity[:, 31, [0, 1]].norm(dim=1).mean()
+                debug_distance = (1 - time) * debug_vel_norm
+                tqdm.write(
+                    f"Action Step 32 and Action Dimensions 0 and 1 Mean Velocity: "
+                    f"{debug_vel_norm} and Distance {debug_distance}"
                 )
                 # L2 norm across time and action dims gives velocity magnitude
                 terminal_vel_norms.append(torch.norm(velocity, dim=(1, 2)))
@@ -382,6 +392,12 @@ class FlowMatchingUncertaintySampler(ABC):
                     sampled_action_seq,
                     time_batch,
                     scorer_global_cond,
+                )
+                tqdm.write(f"---------------Time: {time}-------------------")
+                tqdm.write(f"Velocities: {velocity[0]}")
+                tqdm.write(
+                    f"Action Step 11 and Action Dimensions 1 and 2 Mean Distance: "
+                    f"{(1 - time) * velocity[:, 10, [1,2]].norm(dim=1).mean()}"
                 )
                 # L2 norm across time and action dims gives velocity magnitude
                 velocity_norm = torch.norm(velocity, dim=(1, 2))

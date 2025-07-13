@@ -2,13 +2,13 @@ env:
   type: libero
   task: LiberoEnv-v0
   benchmark: libero_spatial
-  perturbation:
-    enable: False
-    static: False
-    patch_color: [0, 0, 0]
+  ood:
+    enabled: true
 
 eval:
-  batch_size: 3
+  batch_size: 10
   n_episodes: 100
+
+seed: 2156246
 
 # python lerobot/scripts/eval.py --config=configs/flow_matching/eval/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

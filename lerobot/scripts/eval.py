@@ -68,7 +68,6 @@ from tqdm import trange
 from lerobot.common.envs import EnvConfig
 from lerobot.common.envs.factory import make_env
 from lerobot.common.envs.utils import add_envs_task, check_env_attributes_and_types, preprocess_observation
-from lerobot.common.envs.wrappers import PerturbationWrapper
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.utils import get_device_from_parameters
@@ -300,19 +299,11 @@ def eval_policy(
         else:
             for camera in camera_names:
                 if isinstance(env, gym.vector.SyncVectorEnv):
-                    if isinstance(env.envs[0], PerturbationWrapper):
-                        frames = [
-                            env.envs[i].render(camera_name=camera) for i in range(n_to_render_now)
-                        ]
-                    else:
-                        frames = [env.envs[i].unwrapped.render(camera_name=camera) for i in range(n_to_render_now)]
+                    frames = [env.envs[i].unwrapped.render(camera_name=camera) for i in range(n_to_render_now)]
                     ep_frames[camera].append(np.stack(frames))  # noqa: B023
                 elif isinstance(env, gym.vector.AsyncVectorEnv):
                     # Here we must render all frames and discard any we don't need.
-                    if isinstance(env.envs[0], PerturbationWrapper):
-                        render_envs = env[:n_to_render_now]
-                    else:
-                        render_envs = env.call("unwrapped")[:n_to_render_now]
+                    render_envs = env.call("unwrapped")[:n_to_render_now]
                     ep_frames[camera].append(np.stack(
                         render_envs[i].render(camera_name=camera) for i in range(n_to_render_now)
                     ))

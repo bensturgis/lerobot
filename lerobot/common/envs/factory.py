@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
-import random
 
 import gymnasium as gym
 
@@ -51,16 +50,16 @@ def make_single_env(
     if cfg.task == "LiberoEnv-v0":
         cfg.set_task_sampling_seed(seed)
 
-    env = gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs)
-    if cfg.perturbation.enable:
-        env = PerturbationWrapper(
-            env,
-            static=cfg.perturbation.static,
-            min_patch_frac=cfg.perturbation.min_frac,
-            max_patch_frac=cfg.perturbation.max_frac,
-            allowed_area=cfg.perturbation.allowed_area,
-            patch_color=cfg.perturbation.patch_color,
-        )
+    gym_kwargs = cfg.gym_kwargs
+
+    # Edit the environment kwargs before creation if OoD is enabled
+    gym_kwargs = cfg.ood.tweak_gym_kwargs(gym_kwargs)
+
+    env = gym.make(gym_handle, disable_env_checker=True, **gym_kwargs)
+
+    # Wrap the environment if OoD is enabled
+    env = cfg.ood.wrap(env)
+
     return env
 
 def make_env(
