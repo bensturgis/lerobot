@@ -56,32 +56,35 @@ def plot_id_ood_uncertainties(
     id_uncertainties: list[np.ndarray],
     ood_uncertainties: list[np.ndarray],
     output_dir: Path,
+    plot_individual: bool,
 ):
     """
     Draw per-episode uncertainties and mean ± std bands for ID and OoD scenarios.
     """
     # Consistent colours
     colours = {"ID": "C0", "OoD": "C1"}
-
-    # Plot every episode as a faint line
     plt.figure()
-    for ep_idx, uncert in enumerate(id_uncertainties):
-        uncert = np.where(np.isneginf(uncert), np.nan, uncert)
-        plt.plot(
-            np.arange(len(uncert)),
-            uncert,
-            color=colours["ID"],
-            alpha=0.3,
-            label="In-Distribution" if ep_idx == 0 else None)
-    for ep_idx, uncert in enumerate(ood_uncertainties):
-        uncert = np.where(np.isneginf(uncert), np.nan, uncert)
-        plt.plot(
-            np.arange(len(uncert)),
-            uncert,
-            color=colours["OoD"],
-            alpha=0.3,
-            label="Out-of-Distribution" if ep_idx == 0 else None
-        )
+    
+    # Plot every episode as a faint line
+    if plot_id_ood_uncertainties:
+        for ep_idx, uncert in enumerate(id_uncertainties):
+            uncert = np.where(np.isneginf(uncert), np.nan, uncert)
+            plt.plot(
+                np.arange(len(uncert)),
+                uncert,
+                color=colours["ID"],
+                alpha=0.3,
+                label="In-Distribution" if ep_idx == 0 else None
+            )
+        for ep_idx, uncert in enumerate(ood_uncertainties):
+            uncert = np.where(np.isneginf(uncert), np.nan, uncert)
+            plt.plot(
+                np.arange(len(uncert)),
+                uncert,
+                color=colours["OoD"],
+                alpha=0.3,
+                label="Out-of-Distribution" if ep_idx == 0 else None
+            )
 
     # Compute mean ± std across episodes in each bucket
     all_eps = [u for eps in [id_uncertainties, ood_uncertainties] for u in eps]
@@ -111,8 +114,10 @@ def plot_id_ood_uncertainties(
     plt.title(uncert_est_method.replace("_", " ").title())
     plt.legend()
     output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "_individual" if plot_individual else ""
     plt.savefig(
-        output_dir / f"uncertainty_scores_{uncert_est_method}.png", dpi=160, bbox_inches="tight"
+        output_dir / f"uncertainty_scores_{uncert_est_method}{suffix}.png",
+        dpi=160, bbox_inches="tight"
     )
     plt.close()
 
@@ -124,6 +129,7 @@ def plot_all_uncertainties(
     ood_success_uncertainties: list[np.ndarray],
     ood_failure_uncertainties: list[np.ndarray],
     output_dir: Path,
+    plot_individual: bool,
 ):
     """
     Draw per-episode uncertainties and mean ± std bands for
@@ -139,26 +145,26 @@ def plot_all_uncertainties(
         "OoD success": "C2",
         "OoD failure": "C1",
     }
-
-    # Plot every episode as a faint line
-    plt.figure()
     buckets = [
         ("ID success", id_success_uncertainties),
         ("ID failure", id_failure_uncertainties),
         ("OoD success", ood_success_uncertainties),
         ("OoD failure", ood_failure_uncertainties),
     ]
-
-    for label, episodes in buckets:
-        for ep_idx, uncert in enumerate(episodes):
-            uncert = np.where(np.isneginf(uncert), np.nan, uncert)
-            plt.plot(
-                np.arange(len(uncert)),
-                uncert,
-                color=colours[label],
-                alpha=0.3,
-                label=label if ep_idx == 0 else None,   # only first gets legend
-            )
+    plt.figure()
+    
+    # Plot every episode as a faint line
+    if plot_individual:
+        for label, episodes in buckets:
+            for ep_idx, uncert in enumerate(episodes):
+                uncert = np.where(np.isneginf(uncert), np.nan, uncert)
+                plt.plot(
+                    np.arange(len(uncert)),
+                    uncert,
+                    color=colours[label],
+                    alpha=0.3,
+                    label=label if ep_idx == 0 else None,   # only first gets legend
+                )
 
     # Compute mean ± std across episodes in each bucket
     all_eps = [u for _, eps in buckets for u in eps]
@@ -186,8 +192,10 @@ def plot_all_uncertainties(
     plt.title(uncert_est_method.replace("_", " ").title())
     plt.legend()
     output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "_individual" if plot_individual else ""
     plt.savefig(
-        output_dir / f"uncertainty_scores_{uncert_est_method}.png", dpi=160, bbox_inches="tight"
+        output_dir / f"uncertainty_scores_{uncert_est_method}{suffix}.png",
+        dpi=160, bbox_inches="tight"
     )
     plt.close()
 
@@ -461,6 +469,14 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                     id_uncertainties=id_all,
                     ood_uncertainties=ood_all,
                     output_dir=cfg.output_dir / uncert_est_method,
+                    plot_individual=False,
+                )
+                plot_id_ood_uncertainties(
+                    uncert_est_method=uncert_est_method,
+                    id_uncertainties=id_all,
+                    ood_uncertainties=ood_all,
+                    output_dir=cfg.output_dir / uncert_est_method,
+                    plot_individual=True,
                 )
             else:
                 plot_all_uncertainties(
@@ -470,8 +486,17 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                     ood_success_uncertainties=all_uncertainties[uncert_est_method]["ood_success"],
                     ood_failure_uncertainties=all_uncertainties[uncert_est_method]["ood_failure"],
                     output_dir=cfg.output_dir / uncert_est_method,
+                    plot_individual=False
                 )
-
+                plot_all_uncertainties(
+                    uncert_est_method=uncert_est_method,
+                    id_success_uncertainties=all_uncertainties[uncert_est_method]["id_success"],
+                    id_failure_uncertainties=all_uncertainties[uncert_est_method]["id_failure"],
+                    ood_success_uncertainties=all_uncertainties[uncert_est_method]["ood_success"],
+                    ood_failure_uncertainties=all_uncertainties[uncert_est_method]["ood_failure"],
+                    output_dir=cfg.output_dir / uncert_est_method,
+                    plot_individual=True
+                )
 
             policy.cpu()
             del policy
