@@ -288,6 +288,7 @@ class PointwiseConv1dToLinear(nn.Module):
 REPO_DIR_MAP: Dict[str, str] = {
     "lerobot/pusht": "pusht",
     "lerobot/aloha_sim_transfer_cube_human": "aloha_transfer",
+    "lerobot/libero_spatial_one_bowl": "libero",
 }
 
 def resolve_repo_dir(repo_id: str) -> str:

@@ -1,14 +1,15 @@
 #!/usr/bin/env python
 """
-Evaluate a Flow Matching policy's uncertainty estimates under clean and perturbed conditions.
+Evaluate a Flow Matching policy's uncertainty estimates for in-distribution and out-of-distribution
+scenarios.
 
 Runs rollouts with multiple uncertainty estimation methods, records per-step uncertainty scores,
-saves rollout videos, and generates comparison plots for each method and perturbation.
+saves rollout videos, and generates comparison plots for each method.
 
 Usage example:
 
 You want to plot uncertainty estimation scores for the Action Sequence Likelihood and the Composed 
-Action Sequence Likelihood methods as well as for static and dynamic perturbations for 10 episodes:
+Action Sequence Likelihood methods for 10 episodes:
 
 ```
 python lerobot/scripts/eval_uncertainty_estimation.py \
@@ -36,7 +37,6 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
-from lerobot.common.envs.wrappers import PerturbationWrapper
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
@@ -222,10 +222,7 @@ def rollout(
 
     if env.camera_names is not None:
         for camera in env.camera_names:
-            if isinstance(env, PerturbationWrapper):
-                ep_frames[camera].append(env.render(camera_name=camera))
-            else:
-                ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
+            ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
     else:
         ep_frames.append(env.render())
     
@@ -257,10 +254,7 @@ def rollout(
         observation, _, terminated, truncated, info = env.step(action[0].cpu().numpy())
         if env.camera_names is not None:
             for camera in env.camera_names:
-                if isinstance(env, PerturbationWrapper):
-                    ep_frames[camera].append(env.render(camera_name=camera))
-                else:
-                    ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
+                ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
         else:
             ep_frames.append(env.render())
 
@@ -400,7 +394,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             # ------------ ID Case ------------------
             logging.info(f"Creating ID environment.")
             seed = choose_seed(id_failure_pool, rng)
-            cfg.env.perturbation.enable = False
+            cfg.env.ood.enabled = False
             id_env = make_single_env(cfg.env, seed)
             id_ep_info = rollout(
                 env=id_env,
@@ -431,10 +425,8 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             # ------------ OoD Case ------------------
             logging.info(f"Creating OoD environment.")
             seed = choose_seed(ood_failure_pool, rng)
-            ood_env = make_single_env(
-                replace(cfg.env, perturbation=cfg.eval_uncert_est.perturbation_config),
-                seed
-            )
+            cfg.env.ood.enabled = True
+            ood_env = make_single_env(cfg.env, seed)
             ood_ep_info = rollout(
                 env=ood_env,
                 policy=policy,

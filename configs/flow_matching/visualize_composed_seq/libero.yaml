@@ -21,7 +21,7 @@ vector_field:
 
 composed_seq_sampler:
   num_action_seq_samples: 25
-  scoring_metric: "mode_distance"
+  scoring_metric: mode_distance
   velocity_eval_times: [0.0, 0.1, 0.2]
 
 show: False

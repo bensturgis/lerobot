@@ -7,8 +7,8 @@ env:
 
 eval:
   batch_size: 10
-  n_episodes: 100
+  n_episodes: 200
 
-seed: 2156246
+seed: 42
 
 # python lerobot/scripts/eval.py --config=configs/flow_matching/eval/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

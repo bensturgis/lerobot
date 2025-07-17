@@ -365,15 +365,6 @@ class FlowMatchingUncertaintySampler(ABC):
                     time_batch,
                     scorer_global_cond,
                 )
-                tqdm.write(f"---------------Time: {time}-------------------")
-                tqdm.write(f"Velocities: {velocity[0]}")
-                debug_vel_norm = velocity[:, 31, [0, 1]].norm(dim=1).mean()
-                debug_distance = (1 - time) * debug_vel_norm
-                tqdm.write(
-                    f"Action Step 32 and Action Dimensions 0 and 1 Mean Velocity: "
-                    f"{debug_vel_norm} and Distance {debug_distance}"
-                )
-                # L2 norm across time and action dims gives velocity magnitude
                 terminal_vel_norms.append(torch.norm(velocity, dim=(1, 2)))
 
             # Use average velocity norm as uncertainty score 
@@ -393,13 +384,6 @@ class FlowMatchingUncertaintySampler(ABC):
                     time_batch,
                     scorer_global_cond,
                 )
-                tqdm.write(f"---------------Time: {time}-------------------")
-                tqdm.write(f"Velocities: {velocity[0]}")
-                tqdm.write(
-                    f"Action Step 11 and Action Dimensions 1 and 2 Mean Distance: "
-                    f"{(1 - time) * velocity[:, 10, [1,2]].norm(dim=1).mean()}"
-                )
-                # L2 norm across time and action dims gives velocity magnitude
                 velocity_norm = torch.norm(velocity, dim=(1, 2))
                 # Scale by (1 - time) as a simple proxy for “distance from the mode”
                 # (i.e. how far a particle would still travel under constant velocity)
@@ -710,7 +694,6 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
 
         # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
-        laplace_global_cond = self._prepare_conditioning(laplace_global_cond)
 
         # Sample noise priors
         noise_samples = torch.randn(
@@ -742,6 +725,7 @@ class CrossLaplaceSampler(FlowMatchingUncertaintySampler):
             generator=generator
         )
         laplace_global_cond = laplace_flow_matching_model.prepare_global_conditioning(observation)  # (B, global_cond_dim)
+        laplace_global_cond = self._prepare_conditioning(laplace_global_cond)
 
         # Compute uncertainty based on selected metric
         uncertainty_scores = self.score_sample(
