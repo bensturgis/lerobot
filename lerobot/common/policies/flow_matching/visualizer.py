@@ -126,6 +126,8 @@ class FlowMatchingVisualizer(ABC):
             if self.verbose:
                 print(f"Warning: File {filepath} already exists. Skipping save.")
         else:
+            # Presentation
+            # fig.savefig(filepath, dpi=600)
             fig.savefig(filepath, dpi=300)
             if self.verbose:
                 print(f"Saved figure to {filepath}.")
@@ -767,7 +769,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         w_scaled = w * time_norm
 
         # Create quiver plot
-        fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': '3d'})
+        fig, ax = plt.subplots(figsize=(12, 10), subplot_kw={'projection': '3d'})
         fig.canvas.manager.set_window_title("Visualization of Flows")
         quiv = ax.quiver(
             x, y, z,
@@ -796,7 +798,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         ax.set_aspect('equal')
 
         # Colorbar and title
-        cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
+        cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
         cbar.ax.set_ylabel('Time', fontsize=12)
         ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
                      fontsize=16)
@@ -845,8 +847,9 @@ class FlowVisualizer(FlowMatchingVisualizer):
         v = velocity_vectors[..., 1].flatten().cpu()
 
         # Create quiver plot
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots(figsize=(12, 10))
         fig.canvas.manager.set_window_title("Visualization of Flows")
+        # Presentation: width=0.006
         quiv = ax.quiver(
             x, y, u, v, time_grid[:-1].repeat(num_paths).cpu(),
             angles='xy', scale=len(time_grid[:-1]),
@@ -856,6 +859,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Add red dots for sample positions
         sample_x = sample_position[:, 0].cpu()
         sample_y = sample_position[:, 1].cpu()
+        # Presentation s=20
         ax.scatter(sample_x, sample_y, color='red', s=10, label='Sample Positions', zorder=3)
 
         # Set consistent axis limits so the plots of all action steps have same size
@@ -864,10 +868,15 @@ class FlowVisualizer(FlowMatchingVisualizer):
         ax.set_aspect('equal')
 
         # Colorbar and title
-        cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
+        cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
+        # Presentation
+        # cbar.ax.set_ylabel('Time', fontsize=32, labelpad=12)
+        # cbar.ax.tick_params(labelsize=28)
         cbar.ax.set_ylabel('Time', fontsize=12)
-        ax.set_title(f"Flow of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
-                     fontsize=16)
+        ax.set_title(
+            f"Flow of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
+            fontsize=16
+        )
 
         # Axis labels
         if self.action_dim_names:
@@ -880,6 +889,13 @@ class FlowVisualizer(FlowMatchingVisualizer):
         ax.set_ylabel(y_label, fontsize=14)
 
         ax.tick_params(axis='both', labelsize=12)
+        # Presentation
+        # ax.tick_params(
+        #     axis='both',
+        #     which='both',
+        #     labelbottom=False,
+        #     labelleft=False
+        # )
         ax.grid(True)
         plt.tight_layout()
 
@@ -1205,8 +1221,9 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         )
         
         # Create quiver plot
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots(figsize=(12, 10))
         fig.canvas.manager.set_window_title("Visualization of Vector Field")
+        # Presentation: scale=9, width=0.005
         quiv = ax.quiver(
             x_positions, y_positions,
             x_velocities, y_velocities,
@@ -1222,11 +1239,19 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         ax.set_aspect('equal')
 
         # Colorbar and title
-        cbar = fig.colorbar(quiv, ax=ax, shrink=0.7)
+        cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
+        # Presentation: fontsize=32, labelpad=12
         cbar.ax.set_ylabel('Velocity Norm', fontsize=12)
+        # Presentation
+        # cbar.ax.tick_params(labelsize=28)
+        # cbar.set_ticks(np.arange(0.0, 2.01, 0.5))
         
         # Title
-        ax.set_title(f"Vector Field of Action Step {action_step+1} at t={time:.2f}", fontsize=16)
+        ax.set_title(
+            f"Vector Field of Action Step {action_step+1} at t={time:.2f}",
+            fontsize=16,
+            pad=12
+        )
 
         # Axis labels
         if self.action_dim_names:
@@ -1235,6 +1260,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         else:
             x_label = f"Action dimension {self.action_dims[0]}"
             y_label = f"Action dimension {self.action_dims[1]}"
+        # Presentation: fontsize=34, labelpad=4
         ax.set_xlabel(x_label, fontsize=14)
         ax.set_ylabel(y_label, fontsize=14)
 
@@ -1254,6 +1280,13 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             )
 
         ax.tick_params(axis='both', labelsize=12)
+        # Presentation
+        # ax.tick_params(
+        #     axis='both',
+        #     which='both',
+        #     labelbottom=False,
+        #     labelleft=False
+        # )
         ax.grid(True)
         plt.tight_layout()
         
@@ -1294,16 +1327,19 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             label = name.title().replace("_", " ")
             if is_3d:
                 z_positions = actions[:, action_step, z_dim].cpu().numpy()
+                # Presentation s=30
                 ax.scatter(
                     x_positions, y_positions, z_positions, label=label,
                     color=color, s=10, zorder=3,
                 )
             else:
+                # Presentation s=30
                 ax.scatter(
                     x_positions, y_positions, label=label,
                     color=color, s=10, zorder=3,    
                 )
 
         # Draw legend using the prettified names
+        # Presentation: fontsize=28
         ax.legend()
         return ax.get_figure()

@@ -38,6 +38,7 @@ from tqdm import trange
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
 from lerobot.common.policies.factory import make_policy
+from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
 from lerobot.common.policies.flow_matching.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
     make_laplace_path
@@ -124,6 +125,7 @@ def plot_id_ood_uncertainties(
 
 def plot_all_uncertainties(
     uncert_est_method: str,
+    scoring_metric: str,
     id_success_uncertainties: list[np.ndarray],
     id_failure_uncertainties: list[np.ndarray],
     ood_success_uncertainties: list[np.ndarray],
@@ -182,20 +184,40 @@ def plot_all_uncertainties(
 
     for label, episodes in buckets:
         mean, std = compute_uncert_stats([np.where(np.isneginf(u), np.nan, u) for u in episodes])
-        plt.plot(np.arange(max_len), mean, color=colours[label])
+        plt.plot(
+            np.arange(max_len),
+            mean,
+            color=colours[label],
+            label=None if plot_individual else label
+        )
         plt.fill_between(
             np.arange(max_len), mean - std, mean + std, color=colours[label], alpha=0.5
         )
 
-    plt.xlabel("Action-Sequence Index")
-    plt.ylabel("Uncertainty Score")
+    # Presentation: fontsize=18, labelpad=4
+    plt.xlabel("Rollout Step")
+    
+    if scoring_metric == "mode_distance":
+        y_label = "Mode Distance Score"
+    elif scoring_metric == "intermediate_vel_diff":
+        y_label = "Velocity Diff. Score"
+    elif scoring_metric == "likelihood":
+        y_label = "Neg. Log-Likelihood"
+    else:
+        y_label = "Uncertainty Score"
+    # Presentation: fontsize=18, labelpad=4
+    plt.ylabel(ylabel=y_label)
     plt.title(uncert_est_method.replace("_", " ").title())
-    plt.legend()
+    # Presentation
+    # plt.xticks(fontsize=16)
+    # plt.yticks(fontsize=16)
+    # plt.legend(fontsize=15)
     output_dir.mkdir(parents=True, exist_ok=True)
     suffix = "_individual" if plot_individual else ""
+    # Presentation dpi=600
     plt.savefig(
         output_dir / f"uncertainty_scores_{uncert_est_method}{suffix}.png",
-        dpi=160, bbox_inches="tight"
+        dpi=300, bbox_inches="tight"
     )
     plt.close()
 
@@ -398,6 +420,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 laplace_calib_loader=laplace_calib_loader,
                 laplace_path=laplace_path,
             )
+            scoring_metric = getattr(policy.uncertainty_sampler, 'scoring_metric', None)
 
             # ------------ ID Case ------------------
             logging.info(f"Creating ID environment.")
@@ -481,6 +504,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             else:
                 plot_all_uncertainties(
                     uncert_est_method=uncert_est_method,
+                    scoring_metric=scoring_metric,
                     id_success_uncertainties=all_uncertainties[uncert_est_method]["id_success"],
                     id_failure_uncertainties=all_uncertainties[uncert_est_method]["id_failure"],
                     ood_success_uncertainties=all_uncertainties[uncert_est_method]["ood_success"],
@@ -490,6 +514,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 )
                 plot_all_uncertainties(
                     uncert_est_method=uncert_est_method,
+                    scoring_metric=scoring_metric,
                     id_success_uncertainties=all_uncertainties[uncert_est_method]["id_success"],
                     id_failure_uncertainties=all_uncertainties[uncert_est_method]["id_failure"],
                     ood_success_uncertainties=all_uncertainties[uncert_est_method]["ood_success"],
