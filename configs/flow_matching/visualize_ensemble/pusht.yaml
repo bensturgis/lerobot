@@ -1,0 +1,27 @@
+env:
+  type: pusht
+  ood:
+    enabled: true
+
+policy:
+  type: flow_matching
+  device: cuda
+
+vis:
+  num_rollouts: 1
+  action_dim_names: ["pos_x", "pos_y"]
+
+vector_field:
+  action_dims: [0, 1]
+  action_steps: [15]
+
+ensemble_sampler:
+  scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/last/pretrained_model
+  num_action_seq_samples: 25
+  scoring_metric: mode_distance
+  velocity_eval_times: [0.0, 0.1, 0.2]
+
+show: False
+seed: 15
+
+# python lerobot/scripts/flow_matching/visualize_ensemble_uncertainty_estimation.py --config=configs/flow_matching/visualize_ensemble/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

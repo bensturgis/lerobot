@@ -8,7 +8,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 500
-  uncert_est_methods: [cross_laplace, composed_cross_laplace]
+  uncert_est_methods: [cross_ensemble, cross_laplace]
 
 uncertainty_sampler:
   composed_cross_ensemble_sampler:
@@ -18,8 +18,8 @@ uncertainty_sampler:
     num_action_seq_samples: 5
   cross_ensemble_sampler:
     scorer_model_path: outputs/train/flow_matching_libero_spatial/checkpoints/040000/pretrained_model
-    scoring_metric: mode_distance
-    velocity_eval_times: [0.0, 0.1, 0.2]
+    scoring_metric: intermediate_vel_diff
+    velocity_eval_times: [0.8, 0.9, 0.95]
     num_action_seq_samples: 5
   composed_sequence_sampler:
     scoring_metric: mode_distance
@@ -29,8 +29,8 @@ uncertainty_sampler:
     laplace_scope: both
     calib_fraction: 1.0
     batch_size: 1
-    scoring_metric: mode_distance
-    velocity_eval_times: [0.0, 0.1, 0.2]
+    scoring_metric: intermediate_vel_diff
+    velocity_eval_times: [0.8, 0.9, 0.95]
     num_action_seq_samples: 5
   composed_cross_laplace_sampler:
     laplace_scope: both
@@ -40,7 +40,7 @@ uncertainty_sampler:
     velocity_eval_times: [0.0, 0.1, 0.2]
     num_action_seq_samples: 5
 
-job_name: mode_distance_libero
-seed: 112200
+job_name: intermediate_vel_diff_libero_presentation
+seed: 42
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

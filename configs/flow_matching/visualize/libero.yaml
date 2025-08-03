@@ -1,5 +1,5 @@
 # Choose from "action_seq", "flows" and "vector_field"
-vis_types: [action_seq, vector_field, flows]
+vis_types: [flows]
 show: False
 seed: 40
 
@@ -22,6 +22,7 @@ vis:
 flows:
   action_dims: [1, 2]
   axis_limits: [[-1, 1], [-1, 1]]
+  num_paths: 30
 
 vector_field:
   action_dims: [1, 2]

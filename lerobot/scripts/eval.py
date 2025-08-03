@@ -396,7 +396,9 @@ def eval_policy(
                 episode_data = {k: torch.cat([episode_data[k], this_episode_data[k]]) for k in episode_data}
 
         # Maybe render video for visualization.
-        def write_video_for_episode(stacked_frames: np.ndarray, done_idx: int, camera: Optional[str]):
+        def write_video_for_episode(
+            stacked_frames: np.ndarray, done_idx: int, camera: Optional[str] = None
+        ):
             camera_dir = (videos_dir / camera) if camera is not None else videos_dir
             camera_dir.mkdir(parents=True, exist_ok=True)
             video_path = camera_dir / f"eval_episode_{n_episodes_rendered}.mp4"
@@ -425,7 +427,6 @@ def eval_policy(
                     write_video_for_episode(
                         stacked_frames=batch_stacked_frames[ep],
                         done_idx=done_indices[ep].item(),
-                        file_suffix="",
                     )
                     n_episodes_rendered += 1
             elif isinstance(ep_frames, dict) and len(next(iter(ep_frames.values()))) > 0:

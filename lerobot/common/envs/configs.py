@@ -151,7 +151,6 @@ class LiberoEnv(EnvConfig):
     task: str = "LiberoEnv-v0"
     task_ids: List[int] = field(default_factory=list)
     task_sample_seed: int | None = None
-    task_id_rng: random.Random = field(init=False, repr=False)
     fps: int = 20
     episode_length: int = 200
     # Camera and simulation settings

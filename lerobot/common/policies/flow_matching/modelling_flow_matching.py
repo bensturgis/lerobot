@@ -3,7 +3,6 @@
 """Flow Matching Policy as per "Flow Matching for Generative Modelling"."""
 
 import math
-import random
 from collections import deque
 from pathlib import Path
 from tqdm import tqdm
@@ -19,7 +18,10 @@ from torch.utils.data import DataLoader
 
 from lerobot.common.constants import FINAL_FEATURE_MAP_MODULE, OBS_ENV, OBS_ROBOT
 from lerobot.common.policies.factory import make_flow_matching_uncertainty_sampler
-from lerobot.common.policies.flow_matching.conditional_probability_path import OTCondProbPath
+from lerobot.common.policies.flow_matching.conditional_probability_path import (
+    OTCondProbPath,
+    VPDiffusionCondProbPath
+)
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
@@ -283,6 +285,15 @@ class FlowMatchingModel(nn.Module):
             global_cond_dim += self.config.env_state_feature.shape[0]
 
         self.unet = FlowMatchingConditionalUnet1d(config, global_cond_dim=global_cond_dim * config.n_obs_steps)
+        if self.config.cond_vf_type == "ot":
+            self.cond_prob_path = OTCondProbPath(sigma_min=self.config.sigma_min)
+        elif self.config.cond_vf_type == "vp":
+            self.cond_prob_path = VPDiffusionCondProbPath(
+                beta_min=self.config.beta_min,
+                beta_max=self.config.beta_max,
+            )
+        else:
+            raise ValueError(f"Unknown conditional vector field type {self.config.cond_vf_type}")
         self.ode_solver = ODESolver(self.unet)
 
     def forward(
@@ -431,15 +442,14 @@ class FlowMatchingModel(nn.Module):
         times = torch.rand(
             size=(trajectory.shape[0],),
             device=device,
-        )
+        ) * 0.999
 
         # Sample from conditional probability path and vector field.
-        ot_cond_prob_path = OTCondProbPath()
-        interpolated_trajectory = ot_cond_prob_path.sample(
+        interpolated_trajectory = self.cond_prob_path.sample(
             x_1=trajectory,
             t=times[:, None, None],
         )
-        target_velocity = ot_cond_prob_path.velocity(
+        target_velocity = self.cond_prob_path.velocity(
             x_t=interpolated_trajectory,
             x_1=trajectory,
             t=times[:, None, None],

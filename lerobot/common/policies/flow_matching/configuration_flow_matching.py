@@ -87,6 +87,17 @@ class FlowMatchingConfig(PreTrainedConfig):
     n_groups: int = 8
     flow_matching_step_embed_dim: int = 128
     use_film_scale_modulation: bool = True
+
+    # Conditional vector-field selection.
+    # Choose "ot" for optimal‐transport, "vp" for variance‐preserving diffusion.
+    cond_vf_type: str = "ot"
+
+    # Only used for optimal transport conditional vector field
+    sigma_min: float = 0.0  
+
+    # Only used for variance-preserving diffusion conditional vector field
+    beta_min: float = 0.1  
+    beta_max: float = 20.0
     
     # ODE solver.
     ode_step_size: float | None = 0.1
@@ -122,6 +133,9 @@ class FlowMatchingConfig(PreTrainedConfig):
                 "The horizon should be an integer multiple of the downsampling factor (which is determined "
                 f"by `len(down_dims)`). Got {self.horizon=} and {self.down_dims=}"
             )
+        
+        if self.cond_vf_type not in ["ot", "vp"]:
+            raise ValueError(f"Unknown conditional vector field type {self.cond_vf_type}")
 
     def get_optimizer_preset(self) -> AdamConfig:
         return AdamConfig(

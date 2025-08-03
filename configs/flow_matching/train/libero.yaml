@@ -12,19 +12,21 @@ eval:
 policy:
   type: flow_matching
   device: cuda
-  horizon: 32
-  n_action_steps: 16
+  cond_vf_type: vp
+  ode_step_size: 0.01
+  horizon: 16
+  n_action_steps: 8
   crop_shape: null
   crop_is_random: false
   use_separate_rgb_encoder_per_camera: true
 
 
-output_dir: outputs/train/flow_matching_libero_spatial_16_action_steps_02
+output_dir: outputs/train/flow_matching_libero_diffusion
 batch_size: 32
 steps: 125000
 eval_freq: 5000
 save_freq: 5000
-seed: 434
+seed: 261099
 wandb:
   enable: true
 

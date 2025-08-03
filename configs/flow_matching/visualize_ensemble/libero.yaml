@@ -17,7 +17,7 @@ vis:
 vector_field:
   action_dims: [0, 1]
   action_steps: [0]
-  # grid_size: 20
+  grid_size: 20
 
 ensemble_sampler:
   scorer_model_path: outputs/train/flow_matching_libero_spatial_02/checkpoints/035000/pretrained_model
@@ -26,6 +26,6 @@ ensemble_sampler:
   velocity_eval_times: [0.0, 0.1, 0.2]
 
 show: False
-seed: 15
+seed: 58
 
 # python lerobot/scripts/flow_matching/visualize_ensemble_uncertainty_estimation.py --config=configs/flow_matching/visualize_ensemble/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model
