@@ -209,6 +209,7 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                     global_cond=scorer_global_cond,
                     visualize_actions=True,
                     actions=action_data,
+                    mean_uncertainty=mean_uncertainty,
                     generator=generator
                 )
 

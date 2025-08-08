@@ -1,9 +1,8 @@
-import torch
+import warnings
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from torch import Tensor
-from typing import Literal, Sequence
+from typing import List, Sequence
 
 """
 Explanation of shared uncertainy sampler attributes:
@@ -46,6 +45,37 @@ def validate_metric(field_name: str, metric: str, allowed: Sequence[str]) -> Non
             f"{field_name!r} must be one of: {allowed_list}. Got {metric!r}."
         )
 
+def process_velocity_eval_times(
+    scoring_metric: str,
+    vel_eval_times: Sequence[float],
+) -> List[float]:
+    """
+    Validate and possibly modify vel_eval_times.
+
+    Ensures every t satisfies 0.0 ≤ t < 1.0.
+    If scoring_metric == "intermediate_vel_diff" and vel_eval_times does not already
+    start with 0.0, prepends 0.0 and issues a warning.
+    """
+    for t in vel_eval_times:
+        if not (0.0 <= t < 1.0):
+            raise ValueError(
+                f"'velocity_eval_times' entries must satisfy 0.0 ≤ t < 1.0; "
+                f"got {vel_eval_times}"
+            )
+
+    if scoring_metric == "intermediate_vel_diff":
+        needs_zero = len(vel_eval_times) == 0 or vel_eval_times[0] != 0.0
+        if needs_zero:
+            warnings.warn(
+                "scoring_metric 'intermediate_vel_diff' requires velocity_eval_times "
+                "to start with 0.0; prepending 0.0 automatically.",
+                stacklevel=2,
+            )
+            vel_eval_times = [0.0, *vel_eval_times]
+
+    return vel_eval_times
+
+
 @dataclass(kw_only=True)
 class LikelihoodODESolverConfig:
     method: str = "euler"
@@ -66,7 +96,7 @@ class ComposedCrossLaplaceSamplerConfig:
         default_factory=LikelihoodODESolverConfig
     )
     velocity_eval_times: tuple = field(
-        default_factory=lambda: (0.92, 0.95, 0.97)
+        default_factory=lambda: (0.0, 0.1, 0.2)
     )
 
     def __post_init__(self):
@@ -85,6 +115,12 @@ class ComposedCrossLaplaceSamplerConfig:
             allowed=(
                 "likelihood", "mode_distance", "terminal_vel_norm",
             ),
+        )
+
+        # Validate and process velocity evaluation times
+        process_velocity_eval_times(
+            scoring_metric=self.scoring_metric,
+            vel_eval_times=self.velocity_eval_times
         )
 
 @dataclass
@@ -100,7 +136,7 @@ class CrossLaplaceSamplerConfig:
         default_factory=LikelihoodODESolverConfig
     )
     velocity_eval_times: tuple = field(
-        default_factory=lambda: (0.92, 0.95, 0.97)
+        default_factory=lambda: (0.0, 0.1, 0.2)
     )
 
     def __post_init__(self):
@@ -122,6 +158,12 @@ class CrossLaplaceSamplerConfig:
             ),
         )
 
+        # Validate velocity evaluation times
+        process_velocity_eval_times(
+            scoring_metric=self.scoring_metric,
+            vel_eval_times=self.velocity_eval_times
+        )
+
 @dataclass
 class ComposedCrossEnsembleSamplerConfig:
     num_action_seq_samples: int = 1
@@ -133,16 +175,23 @@ class ComposedCrossEnsembleSamplerConfig:
         default_factory=LikelihoodODESolverConfig
     )
     velocity_eval_times: tuple = field(
-        default_factory=lambda: (0.92, 0.95, 0.97)
+        default_factory=lambda: (0.0, 0.1, 0.2)
     )
 
     def __post_init__(self):
+        # Validate scoring metric
         validate_metric(
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric,
             allowed=(
                 "likelihood", "mode_distance", "terminal_vel_norm",
             ),
+        )
+
+        # Validate velocity evaluation times
+        process_velocity_eval_times(
+            scoring_metric=self.scoring_metric,
+            vel_eval_times=self.velocity_eval_times
         )
 
 @dataclass
@@ -155,7 +204,7 @@ class CrossEnsembleSamplerConfig:
         default_factory=LikelihoodODESolverConfig
     )
     velocity_eval_times: tuple = field(
-        default_factory=lambda: (0.92, 0.95, 0.97)
+        default_factory=lambda: (0.0, 0.1, 0.2)
     )
 
     def __post_init__(self):
@@ -168,6 +217,12 @@ class CrossEnsembleSamplerConfig:
             ),
         )
 
+        # Validate velocity evaluation times
+        process_velocity_eval_times(
+            scoring_metric=self.scoring_metric,
+            vel_eval_times=self.velocity_eval_times
+        )
+
 @dataclass
 class ComposedSequenceSamplerConfig:
     num_action_seq_samples: int = 1
@@ -178,7 +233,7 @@ class ComposedSequenceSamplerConfig:
         default_factory=LikelihoodODESolverConfig
     )
     velocity_eval_times: tuple = field(
-        default_factory=lambda: (0.92, 0.95, 0.97)
+        default_factory=lambda: (0.0, 0.1, 0.2)
     )
     
     def __post_init__(self):
@@ -188,6 +243,12 @@ class ComposedSequenceSamplerConfig:
             allowed=(
                 "likelihood", "mode_distance", "terminal_vel_norm",
             ),
+        )
+
+        # Validate velocity evaluation times
+        process_velocity_eval_times(
+            scoring_metric=self.scoring_metric,
+            vel_eval_times=self.velocity_eval_times
         )
 
 @dataclass

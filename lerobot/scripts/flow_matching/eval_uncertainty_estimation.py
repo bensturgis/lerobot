@@ -208,6 +208,7 @@ def plot_all_uncertainties(
     # Presentation: fontsize=18, labelpad=4
     plt.ylabel(ylabel=y_label)
     plt.title(uncert_est_method.replace("_", " ").title())
+    plt.legend()
     # Presentation
     # plt.xticks(fontsize=16)
     # plt.yticks(fontsize=16)

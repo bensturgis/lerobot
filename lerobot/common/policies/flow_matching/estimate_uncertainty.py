@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from typing import Dict, List, Literal, Optional, Sequence, Tuple, Union
 
+from lerobot.common.policies.flow_matching.conditional_probability_path import VPDiffusionCondProbPath
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
     ComposedCrossEnsembleSamplerConfig,
@@ -75,13 +76,15 @@ class FlowMatchingUncertaintySampler(ABC):
         # Build time grid for sampling according to ODE solver method and scoring metric
         if flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
             if scoring_metric in ["intermediate_vel_norm", "intermediate_vel_diff"]:
-                self.sampling_time_grid = self._make_sampling_time_grid(
+                self.sampling_time_grid = self.sampling_ode_solver.make_sampling_time_grid(
                     step_size=flow_matching_cfg.ode_step_size,
-                    extra_times=velocity_eval_times
+                    extra_times=velocity_eval_times,
+                    device=self.device
                 )
             else:
-                self.sampling_time_grid = self._make_sampling_time_grid(
-                    step_size=flow_matching_cfg.ode_step_size
+                self.sampling_time_grid = self.sampling_ode_solver.make_sampling_time_grid(
+                    step_size=flow_matching_cfg.ode_step_size,
+                    device=self.device
                 )
         elif flow_matching_cfg.ode_solver_method in ADAPTIVE_SOLVERS:
             if scoring_metric in ["intermediate_vel_norm", "intermediate_vel_diff"]:
@@ -145,54 +148,6 @@ class FlowMatchingUncertaintySampler(ABC):
 
         return composed_action_seq
 
-    def _make_sampling_time_grid(
-        self,
-        step_size: float,
-        extra_times: Optional[Sequence[float]] = None,
-    ) -> Tensor:
-        """
-        Build a time grid from 0.0 to 1.0 with fixed step_size, plus extra points.
-
-        Args:
-            step_size: Spacing between regular points.
-            extra_times: Additional timepoints to include.
-
-        Returns:
-            A time grid of unique, sorted times in [0.0, 1.0.
-        """
-        if not (0 < step_size <= 1.0):
-            raise ValueError("step_size must be > 0 and <= 1.")
-
-        # How many full steps of step_size fit into [0,1]
-        n = math.floor(1.0 / step_size)
-
-        # Regular grid from 0.0 to (n * step_size)
-        time_grid = torch.linspace(
-            0.0,
-            n * step_size,
-            steps=n + 1,
-            device=self.device,
-            dtype=self.dtype,
-        )
-
-        # Ensure time grid ends with 1.0
-        if time_grid[-1] < 1.0:
-            time_grid = torch.cat([
-                time_grid, torch.tensor([1.0], device=self.device, dtype=self.dtype)
-            ])
-
-        # Merge step size time grid with extra times and sort
-        if extra_times:
-            time_grid = torch.cat([
-                time_grid, torch.tensor(extra_times, device=self.device, dtype=self.dtype).clamp(0.0, 1.0)
-            ])
-            time_grid, _ = torch.sort(torch.unique(time_grid))
-
-        if time_grid[0].item() != 0.0 or time_grid[-1].item() != 1.0:
-            raise RuntimeError("Sampling time grid must start at 0.0 and end at 1.0.")
-
-        return time_grid
-    
     def _make_fixed_lik_estimation_time_grid(
         self, direction: Literal["backward", "forward"]
     ) -> Tensor:
@@ -240,7 +195,6 @@ class FlowMatchingUncertaintySampler(ABC):
 
         return lik_estimation_time_grid
 
-
     @abstractmethod
     def conditional_sample_with_uncertainty(
         self,
@@ -262,6 +216,24 @@ class FlowMatchingUncertaintySampler(ABC):
         """
         pass
 
+    def _get_intermediate_vel_diff_factor(self, t: Tensor) -> float:
+        """
+        Scale factor used when computing the intermediate-velocity-difference uncertainty metric.
+        """
+        if self.flow_matching_cfg.cond_vf_type == "vp":
+            cond_prob_path = VPDiffusionCondProbPath(
+                beta_min=self.flow_matching_cfg.beta_min,
+                beta_max=self.flow_matching_cfg.beta_max,
+            )
+            return (2 / cond_prob_path.get_beta(t))
+        elif self.flow_matching_cfg.cond_vf_type == "ot":
+            return t
+        else:
+            raise ValueError(
+                "No intermediate velocity difference factor provided for conditional " \
+                f"VF type: {self.flow_matching_cfg.cond_vf_type}."
+            )
+        
     def score_sample(
         self,
         scoring_metric: str,
@@ -309,28 +281,16 @@ class FlowMatchingUncertaintySampler(ABC):
         Returns:
             Uncertainty scores per sample where larger values indicate higher uncertainty.
             Shape: (batch_size,).
-        """
+        """       
         if scoring_metric in [
             "intermediate_vel_norm", "intermediate_vel_diff"
         ]:
-            # Map each configured evaluation time to its index in the solver's time grid
-            matched_indices = []
-            for eval_time in torch.tensor(velocity_eval_times, device=self.device, dtype=self.dtype):
-                # Locate entries equal to eval_t (within tolerance)
-                time_mask = torch.isclose(self.sampling_time_grid, eval_time, atol=1e-5, rtol=0)
-                match_count = int(time_mask.sum().item())
-                if match_count == 0:
-                    raise ValueError(f"Evaluation time {eval_time.item()} not found in sampling_time_grid")
-                if match_count > 1:
-                    raise ValueError(f"Evaluation time {eval_time.item()} matched {match_count} entries in sampling_time_grid; expected exactly one.")
-                
-                # Grab index of match
-                index = time_mask.nonzero(as_tuple=True)[0].item()
-                matched_indices.append(index)
-
-            # Select only the ODE states and time points that correspond to those indices
-            selected_ode_states = ode_states[matched_indices]
-            selected_grid_times = self.sampling_time_grid[matched_indices]
+            # Select the ODE states that correspond to the velocity evaluation times
+            selected_ode_states, selected_grid_times = self.sampling_ode_solver.select_ode_states(
+                time_grid=self.sampling_time_grid,
+                ode_states=ode_states,
+                requested_times=torch.tensor(velocity_eval_times, device=self.device, dtype=self.dtype)
+            )
 
         # Compute uncertainty based on selected metric
         if scoring_metric == "intermediate_vel_norm":
@@ -394,27 +354,38 @@ class FlowMatchingUncertaintySampler(ABC):
         elif scoring_metric == "intermediate_vel_diff":
             # Evaluate difference between sampler and scorer velocity field at each
             # intermediate time point
-            per_step_vel_diff: List[Tensor] = []
-            for time, intermediate_state in zip(selected_grid_times, selected_ode_states):
+            inter_vel_diff_score: float = 0.0
+            for idx, (time, inter_state) in enumerate(zip(selected_grid_times, selected_ode_states)):
+                # Determine dt: difference to next time or to 1.0 for last step
+                if idx < len(selected_grid_times) - 1:
+                    dt = selected_grid_times[idx + 1] - time
+                else:
+                    dt = 1.0 - time
+            
                 time_batch = torch.full(
                     (ode_states[-1].shape[0],), time, device=self.device, dtype=self.dtype
                 )
                 sampler_velocity = self.velocity_model(
-                    intermediate_state,
+                    inter_state,
                     time_batch,
                     sampler_global_cond,
                 )
                 scorer_velocity = scorer_velocity_model(
-                    intermediate_state,
+                    inter_state,
                     time_batch,
                     scorer_global_cond,
                 )
-                velocity_difference = sampler_velocity - scorer_velocity
                 # L2 norm across time and action dims gives magnitude of velocity difference
-                per_step_vel_diff.append(torch.norm(velocity_difference, dim=(1, 2)))
+                velocity_difference = torch.norm(sampler_velocity - scorer_velocity, dim=(1, 2)) ** 2
+                
+                # Scale velocity difference by factor that depends on conditional vector field type
+                inter_vel_diff_score += (
+                    self._get_intermediate_vel_diff_factor(time)
+                    * velocity_difference
+                    * dt
+                )
             
-            # Use average velocity difference as uncertainty score
-            return torch.stack(per_step_vel_diff, dim=0).mean(dim=0)
+            return inter_vel_diff_score
         elif scoring_metric == "likelihood":            
             # Compute log-likelihood of sampled action sequences in scorer model    
             scoring_ode_solver = ODESolver(scorer_velocity_model)

@@ -1,5 +1,6 @@
 import itertools
 import logging
+import math
 import torch
 import time
 import warnings
@@ -46,9 +47,9 @@ class ODESolver():
         return_intermediate_vels: bool = False,
         enable_grad: bool = False,
     ) -> Union[
-            Tensor,
-            Sequence[Tensor],
-            Tuple[Tensor, Tensor]
+        Tensor,
+        Sequence[Tensor],
+        Tuple[Tensor, Tensor]
     ]:
         """
         Solve the flow matching ODE with the conditioned velocity model.
@@ -338,6 +339,108 @@ class ODESolver():
             log_p_1_x_1 = log_p_0(x_init) - log_prob_diff[-1]
 
         return (trajectory, log_p_1_x_1) if return_intermediate_states else (trajectory[-1], log_p_1_x_1)
+    
+
+    def make_sampling_time_grid(
+        self,
+        step_size: float,
+        device: torch.device,
+        extra_times: Optional[Union[Tensor, Sequence]] = None,
+    ) -> Tensor:
+        """
+        Build a time grid from 0.0 to 1.0 with fixed step_size, plus extra points.
+
+        Args:
+            step_size: Spacing between regular points.
+            extra_times: Additional timepoints to include.
+            device: The device on which to create the time grid.
+
+        Returns:
+            A time grid of unique, sorted times in [0.0, 1.0.]
+        """
+        if not (0 < step_size <= 1.0):
+            raise ValueError("step_size must be > 0 and <= 1.")
+
+        # How many full steps of step_size fit into [0,1]
+        n = math.floor(1.0 / step_size)
+
+        # Regular grid from 0.0 to (n * step_size)
+        time_grid = torch.linspace(
+            0.0,
+            n * step_size,
+            steps=n + 1,
+            device=device,
+        )
+
+        # Ensure time grid ends with 1.0
+        if time_grid[-1] < 1.0:
+            time_grid = torch.cat([
+                time_grid, torch.tensor([1.0], device=device)
+            ])
+
+        # Merge step size time grid with extra times and sort
+        if extra_times is not None:
+            time_grid = torch.cat([
+                time_grid, torch.tensor(extra_times, device=device).clamp(0.0, 1.0)
+            ])
+
+        # Remove near-duplicates and sort
+        time_grid, _ = torch.sort(time_grid)
+        keep = torch.ones_like(time_grid, dtype=torch.bool)
+        keep[1:] = torch.diff(time_grid) > 1e-4
+        time_grid = time_grid[keep]
+
+        if time_grid[0].item() != 0.0 or time_grid[-1].item() != 1.0:
+            raise RuntimeError("Sampling time grid must start at 0.0 and end at 1.0.")
+
+        return time_grid
+    
+
+    def select_ode_states(
+        self, time_grid: Tensor, ode_states: Tensor, requested_times: Tensor
+    ) -> Tuple[Tensor, Tensor]:
+        """
+        Extract the ODE states (and their timestamps) that correspond to a set of
+        requested times.
+
+        Args:
+            time_grid: A tensor of time points at which the ODE was evaluated.
+            ode_states: A tensor of ODE states corresponding to the time points in time_grid.
+            requested_times: A tensor of times for which to extract the ODE states.
+
+        Returns:
+            A tuple containing:
+                - A tensor of ODE states corresponding to the requested times.
+                - A tensor of the corresponding time points from `time_grid`.
+        """
+        if time_grid.size(0) != ode_states.size(0):
+            raise ValueError(
+                f"`time_grid` and `ode_states` must have the same length; "
+                f"got {time_grid.size(0)} and {ode_states.size(0)}."
+            )
+        # Map each requested time to its index in the time grid
+        matched_indices = []
+        for req_t in requested_times:
+            # Locate entries equal to requested time (within tolerance)
+            time_mask = torch.isclose(time_grid, req_t, atol=1e-5, rtol=0)
+            match_count = int(time_mask.sum().item())
+            if match_count == 0:
+                raise ValueError(f"Requested time {req_t.item()} not found in time_grid")
+            if match_count > 1:
+                raise ValueError(
+                    f"Requested time {req_t.item()} matched {match_count} entries in time_grid; "
+                    "expected exactly one."
+                )
+            
+            # Grab index of match
+            index = time_mask.nonzero(as_tuple=True)[0].item()
+            matched_indices.append(index)
+
+        # Select only the ODE states and time points that correspond to those indices
+        selected_ode_states = ode_states[matched_indices]
+        selected_grid_times = time_grid[matched_indices]
+
+        return selected_ode_states, selected_grid_times
 
 
     def _validate_and_configure_solver(
