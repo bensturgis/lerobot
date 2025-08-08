@@ -11,6 +11,7 @@ from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler imp
 from lerobot.configs import parser
 from lerobot.configs.default import (
     ActionSeqVisConfig,
+    FlowVisConfig,
     VectorFieldVisConfig,
     VisConfig
 )
@@ -25,6 +26,7 @@ class VisualizeEnsemblePipelineConfig:
     ensemble_sampler: CrossEnsembleSamplerConfig = field(default_factory=CrossEnsembleSamplerConfig)
     vis: VisConfig = field(default_factory=VisConfig)
     action_seq: ActionSeqVisConfig = field(default_factory=ActionSeqVisConfig)
+    flows: FlowVisConfig = field(default_factory=FlowVisConfig)
     vector_field: VectorFieldVisConfig = field(default_factory=VectorFieldVisConfig)
 
     seed: int | None = None
@@ -52,6 +54,7 @@ class VisualizeEnsemblePipelineConfig:
 
         if self.vector_field.action_dim_names is None:
             self.vector_field.action_dim_names = self.vis.action_dim_names
+            self.flows.action_dim_names = self.vis.action_dim_names
 
 
         # Plug in the composed sequence sampler config into the uncertainty sampler config to load the scorer model

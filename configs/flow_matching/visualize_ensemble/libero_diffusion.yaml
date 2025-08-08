@@ -14,18 +14,13 @@ vis:
                      "ee_rot_x", "ee_rot_y", "ee_rot_z",
                      "gripper_open"]
 
-vector_field:
-  action_dims: [0, 1]
-  action_steps: [0]
-  grid_size: 20
-
 flows:
   num_paths: 5
   action_dims: [0, 1]
   axis_limits: [[-1.5, 1.5], [-1.5, 1.5]]
 
 ensemble_sampler:
-  scorer_model_path: outputs/train/flow_matching_libero_spatial_02/checkpoints/035000/pretrained_model
+  scorer_model_path: outputs/train/flow_matching_libero_spatial_diffusion_02/checkpoints/last/pretrained_model
   num_action_seq_samples: 25
   scoring_metric: intermediate_vel_diff
   velocity_eval_times: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -33,4 +28,4 @@ ensemble_sampler:
 show: False
 seed: 58
 
-# python lerobot/scripts/flow_matching/visualize_ensemble_uncertainty_estimation.py --config=configs/flow_matching/visualize_ensemble/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model
+# python lerobot/scripts/flow_matching/visualize_ensemble_uncertainty_estimation.py --config=configs/flow_matching/visualize_ensemble/libero_diffusion.yaml --policy.path=outputs/train/flow_matching_libero_spatial_diffusion/checkpoints/last/pretrained_model

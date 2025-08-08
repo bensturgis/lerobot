@@ -32,6 +32,7 @@ from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossEnsembleSampler
 from lerobot.common.policies.flow_matching.visualizer import (
     ActionSeqVisualizer,
+    FlowVisualizer,
     VectorFieldVisualizer
 )
 from lerobot.common.utils.io_utils import write_video
@@ -132,6 +133,12 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
             velocity_model=scorer_flow_matching_model.unet,
             output_root=ep_dir,
         )
+        flow_visualizer = FlowVisualizer(
+            cfg=cfg.flows,
+            flow_matching_cfg=policy.config,
+            velocity_model=policy.flow_matching.unet,
+            output_root=ep_dir,
+        )
 
         # Initialize the dictionary of actions to visualize in the vector field plot
         action_data: Dict[str, Tensor] = {}
@@ -197,21 +204,32 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                     batch_size=num_samples, global_cond=scorer_global_cond.repeat(num_samples, 1), generator=generator
                 )
 
-                # Store the action samples to overlay them in the vector field plot
-                action_data["scorer_actions"] = scorer_actions
-                action_data["sampler_actions"] = sampler_actions[1:]
-                
-                # Choose an action which will be used to generate the vector field plot
-                action_data["base_action"] = sampler_actions[0].unsqueeze(0)                
-                
-                # Visualize scorer vector field with sampler action sequences
-                vector_field_visualizer.visualize(
-                    global_cond=scorer_global_cond,
-                    visualize_actions=True,
-                    actions=action_data,
-                    mean_uncertainty=mean_uncertainty,
-                    generator=generator
-                )
+                if cfg.ensemble_sampler.scoring_metric == "intermediate_vel_diff":
+                    flow_visualizer.visualize_velocity_difference(
+                        scorer_velocity_model=scorer_flow_matching_model.unet,
+                        sampler_global_cond=sampler_global_cond,
+                        scorer_global_cond=scorer_global_cond,
+                        velocity_eval_times=torch.tensor(
+                            cfg.ensemble_sampler.velocity_eval_times,
+                            device=device
+                        )
+                    )
+                else:
+                    # Store the action samples to overlay them in the vector field plot
+                    action_data["scorer_actions"] = scorer_actions
+                    action_data["sampler_actions"] = sampler_actions[1:]
+                    
+                    # Choose an action which will be used to generate the vector field plot
+                    action_data["base_action"] = sampler_actions[0].unsqueeze(0)                
+                    
+                    # Visualize scorer vector field with sampler action sequences
+                    vector_field_visualizer.visualize(
+                        global_cond=scorer_global_cond,
+                        visualize_actions=True,
+                        actions=action_data,
+                        mean_uncertainty=mean_uncertainty,
+                        generator=generator
+                    )
 
             # Apply the next action
             observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())

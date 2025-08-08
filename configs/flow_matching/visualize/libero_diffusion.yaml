@@ -1,0 +1,32 @@
+# Choose from "action_seq", "flows" and "vector_field"
+vis_types: [vector_field]
+show: False
+seed: 40
+
+env:
+  type: libero
+  task: LiberoEnv-v0
+  benchmark: libero_spatial
+
+policy:
+  type: flow_matching
+  device: cuda
+
+vis:
+  num_rollouts: 2
+
+  action_dim_names: ["ee_pos_x", "ee_pos_y", "ee_pos_z",
+                     "ee_rot_x", "ee_rot_y", "ee_rot_z",
+                     "gripper_open"]
+
+flows:
+  action_dims: [1, 2]
+  axis_limits: [[-1.25, 1.25], [-1.25, 1.25]]
+  num_paths: 20
+
+vector_field:
+  action_dims: [1, 2]
+  grid_size: 25
+
+
+# python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/libero_diffusion.yaml --policy.path=outputs/train/flow_matching_libero_spatial_diffusion/checkpoints/last/pretrained_model
