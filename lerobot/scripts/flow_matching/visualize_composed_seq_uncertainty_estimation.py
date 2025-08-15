@@ -30,7 +30,7 @@ from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.estimate_uncertainty import ComposedSequenceSampler
-from lerobot.common.policies.flow_matching.visualizer import (
+from lerobot.common.policies.flow_matching.visualizers.visualizer import (
     ActionSeqVisualizer,
     VectorFieldVisualizer
 )

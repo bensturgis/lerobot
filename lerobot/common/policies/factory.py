@@ -30,7 +30,7 @@ from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionC
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
 from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintySampler
-from lerobot.common.policies.flow_matching.visualizer import (
+from lerobot.common.policies.flow_matching.visualizers.visualizer import (
     FlowMatchingVisualizer,
     ActionSeqVisualizer,
     FlowVisualizer,
