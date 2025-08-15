@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -89,6 +89,42 @@ class FlowVisualizer(FlowMatchingVisualizer):
         
         return global_cond
 
+    def _make_sampling_grid(
+        self, 
+        ode_solver: ODESolver,
+        vel_eval_times: Optional[Tensor],
+        device: torch.device
+    ) -> Tuple[Tensor, Tensor]:
+        """
+        Create the grid containing the times at which the velocities will be evaluated and plotted
+        as well as the sampling time grid for solving the ODE.
+        """
+        # Default eval times
+        if vel_eval_times is None:
+            vel_eval_times = torch.arange(0.0, 0.9 + 1e-8, 0.1, device=device)
+        else:
+            vel_eval_times = vel_eval_times.to(device)
+
+        # Always unique + sorted for safety
+        vel_eval_times = torch.unique(vel_eval_times)
+        vel_eval_times, _ = torch.sort(vel_eval_times)
+
+        method = self.flow_matching_cfg.ode_solver_method
+        if method in FIXED_STEP_SOLVERS:
+            sampling_time_grid = ode_solver.make_sampling_time_grid(
+                step_size=self.flow_matching_cfg.ode_step_size,
+                extra_times=vel_eval_times,
+                device=device,
+            )
+        elif method in ADAPTIVE_SOLVERS:
+            sampling_time_grid = vel_eval_times
+            if sampling_time_grid[-1].item() != 1.0:
+                sampling_time_grid = torch.cat([sampling_time_grid, sampling_time_grid.new_tensor([1.0])])
+        else:
+            raise ValueError(f"Unknown ODE method: {method}")
+
+        return vel_eval_times, sampling_time_grid
+
     def _compute_vector_field(
         self, velocity_model: nn.Module, global_cond: Tensor, paths: Tensor, eval_times: Tensor, 
     ) -> Tensor:
@@ -110,12 +146,86 @@ class FlowVisualizer(FlowMatchingVisualizer):
         return vector_field
     
     def _compute_axis_limits(self, path_positions: Tensor) :
+        """Compute global axis limits to create plots of equal size."""
         self.axis_limits = []
         for i in range(len(self.action_dims)):
             coords = path_positions[..., i]           # (num_paths, t, steps)
             coord_min, coord_max = coords.min().cpu(), coords.max().cpu()
             margin = 0.05 * (coord_max - coord_min)
             self.axis_limits.append((coord_min - margin, coord_max + margin))
+
+    def _make_figure(self) -> Tuple[Figure, bool]:
+        """Create 2D or 3D figure based on action_dims."""
+        if len(self.action_dims) == 2:
+            fig, _ = plt.subplots(figsize=(12, 10))
+            return fig, False
+        fig, _ = plt.subplots(figsize=(12, 10), subplot_kw={'projection': '3d'})
+        return fig, True
+
+    def _render_action_steps(
+        self,
+        path_positions: Tensor,
+        vector_fields: Dict[str, Tensor],
+        eval_times: Tensor,
+        ode_states: Tensor,
+        final_action_overlays: List[Dict[str, Any]],                # list of dicts: {name, tensor, color, scale, zorder}
+    ):
+        """Render the flow plots including overlaid actions."""
+        # Compute global axis limits to create plots of equal size
+        if self.axis_limits is None:
+            self._compute_axis_limits(path_positions=path_positions)
+
+        # Create a separate figure for each action step
+        for action_step in self.action_steps:
+            single_action_path_positions = path_positions[:, :, action_step, :]
+            single_action_vector_field = {label: vel[:, :, action_step, :] for label, vel in vector_fields.items()}
+
+            fig, is_3d = self._make_figure()
+
+            # Overlay ODE states as background
+            add_action_overlays(
+                ax=fig.axes[0],
+                action_data={"Sampler ODE States": ode_states.flatten(0, 1)},
+                action_step=action_step,
+                action_dims=self.action_dims,
+                colors=["grey"],
+                scale=5,
+                zorder=1
+            )
+
+            # Vector field plot
+            fig = self._plot_flows(
+                fig=fig,
+                path_positions=single_action_path_positions,
+                vector_fields=single_action_vector_field,
+                time_grid=eval_times,
+                action_step=action_step,
+            )
+
+            # Overlay the action samples from the sampler and scorer model
+            for overlay in final_action_overlays:
+                add_action_overlays(
+                    ax=fig.axes[0],
+                    action_data={overlay["name"]: overlay["tensor"]},
+                    action_step=action_step,
+                    action_dims=self.action_dims,
+                    colors=[overlay["color"]],
+                    zorder=overlay.get("zorder", 3),
+                    scale=overlay.get("scale", 30),
+                )
+
+            # Show plot if requested
+            if self.show:
+                plt.show(block=True)
+
+            # Save plot if requested
+            if self.save:
+                self._save_figure(fig, action_step=action_step)
+
+            plt.close(fig)
+
+        if self.create_gif:
+            self._create_gif()
 
     def visualize(
         self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
@@ -146,23 +256,12 @@ class FlowVisualizer(FlowMatchingVisualizer):
             generator=generator
         )
         
-        # Create time grid
-        vel_eval_step_size = 0.1
-        vel_eval_times = torch.arange(0, 0.9 + 1e-8, vel_eval_step_size, device=device)         
-
-        if self.flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
-            sampling_time_grid = ode_solver.make_sampling_time_grid(
-                step_size=self.flow_matching_cfg.ode_step_size,
-                extra_times=vel_eval_times,
-                device=device,
-            )
-        elif self.flow_matching_cfg.ode_solver_method in ADAPTIVE_SOLVERS:
-            sampling_time_grid, _ = vel_eval_times.to(device)
-            # Append 1.0 if not already there
-            if sampling_time_grid[-1].item() != 1.0:
-                sampling_time_grid = torch.cat(
-                    [sampling_time_grid, torch.tensor([1.0], device=device)]
-                )
+        # Create time grid for solving the ODE
+        vel_eval_times, sampling_time_grid = self._make_sampling_grid(
+            ode_solver=ode_solver,
+            vel_eval_times=None,
+            device=device,
+        )
 
         # Sample paths from the ODE
         ode_states = ode_solver.sample(
@@ -194,82 +293,26 @@ class FlowVisualizer(FlowMatchingVisualizer):
             paths=paths,
             eval_times=vel_eval_times,
         )
+        vector_field_dict = {
+            "Velocities": vector_field
+        }
         
         # Select the specific action step and dimensions
         path_positions = paths[..., self.action_dims]
-        velocity_vectors = vector_field[..., self.action_dims]
         
-        # Compute global axis limits to create plots of equal size
-        if self.axis_limits is None:
-            self._compute_axis_limits(path_positions=path_positions)
-
-        # Create a separate figure for each action step
-        for action_step in self.action_steps:
-            path_positions_single_action = path_positions[:, :, action_step, :]
-            velocity_vectors_single_action = velocity_vectors[:, :, action_step, :]
-            vector_fields = {
-                "Velocities": velocity_vectors_single_action
-            }
-
-            if len(self.action_dims) == 2:
-                fig, _ = plt.subplots(figsize=(12, 10))
-                is_3d = False
-            else:
-                fig, _ = plt.subplots(figsize=(12, 10), subplot_kw={'projection': '3d'})
-                is_3d = True
-
-            add_action_overlays(
-                ax=fig.axes[0],
-                action_data={"Sampler ODE States": ode_states.flatten(0,1)},
-                action_step=action_step,
-                action_dims=self.action_dims,
-                colors=["grey"],
-                scale=5,
-                zorder=1
-            )
-
-            if not is_3d:
-                fig = self._plot_flows_2d(
-                    fig=fig,
-                    path_positions=path_positions_single_action,
-                    vector_fields=vector_fields,
-                    time_grid=vel_eval_times,
-                    num_paths=self.num_paths,
-                    action_step=action_step,
-                )
-            else:
-                fig = self._plot_flows_3d(
-                    fig=fig,
-                    path_positions=path_positions_single_action,
-                    vector_fields=vector_fields,
-                    time_grid=vel_eval_times,
-                    num_paths=self.num_paths,
-                    action_step=action_step,
-                )
-
-            # Plot the action samples from the sampler and scorer model
-            add_action_overlays(
-                ax=fig.axes[0],
-                action_data={"Sampled Actions": final_sample},
-                action_step=action_step,
-                action_dims=self.action_dims,
-                colors=["red"],
-                zorder=3,
-                scale=30
-            )
-
-            # Show plot if requested
-            if self.show:
-                plt.show(block=True)
-
-            # Save plot if requested
-            if self.save:
-                self._save_figure(fig, action_step=action_step)
-        
-            plt.close(fig)
-
-        if self.create_gif:
-            self._create_gif()
+        self._render_action_steps(
+            path_positions=path_positions,
+            vector_fields=vector_field_dict,
+            eval_times=vel_eval_times,
+            ode_states=ode_states,
+            final_action_overlays=[{
+                "name": "Sampled Actions",
+                "tensor": final_sample,
+                "color": "red",
+                "scale": 30,
+                "zorder": 3,
+            }],
+        )
 
     def visualize_velocity_difference(
         self,
@@ -299,23 +342,12 @@ class FlowVisualizer(FlowMatchingVisualizer):
             generator=generator
         )
         
-        # Create time grid
-        if velocity_eval_times is None:
-            velocity_eval_times = torch.linspace(0.0, 0.9, steps=10, device=device)           
-
-        if self.flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
-            sampling_time_grid = sampler_ode_solver.make_sampling_time_grid(
-                step_size=self.flow_matching_cfg.ode_step_size,
-                extra_times=velocity_eval_times,
-                device=device,
-            )
-        elif self.flow_matching_cfg.ode_solver_method in ADAPTIVE_SOLVERS:
-            sampling_time_grid, _ = torch.sort(torch.unique(velocity_eval_times)).to(device)
-            # Append 1.0 if not already there
-            if sampling_time_grid[-1].item() != 1.0:
-                sampling_time_grid = torch.cat(
-                    [sampling_time_grid, torch.tensor([1.0], device=device)]
-                )
+        # Create time grid for solving the ODE
+        velocity_eval_times, sampling_time_grid = self._make_sampling_grid(
+            ode_solver=sampler_ode_solver,
+            vel_eval_times=velocity_eval_times,
+            device=device,
+        )
 
         # Sample paths from the ODE
         sampler_ode_states = sampler_ode_solver.sample(
@@ -362,108 +394,40 @@ class FlowVisualizer(FlowMatchingVisualizer):
             paths=paths,
             eval_times=velocity_eval_times,
         )
+        vector_fields = {
+            "Sampler Velocities": sampler_vector_field,
+            "Scorer Velocities": scorer_vector_field
+        }
         
         # Select the specific action step and dimensions
         path_positions = paths[..., self.action_dims]
-        sampler_velocity_vectors = sampler_vector_field[..., self.action_dims]
-        scorer_velocity_vectors = scorer_vector_field[..., self.action_dims]
 
-        # Compute global axis limits to create plots of equal size
-        if self.axis_limits is None:
-            self._compute_axis_limits(path_positions=path_positions)
+        # Brighten colors for action overlays
+        def _brighten(rgb, f): return np.clip(np.array(rgb) * f, 0, 1)
+        c0 = _brighten(plt.cm.get_cmap("tab10").colors[0], 1.6)
+        c1 = _brighten(plt.cm.get_cmap("tab10").colors[1], 1.4)
 
-        # Create a separate figure for each action step
-        for action_step in self.action_steps:
-            path_positions_single_action = path_positions[:, :, action_step, :]
-            sampler_velocity_vectors_single_action = sampler_velocity_vectors[:, :, action_step, :]
-            scorer_velocity_vectors_single_action = scorer_velocity_vectors[:, :, action_step, :]
-            vector_fields = {
-                "Sampler Velocities": sampler_velocity_vectors_single_action,
-                "Scorer Velocities": scorer_velocity_vectors_single_action
-            }
+        self._render_action_steps(
+            path_positions=path_positions,
+            vector_fields=vector_fields,
+            eval_times=velocity_eval_times,
+            ode_states=sampler_ode_states,
+            final_action_overlays=[
+                {"name": "Sampler Actions", "tensor": final_sample, "color": c0, "scale": 50, "zorder": 3},
+                {"name": "Scorer Actions",  "tensor": scorer_actions, "color": c1, "scale": 50, "zorder": 3},
+            ],
+        )
 
-            if len(self.action_dims) == 2:
-                fig, _ = plt.subplots(figsize=(12, 10))
-                is_3d = False
-            else:
-                fig, _ = plt.subplots(figsize=(12, 10), subplot_kw={'projection': '3d'})
-                is_3d = True
-
-            add_action_overlays(
-                ax=fig.axes[0],
-                action_data={"Sampler ODE States": sampler_ode_states.flatten(0,1)},
-                action_step=action_step,
-                action_dims=self.action_dims,
-                colors=["grey"],
-                scale=5,
-                zorder=1
-            )
-
-            if not is_3d:
-                fig = self._plot_flows_2d(
-                    fig=fig,
-                    path_positions=path_positions_single_action,
-                    vector_fields=vector_fields,
-                    time_grid=velocity_eval_times,
-                    num_paths=self.num_paths,
-                    action_step=action_step,
-                )
-            else:
-                fig = self._plot_flows_3d(
-                    fig=fig,
-                    path_positions=path_positions_single_action,
-                    vector_fields=vector_fields,
-                    time_grid=velocity_eval_times,
-                    num_paths=self.num_paths,
-                    action_step=action_step,
-                )
-
-            # Plot the action samples from the sampler and scorer model
-            sampler_actions_colors = np.clip(np.array(plt.cm.get_cmap("tab10").colors[0]) * 1.6, 0, 1)
-            add_action_overlays(
-                ax=fig.axes[0],
-                action_data={"Sampler Actions": final_sample},
-                action_step=action_step,
-                action_dims=self.action_dims,
-                colors=[sampler_actions_colors],
-                zorder=3,
-                scale=50
-            )
-            scorer_actions_colors = np.clip(np.array(plt.cm.get_cmap("tab10").colors[1]) * 1.4, 0, 1)
-            add_action_overlays(
-                ax=fig.axes[0],
-                action_data={"Scorer Actions": scorer_actions},
-                action_step=action_step,
-                action_dims=self.action_dims,
-                colors=[scorer_actions_colors],
-                zorder=3,
-                scale=50
-            )
-
-            # Show plot if requested
-            if self.show:
-                plt.show(block=True)
-
-            # Save plot if requested
-            if self.save:
-                self._save_figure(fig, action_step=action_step)
-        
-            plt.close(fig)
-
-        if self.create_gif:
-            self._create_gif()
-
-    def _plot_flows_3d(
+    def _plot_flows(
         self,
         fig: Figure,
-        path_positions: Tensor,
-        vector_fields: Sequence[Tensor],
-        time_grid: Tensor,
-        num_paths: int,
+        path_positions: torch.Tensor,      # (num_paths, T, horizon, d) with d=2 or 3
+        vector_fields: Dict[str, torch.Tensor],
+        time_grid: torch.Tensor,
         action_step: int,
     ) -> plt.Figure:
         """
-        Draw a 3D quiver plot for the flow of a single action step.
+        Draw a 2D or 3D quiver plot for the flow of a single action step.
         """
         was_interactive = plt.isinteractive()
         plt.ioff()
@@ -472,147 +436,74 @@ class FlowVisualizer(FlowMatchingVisualizer):
         ax = fig.axes[0]
 
         # Extract x-, y- and z-coordinates
-        x, y, z = [path_positions[..., i].flatten().cpu() for i in range(3)]
-        
-        for field_idx, (label, velocity_vectors) in enumerate(vector_fields.items()):
-            # Scale the velocity vectors for plotting
-            time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
-            velocity_vectors_scaled = velocity_vectors * time_diff.view(1, -1, 1)
-            
-            # Extract velocities
-            u_scaled, v_scaled, w_scaled = [velocity_vectors_scaled[..., i].flatten().cpu() for i in range(3)]
-            
-            if len(vector_fields) > 1:
-                # Pick a distinct base color for this field
-                colors = plt.cm.get_cmap("tab10").colors[field_idx % 10]
-            else:
-                # Color arrows by time
-                cmap = cm.get_cmap('viridis')
-                time_norm = (time_grid / time_grid[-1]).repeat(num_paths).cpu()
-                colors = cmap(time_norm)
-                label = None
+        dim = path_positions.shape[-1]
+        coords = [path_positions[..., i].flatten().cpu() for i in range(dim)]
+        x, y = coords[0], coords[1]
+        z = coords[2] if dim == 3 else None
 
-            # Create quiver plot
-            quiv = ax.quiver(
-                x, y, z,
-                u_scaled, v_scaled, w_scaled, 
-                linewidth=1.5,
-                arrow_length_ratio=0.25,
-                normalize=False,
-                color=colors,
-                label=label
-            )
+        # Scale velocity vectors
+        time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
+        vector_fields = {label: vel * time_diff.view(1, -1, 1) for label, vel in vector_fields.items()}
 
-        # Set consistent axis limits so the plots of all action steps have same size
-        ax.set_xlim(*self.axis_limits[0])
-        ax.set_ylim(*self.axis_limits[1])
-        ax.set_zlim(*self.axis_limits[2])
-        ax.set_aspect('equal')
-
-        # Colorbar
-        if len(vector_fields) > 1:
-            cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
-            cbar.ax.set_ylabel('Time', fontsize=12)
-        # Title
-        ax.set_title(
-            f"Flows of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
-            fontsize=16
-        )
-
-        # Axis labels
-        if self.action_dim_names:
-            x_label = self.action_dim_names[self.action_dims[0]]
-            y_label = self.action_dim_names[self.action_dims[1]]
-            z_label = self.action_dim_names[self.action_dims[2]]
-        else:
-            x_label = f"Action dimension {self.action_dims[0]}"
-            y_label = f"Action dimension {self.action_dims[1]}"
-            z_label = f"Action dimension {self.action_dims[2]}"
-        ax.set_xlabel(x_label, fontsize=14, labelpad=8)
-        ax.set_ylabel(y_label, fontsize=14, labelpad=8)
-        ax.set_zlabel(z_label, fontsize=14, labelpad=8)
-
-        ax.tick_params(axis='both', labelsize=12)
-        ax.grid(True)
-        plt.tight_layout()
-
-        if was_interactive:
-            plt.ion()
-
-        return fig
-    
-    def _plot_flows_2d(
-        self,
-        fig: Figure,
-        path_positions: Tensor,
-        vector_fields: Dict[str, Tensor],
-        time_grid: Tensor,
-        num_paths: int,
-        action_step: int,
-    ) -> plt.Figure:
-        """
-        Draw a 2D quiver plot for the flow of a single action step.
-        """
-        was_interactive = plt.isinteractive()
-        plt.ioff()
-
-        fig.canvas.manager.set_window_title("Visualization of Flows")
-        ax = fig.axes[0]
-
-        # Extract x- and y-coordinates
-        x = path_positions[..., 0].flatten().cpu()
-        y = path_positions[..., 1].flatten().cpu()
-
+        quiv = None
         if len(vector_fields) > 1:
             for field_idx, (label, velocity_vectors) in enumerate(vector_fields.items()):
-                # Scale the velocity vectors for plotting
-                time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
-                velocity_vectors_scaled = velocity_vectors * time_diff.view(1, -1, 1)
-                
-                # Extract velocities
-                u_scaled = velocity_vectors_scaled[..., 0].flatten().cpu()
-                v_scaled = velocity_vectors_scaled[..., 1].flatten().cpu()
-                
-                # Pick a distinct base color for this field
+                vel_components = [velocity_vectors[..., i].flatten().cpu() for i in range(dim)]
                 colour = plt.cm.get_cmap("tab10").colors[field_idx % 10]
 
-                # Create quiver plot
+                if dim == 2:
+                    quiv = ax.quiver(
+                        x, y, vel_components[0], vel_components[1],
+                        angles='xy', scale_units='xy', width=0.004,
+                        color=colour, label=label
+                    )
+                else:
+                    quiv = ax.quiver(
+                        x, y, z,
+                        vel_components[0], vel_components[1], vel_components[2],
+                        linewidth=1.5, arrow_length_ratio=0.25,
+                        normalize=False, color=colour, label=label
+                    )
+        else:
+            # Single field: color by time
+            (label, velocity_vectors), = vector_fields.items()
+            vel_components = [velocity_vectors[..., i].flatten().cpu() for i in range(dim)]
+            time_norm = (time_grid / time_grid[-1]).repeat(self.num_paths).cpu()
+            if dim == 2:
                 # Presentation: width=0.006
                 quiv = ax.quiver(
-                    x, y, u_scaled, v_scaled,
-                    angles='xy',
-                    scale_units='xy', width=0.004,
-                    color=colour,
-                    label=label
+                    x, y, vel_components[0], vel_components[1],
+                    time_norm, angles='xy', scale_units='xy', width=0.004,
+                    cmap='viridis', scale=1.0
                 )
-        else:
-            label, velocity_vectors = next(iter(vector_fields.items()))
-
-            # Scale the velocity vectors for plotting
-            time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
-            velocity_vectors_scaled = velocity_vectors * time_diff.view(1, -1, 1)
-
-            # Extract velocities
-            u_scaled = velocity_vectors_scaled[..., 0].flatten().cpu()
-            v_scaled = velocity_vectors_scaled[..., 1].flatten().cpu()
-
-            # Presentation: width=0.006
-            quiv = ax.quiver(
-                x, y, u_scaled, v_scaled, time_grid.repeat(num_paths).cpu(),
-                angles='xy', scale=1.0,
-                scale_units='xy', width=0.004, cmap='viridis',
-            )
-
-            # Colorbar
-            # Presentation
+            else:
+                colors = cm.get_cmap('viridis')(time_norm)
+                quiv = ax.quiver(
+                    x, y, z,
+                    vel_components[0], vel_components[1], vel_components[2],
+                    linewidth=1.5, arrow_length_ratio=0.25,
+                    normalize=False, color=colors, label=None
+                )
             # cbar.ax.set_ylabel('Time', fontsize=32, labelpad=12)
             # cbar.ax.tick_params(labelsize=28)
             cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
             cbar.ax.set_ylabel('Time', fontsize=12)
 
-        # Set consistent axis limits so the plots of all action steps have same size
+        # Axis labels
+        dims = self.action_dims[:dim]
+        if self.action_dim_names:
+            labels = [self.action_dim_names[d] for d in dims]
+        else:
+            labels = [f"Action dimension {d}" for d in dims]
+        ax.set_xlabel(labels[0], fontsize=14)
+        ax.set_ylabel(labels[1], fontsize=14)
+        if dim == 3:
+            ax.set_zlabel(labels[2], fontsize=14, labelpad=8)
+
         ax.set_xlim(*self.axis_limits[0])
         ax.set_ylim(*self.axis_limits[1])
+        if dim == 3:
+            ax.set_zlim(*self.axis_limits[2])
         ax.set_aspect('equal')
 
         # Title
@@ -620,18 +511,6 @@ class FlowVisualizer(FlowMatchingVisualizer):
             f"Flows of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
             fontsize=16
         )
-
-        # Axis labels
-        if self.action_dim_names:
-            x_label = self.action_dim_names[self.action_dims[0]]
-            y_label = self.action_dim_names[self.action_dims[1]]
-        else:
-            x_label = f"Action dimension {self.action_dims[0]}"
-            y_label = f"Action dimension {self.action_dims[1]}"
-        ax.set_xlabel(x_label, fontsize=14)
-        ax.set_ylabel(y_label, fontsize=14)
-
-        ax.tick_params(axis='both', labelsize=12)
         # Presentation
         # ax.tick_params(
         #     axis='both',
@@ -639,20 +518,11 @@ class FlowVisualizer(FlowMatchingVisualizer):
         #     labelbottom=False,
         #     labelleft=False
         # )
+        ax.tick_params(axis='both', labelsize=12)
         ax.grid(True)
         plt.tight_layout()
 
         if was_interactive:
             plt.ion()
-        
-        return fig
 
-    def get_figure_filename(self, **kwargs) -> str:
-        """Get the figure filename of the current step in the action sequence."""
-        if "action_step" not in kwargs:
-            raise ValueError(
-                "`action_step` must be provided to get filename of flows figure."
-            )
-        
-        action_step = kwargs["action_step"]
-        return f"flows_action_{action_step+1:02d}.png"
+        return fig
