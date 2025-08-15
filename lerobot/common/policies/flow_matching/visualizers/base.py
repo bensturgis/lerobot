@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import torch
 
 from abc import ABC, abstractmethod
-from matplotlib.axes import Axes
 from pathlib import Path
 from torch import nn, Tensor
 from typing import Optional
@@ -117,7 +116,7 @@ class FlowMatchingVisualizer(ABC):
         vis_type_dir = self.output_root / self.vis_type
 
         # Get the path to the GIF file
-        gif_path = next_available_name(vis_type_dir, self.gif_name_base, ext=".gif")
+        gif_path = next_available_name(vis_type_dir, self.gif_name_base, ext="gif")
 
         # Make the GIF with the frames from the current run dir
         make_gif(frames_dir=self.run_dir, out_path=gif_path, duration=duration)

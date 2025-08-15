@@ -1,16 +1,18 @@
+from pathlib import Path
+from typing import Optional, Tuple, Union
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from torch import Tensor, nn
 
-from pathlib import Path
-from torch import nn, Tensor
-from typing import Optional, Tuple, Union
-
-from .base import FlowMatchingVisualizer
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import VectorFieldVisConfig
+
+from .base import FlowMatchingVisualizer
+from .utils import add_action_overlays
 
 
 class VectorFieldVisualizer(FlowMatchingVisualizer):
@@ -116,12 +118,13 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             rtol=self.flow_matching_cfg.rtol,
         )
 
-        if visualize_actions:
-            if not action_data:
-                action_data["action_samples"] = action_samples[1:]
+        if visualize_actions and not action_data:
+            action_data["action_samples"] = action_samples[1:]
+            action_data_colors = ["red"]
         
         if "base_action" not in action_data:
             action_data["base_action"] = action_samples[0].unsqueeze(0)
+            action_data_colors.append("cyan")
 
         # Build a 1-D lin-space once and reuse it for every axis we need
         axis_lin = np.linspace(self.min_action, self.max_action, self.grid_size)
@@ -180,7 +183,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm,
-                    mean_uncertainty=kwargs.get("mean_uncertainty", None)
+                    mean_uncertainty=kwargs.get("mean_uncertainty")
                 )
             else:
                 fig = self._create_vector_field_plot_3d(
@@ -194,14 +197,16 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm,
-                    mean_uncertainty=kwargs.get("mean_uncertainty", None)
+                    mean_uncertainty=kwargs.get("mean_uncertainty")
                 )
 
             if visualize_actions:
-                self._add_actions(
+                add_action_overlays(
                     ax=fig.axes[0],
                     action_data=action_data,
                     action_step=action_step,
+                    action_dims=self.action_dims,
+                    colors=action_data_colors,                   
                 )
 
             if self.show:
@@ -288,12 +293,12 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",
-                bbox=dict(
-                    boxstyle="round,pad=0.3",
-                    facecolor="white",
-                    edgecolor="none",
-                    alpha=0.8
-                ),
+                bbox={
+                    "boxstyle": "round,pad=0.3",
+                    "facecolor": "white",
+                    "edgecolor": "none",
+                    "alpha": 0.8
+                },
             )
 
         ax.tick_params(axis='both', labelsize=12)
@@ -380,12 +385,12 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",
-                bbox=dict(
-                    boxstyle="round,pad=0.3",
-                    facecolor="white",
-                    edgecolor="none",
-                    alpha=0.8
-                ),
+                bbox={
+                    "boxstyle": "round,pad=0.3",
+                    "facecolor": "white",
+                    "edgecolor": "none",
+                    "alpha": 0.8
+                },
             )
 
         ax.tick_params(axis='both', labelsize=12)
@@ -405,7 +410,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         return fig
     
     def get_figure_filename(self, **kwargs) -> str:
-        if not "time" in kwargs:
+        if "time" not in kwargs:
             raise ValueError(
                 "`time` must be provided to get filename of vector field figure."
             )

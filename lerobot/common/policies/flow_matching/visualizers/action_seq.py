@@ -1,20 +1,21 @@
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
+
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
 from dm_control import mujoco
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
-from pathlib import Path
-from torch import nn, Tensor
-from typing import List, Optional, Tuple, Union
+from torch import Tensor, nn
 
-from .base import FlowMatchingVisualizer
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import ActionSeqVisConfig
+
+from .base import FlowMatchingVisualizer
 
 
 # TODO: Add action sequence visualization to live stream and video of policy rollout
@@ -83,7 +84,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
                 f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
             )
         
-        dir_name = kwargs.get("dir_name", None)
+        dir_name = kwargs.get("dir_name")
         self.run_dir = self._update_run_dir(vis_type_dir_name=dir_name)
 
         device = get_device_from_parameters(self.velocity_model)
@@ -288,7 +289,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         ax.axis("off")
 
         # For each sequence, project 3D waypoints to pixel coords and draw
-        for waypoints_left, waypoints_right in zip(all_waypoints_left, all_waypoints_right):
+        for waypoints_left, waypoints_right in zip(all_waypoints_left, all_waypoints_right, strict=False):
             self._draw_waypoints(env=env, waypoints=waypoints_left, ax=ax)
             self._draw_waypoints(env=env, waypoints=waypoints_right, ax=ax)           
 

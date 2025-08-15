@@ -20,13 +20,13 @@ vis:
                      "gripper_open"]
 
 flows:
-  action_dims: [1, 2]
-  axis_limits: [[-1, 1], [-1, 1]]
+  action_dims: [0, 1, 2]
+  axis_limits: [[-1, 1], [-1, 1], [-1, 1]]
   num_paths: 30
 
 vector_field:
-  action_dims: [1, 2]
-  # grid_size: 20
+  action_dims: [0, 1, 2]
+  grid_size: 20
 
 
 # python lerobot/scripts/flow_matching/visualize.py --config=configs/flow_matching/visualize/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

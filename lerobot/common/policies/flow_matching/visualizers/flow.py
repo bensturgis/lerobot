@@ -1,13 +1,13 @@
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-import torch
-
-from matplotlib.figure import Figure
 from pathlib import Path
-from torch import nn, Tensor
 from typing import Dict, Optional, Sequence, Union
 
-from .base import FlowMatchingVisualizer
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from matplotlib.figure import Figure
+from torch import Tensor, nn
+
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
@@ -16,6 +16,9 @@ from lerobot.common.policies.flow_matching.ode_solver import (
 )
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import FlowVisConfig
+
+from .base import FlowMatchingVisualizer
+from .utils import add_action_overlays
 
 
 class FlowVisualizer(FlowMatchingVisualizer):
@@ -144,16 +147,17 @@ class FlowVisualizer(FlowMatchingVisualizer):
         )
         
         # Create time grid
-        velocity_eval_times = torch.linspace(0.0, 0.9, steps=10, device=device)           
+        vel_eval_step_size = 0.1
+        vel_eval_times = torch.arange(0, 0.9 + 1e-8, vel_eval_step_size, device=device)         
 
         if self.flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
             sampling_time_grid = ode_solver.make_sampling_time_grid(
                 step_size=self.flow_matching_cfg.ode_step_size,
-                extra_times=velocity_eval_times,
+                extra_times=vel_eval_times,
                 device=device,
             )
         elif self.flow_matching_cfg.ode_solver_method in ADAPTIVE_SOLVERS:
-            sampling_time_grid, _ = torch.sort(torch.unique(velocity_eval_times)).to(device)
+            sampling_time_grid, _ = vel_eval_times.to(device)
             # Append 1.0 if not already there
             if sampling_time_grid[-1].item() != 1.0:
                 sampling_time_grid = torch.cat(
@@ -176,10 +180,10 @@ class FlowVisualizer(FlowMatchingVisualizer):
         final_sample = ode_states[-1] # Shape: (num_paths, horizon, action_dim)
 
         # Extract the flow paths from the ODE states
-        eval_ode_states, velocity_eval_times = ode_solver.select_ode_states(
+        eval_ode_states, vel_eval_times = ode_solver.select_ode_states(
             time_grid=sampling_time_grid,
             ode_states=ode_states,
-            requested_times=velocity_eval_times,
+            requested_times=vel_eval_times,
         )
         paths = eval_ode_states.transpose(0, 1) # Shape: (num_paths, timesteps-1, horizon, action_dim)
         
@@ -188,7 +192,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             velocity_model=self.velocity_model,
             global_cond=global_cond,
             paths=paths,
-            eval_times=velocity_eval_times,
+            eval_times=vel_eval_times,
         )
         
         # Select the specific action step and dimensions
@@ -214,10 +218,11 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 fig, _ = plt.subplots(figsize=(12, 10), subplot_kw={'projection': '3d'})
                 is_3d = True
 
-            self._add_actions(
+            add_action_overlays(
                 ax=fig.axes[0],
                 action_data={"Sampler ODE States": ode_states.flatten(0,1)},
                 action_step=action_step,
+                action_dims=self.action_dims,
                 colors=["grey"],
                 scale=5,
                 zorder=1
@@ -228,7 +233,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
                     fig=fig,
                     path_positions=path_positions_single_action,
                     vector_fields=vector_fields,
-                    time_grid=velocity_eval_times,
+                    time_grid=vel_eval_times,
                     num_paths=self.num_paths,
                     action_step=action_step,
                 )
@@ -236,21 +241,21 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 fig = self._plot_flows_3d(
                     fig=fig,
                     path_positions=path_positions_single_action,
-                    velocity_vectors=velocity_vectors_single_action,
                     vector_fields=vector_fields,
-                    time_grid=velocity_eval_times,
+                    time_grid=vel_eval_times,
                     num_paths=self.num_paths,
                     action_step=action_step,
                 )
 
             # Plot the action samples from the sampler and scorer model
-            self._add_actions(
+            add_action_overlays(
                 ax=fig.axes[0],
                 action_data={"Sampled Actions": final_sample},
                 action_step=action_step,
-                colors=[plt.cm.get_cmap("tab10").colors[0]],
+                action_dims=self.action_dims,
+                colors=["red"],
                 zorder=3,
-                scale=50
+                scale=30
             )
 
             # Show plot if requested
@@ -384,10 +389,11 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 fig, _ = plt.subplots(figsize=(12, 10), subplot_kw={'projection': '3d'})
                 is_3d = True
 
-            self._add_actions(
+            add_action_overlays(
                 ax=fig.axes[0],
                 action_data={"Sampler ODE States": sampler_ode_states.flatten(0,1)},
                 action_step=action_step,
+                action_dims=self.action_dims,
                 colors=["grey"],
                 scale=5,
                 zorder=1
@@ -413,19 +419,23 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 )
 
             # Plot the action samples from the sampler and scorer model
-            self._add_actions(
+            sampler_actions_colors = np.clip(np.array(plt.cm.get_cmap("tab10").colors[0]) * 1.6, 0, 1)
+            add_action_overlays(
                 ax=fig.axes[0],
                 action_data={"Sampler Actions": final_sample},
                 action_step=action_step,
-                colors=[plt.cm.get_cmap("tab10").colors[0]],
+                action_dims=self.action_dims,
+                colors=[sampler_actions_colors],
                 zorder=3,
                 scale=50
             )
-            self._add_actions(
+            scorer_actions_colors = np.clip(np.array(plt.cm.get_cmap("tab10").colors[1]) * 1.4, 0, 1)
+            add_action_overlays(
                 ax=fig.axes[0],
                 action_data={"Scorer Actions": scorer_actions},
                 action_step=action_step,
-                colors=[plt.cm.get_cmap("tab10").colors[1]],
+                action_dims=self.action_dims,
+                colors=[scorer_actions_colors],
                 zorder=3,
                 scale=50
             )
@@ -464,34 +474,33 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Extract x-, y- and z-coordinates
         x, y, z = [path_positions[..., i].flatten().cpu() for i in range(3)]
         
-        for field_idx, velocity_vectors in enumerate(vector_fields):
+        for field_idx, (label, velocity_vectors) in enumerate(vector_fields.items()):
+            # Scale the velocity vectors for plotting
+            time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
+            velocity_vectors_scaled = velocity_vectors * time_diff.view(1, -1, 1)
+            
             # Extract velocities
-            u, v, w = [velocity_vectors[..., i].flatten().cpu() for i in range(3)]
-
-            # Scale original vectors by normalised time                                        # overall scale
-            length_scale = 0.1
-            u_scaled = u * time_norm
-            v_scaled = v * time_norm
-            w_scaled = w * time_norm
-
-            time_norm = (time_grid / time_grid[-1]).repeat(num_paths).cpu()
+            u_scaled, v_scaled, w_scaled = [velocity_vectors_scaled[..., i].flatten().cpu() for i in range(3)]
+            
             if len(vector_fields) > 1:
                 # Pick a distinct base color for this field
                 colors = plt.cm.get_cmap("tab10").colors[field_idx % 10]
             else:
                 # Color arrows by time
                 cmap = cm.get_cmap('viridis')
+                time_norm = (time_grid / time_grid[-1]).repeat(num_paths).cpu()
                 colors = cmap(time_norm)
+                label = None
 
             # Create quiver plot
             quiv = ax.quiver(
                 x, y, z,
                 u_scaled, v_scaled, w_scaled, 
-                length=length_scale,
                 linewidth=1.5,
                 arrow_length_ratio=0.25,
                 normalize=False,
-                color=colors
+                color=colors,
+                label=label
             )
 
         # Set consistent axis limits so the plots of all action steps have same size
@@ -506,7 +515,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             cbar.ax.set_ylabel('Time', fontsize=12)
         # Title
         ax.set_title(
-            f"Flow of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
+            f"Flows of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
             fontsize=16
         )
 
@@ -556,9 +565,13 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
         if len(vector_fields) > 1:
             for field_idx, (label, velocity_vectors) in enumerate(vector_fields.items()):
+                # Scale the velocity vectors for plotting
+                time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
+                velocity_vectors_scaled = velocity_vectors * time_diff.view(1, -1, 1)
+                
                 # Extract velocities
-                u = velocity_vectors[..., 0].flatten().cpu()
-                v = velocity_vectors[..., 1].flatten().cpu()
+                u_scaled = velocity_vectors_scaled[..., 0].flatten().cpu()
+                v_scaled = velocity_vectors_scaled[..., 1].flatten().cpu()
                 
                 # Pick a distinct base color for this field
                 colour = plt.cm.get_cmap("tab10").colors[field_idx % 10]
@@ -566,22 +579,27 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 # Create quiver plot
                 # Presentation: width=0.006
                 quiv = ax.quiver(
-                    x, y, u, v,
-                    angles='xy', scale=len(time_grid),
+                    x, y, u_scaled, v_scaled,
+                    angles='xy',
                     scale_units='xy', width=0.004,
                     color=colour,
                     label=label
                 )
         else:
             label, velocity_vectors = next(iter(vector_fields.items()))
-            
-            u = velocity_vectors[..., 0].flatten().cpu()
-            v = velocity_vectors[..., 1].flatten().cpu()
+
+            # Scale the velocity vectors for plotting
+            time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
+            velocity_vectors_scaled = velocity_vectors * time_diff.view(1, -1, 1)
+
+            # Extract velocities
+            u_scaled = velocity_vectors_scaled[..., 0].flatten().cpu()
+            v_scaled = velocity_vectors_scaled[..., 1].flatten().cpu()
 
             # Presentation: width=0.006
             quiv = ax.quiver(
-                x, y, u, v, time_grid.repeat(num_paths).cpu(),
-                angles='xy', scale=len(time_grid),
+                x, y, u_scaled, v_scaled, time_grid.repeat(num_paths).cpu(),
+                angles='xy', scale=1.0,
                 scale_units='xy', width=0.004, cmap='viridis',
             )
 
@@ -599,7 +617,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
         # Title
         ax.set_title(
-            f"Flow of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
+            f"Flows of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
             fontsize=16
         )
 

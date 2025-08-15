@@ -16,8 +16,8 @@ vis:
 
 flows:
   num_paths: 5
-  action_dims: [0, 1]
-  axis_limits: [[-1.5, 1.5], [-1.5, 1.5]]
+  action_dims: [0, 1, 2]
+  axis_limits: [[-1.5, 1.5], [-1.5, 1.5], [-1.5, 1.5]]
 
 ensemble_sampler:
   scorer_model_path: outputs/train/flow_matching_libero_spatial_diffusion_02/checkpoints/last/pretrained_model

@@ -1,9 +1,10 @@
-import imageio
-
-from matplotlib.axes import Axes
 from pathlib import Path
-from torch import Tensor
 from typing import Dict, Iterable, Optional, Sequence
+
+import imageio
+from matplotlib.axes import Axes
+from torch import Tensor
+
 
 def make_run_dir(base_dir: Path, indexed: bool):
     """

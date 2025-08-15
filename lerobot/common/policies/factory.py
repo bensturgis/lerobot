@@ -30,19 +30,12 @@ from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionC
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
 from lerobot.common.policies.flow_matching.estimate_uncertainty import FlowMatchingUncertaintySampler
-from lerobot.common.policies.flow_matching.visualizers.visualizer import (
-    FlowMatchingVisualizer,
-    ActionSeqVisualizer,
-    FlowVisualizer,
-    VectorFieldVisualizer,
-)
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.tdmpc.configuration_tdmpc import TDMPCConfig
 from lerobot.common.policies.vqbet.configuration_vqbet import VQBeTConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.configs.default import VisConfig
 from lerobot.configs.types import FeatureType
 
 

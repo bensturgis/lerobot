@@ -14,31 +14,31 @@ python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimati
     --env.type=pusht
 ``` 
 """
-import gymnasium as gym
 import logging
-import numpy as np
 import time
-import torch
-
-from torch import Tensor
-from tqdm import trange, tqdm
 from typing import Dict
 
-from lerobot.configs import parser
-from lerobot.configs.visualize_ensemble import VisualizeEnsemblePipelineConfig
+import gymnasium as gym
+import numpy as np
+import torch
+from torch import Tensor
+from tqdm import tqdm, trange
+
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.estimate_uncertainty import CrossEnsembleSampler
-from lerobot.common.policies.flow_matching.visualizers.visualizer import (
+from lerobot.common.policies.flow_matching.visualizers import (
     ActionSeqVisualizer,
     FlowVisualizer,
-    VectorFieldVisualizer
+    VectorFieldVisualizer,
 )
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.live_window import LiveWindow
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
+from lerobot.configs import parser
+from lerobot.configs.visualize_ensemble import VisualizeEnsemblePipelineConfig
+
 
 @parser.wrap()
 def main(cfg: VisualizeEnsemblePipelineConfig): 
