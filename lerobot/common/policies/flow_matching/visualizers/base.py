@@ -1,13 +1,14 @@
-import matplotlib.pyplot as plt
-import torch
-
 from abc import ABC, abstractmethod
 from pathlib import Path
-from torch import nn, Tensor
 from typing import Optional
 
-from .utils import make_gif, make_run_dir, next_available_name
+import matplotlib.pyplot as plt
+import torch
+from torch import Tensor, nn
+
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+
+from .utils import make_gif, make_run_dir, next_available_name
 
 
 class FlowMatchingVisualizer(ABC):

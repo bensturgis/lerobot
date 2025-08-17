@@ -3,14 +3,12 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs, policies
-from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import ComposedSequenceSamplerConfig
-from lerobot.configs import parser
-from lerobot.configs.default import (
-    ActionSeqVisConfig,
-    VectorFieldVisConfig,
-    VisConfig
+from lerobot.common import envs
+from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    ComposedSequenceSamplerConfig,
 )
+from lerobot.configs import parser
+from lerobot.configs.default import ActionSeqVisConfig, VectorFieldVisConfig, VisConfig
 from lerobot.configs.policies import PreTrainedConfig
 
 

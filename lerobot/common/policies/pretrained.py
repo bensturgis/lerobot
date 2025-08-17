@@ -26,6 +26,9 @@ from safetensors.torch import load_model as load_model_as_safetensor
 from safetensors.torch import save_model as save_model_as_safetensor
 from torch import Tensor, nn
 
+from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
+)
 from lerobot.common.utils.hub import HubMixin
 from lerobot.configs.policies import PreTrainedConfig
 
@@ -79,6 +82,7 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         pretrained_name_or_path: str | Path,
         *,
         config: PreTrainedConfig | None = None,
+        uncertainty_sampler_config: UncertaintySamplerConfig | None = None,
         force_download: bool = False,
         resume_download: bool | None = None,
         proxies: dict | None = None,
@@ -105,6 +109,8 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
                 revision=revision,
                 **kwargs,
             )
+        if uncertainty_sampler_config is not None:
+            kwargs = {**kwargs, "uncertainty_sampler_config": uncertainty_sampler_config}
         instance = cls(config, **kwargs)
 
         def _load_weights(
@@ -135,24 +141,24 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
 
         _load_weights(instance, pretrained_name_or_path, revision)
 
-        uncertainty_sampler_config = kwargs.get("uncertainty_sampler_config")
         if (
-            config.type == "flow_matching" and
-            uncertainty_sampler_config is not None and
-            uncertainty_sampler_config.type in ["cross_ensemble", "composed_cross_ensemble"]
-        ):           
-            scorer_model_path = uncertainty_sampler_config.cross_ensemble_sampler.scorer_model_path
-            if scorer_model_path is None:
-                raise ValueError(
-                    "Cross-likelihood uncertainty sampler requested but no scorer checkpoint provided."
-                )
-            
-            scorer_policy = cls(config)
-            _load_weights(scorer_policy, scorer_model_path)
-            instance.scorer.load_state_dict(scorer_policy.flow_matching.state_dict(), strict=True)
-            instance.scorer.eval()
-            for p in instance.scorer.parameters():
-                p.requires_grad_(False)
+            config.type == "flow_matching" and uncertainty_sampler_config is not None
+        ):
+            active_uncertainty_sampler_config = uncertainty_sampler_config.active_config
+            if getattr(active_uncertainty_sampler_config, "scorer_type", None) == "ensemble":
+                ensemble_model_path = getattr(active_uncertainty_sampler_config, "ensemble_model_path", None)
+                if not ensemble_model_path:
+                    raise ValueError(
+                        "Cross-Bayesian uncertainty sampler with ensemble scorer type requested "
+                        "but no scorer checkpoint provided."
+                    )
+                
+                scorer_policy = cls(config)
+                _load_weights(scorer_policy, ensemble_model_path)
+                instance.scorer.load_state_dict(scorer_policy.flow_matching.state_dict(), strict=True)
+                instance.scorer.eval()
+                for p in instance.scorer.parameters():
+                    p.requires_grad_(False)
 
         instance.to(config.device)
         instance.eval()

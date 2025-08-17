@@ -1,21 +1,24 @@
 import copy
 import logging
-import torch
-
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+
+import torch
 from laplace import Laplace
 from laplace.baselaplace import BaseLaplace
-from pathlib import Path
-from torch import nn, Tensor
+from torch import Tensor, nn
+from torch.nn.utils import vector_to_parameters
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
-from torch.nn.utils import vector_to_parameters
-from typing import Dict, List, Optional, Tuple, Union
 
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.policies.flow_matching.conditional_probability_path import OTCondProbPath
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
+from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    CrossBayesianSamplerConfig,
+)
 from lerobot.common.policies.pretrained import PreTrainedPolicy
-from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import CrossLaplaceSamplerConfig
 from lerobot.common.utils.utils import get_safe_torch_device
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
 from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
@@ -181,7 +184,7 @@ def draw_laplace_flow_matching_model(
     laplace_posterior: BaseLaplace, 
     flow_matching_model: nn.Module,
     generator: Optional[torch.Generator] = None,
-) -> nn.Module:
+) -> FlowMatchingModel:
     """
     Sample a single set of weights from a fitted Laplace posterior and
     insert it into a copy of the MAP flow matching model.
@@ -296,7 +299,7 @@ def resolve_repo_dir(repo_id: str) -> str:
         return REPO_DIR_MAP[repo_id]
     except KeyError:
         raise ValueError(
-            f"Unknown repo_id {repo_id!r}. Expected one of {list(REPO_DIR_MAP)!r}"
+            f"Unknown repo_id {repo_id}. Expected one of {list(REPO_DIR_MAP)}"
         )
 
 def make_laplace_path(
@@ -317,7 +320,7 @@ def make_laplace_path(
     return out_dir / fname
 
 def get_laplace_posterior(
-    cfg: CrossLaplaceSamplerConfig,
+    cfg: CrossBayesianSamplerConfig,
     flow_matching_model: nn.Module,
     laplace_calib_loader: Optional[torch.utils.data.DataLoader],
     laplace_path: str,

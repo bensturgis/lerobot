@@ -25,7 +25,6 @@ import logging
 import random
 import time
 from collections import defaultdict
-from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -35,21 +34,20 @@ import numpy as np
 import torch
 from tqdm import trange
 
-from lerobot.configs import parser
-from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
+from lerobot.common.envs.factory import make_single_env
+from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
-from lerobot.common.policies.flow_matching.laplace_utils import (
+from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
-    make_laplace_path
+    make_laplace_path,
 )
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.utils import get_device_from_parameters
-from lerobot.common.envs.factory import make_single_env
-from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
+from lerobot.configs import parser
+from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
 
 
 def plot_id_ood_uncertainties(
@@ -199,7 +197,7 @@ def plot_all_uncertainties(
     
     if scoring_metric == "mode_distance":
         y_label = "Mode Distance Score"
-    elif scoring_metric == "intermediate_vel_diff":
+    elif scoring_metric == "inter_vel_diff":
         y_label = "Velocity Diff. Score"
     elif scoring_metric == "likelihood":
         y_label = "Neg. Log-Likelihood"
@@ -371,7 +369,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
     
     if cfg.policy.type != "flow_matching":
         raise ValueError(
-            f"visualize_flow_matching.py only supports Flow Matching policies, "
+            f"eval_uncertainty_estimation.py only supports Flow Matching policies, "
             f"but got policy type '{cfg.policy.type}'."
         )
     
@@ -395,36 +393,29 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                 uncertainty_sampler_cfg=cfg.uncertainty_sampler
             ).to(device)
             policy.eval()
-            if uncert_est_method in ["cross_laplace", "composed_cross_laplace"]:
-                if uncert_est_method == "cross_laplace":
-                    laplace_cfg = cfg.uncertainty_sampler.cross_laplace_sampler
-                elif uncert_est_method == "composed_cross_laplace":
-                    laplace_cfg = cfg.uncertainty_sampler.composed_cross_laplace_sampler
+            laplace_calib_loader = None
+            laplace_path = None
+            if getattr(cfg.uncertainty_sampler.active_config, "scorer_type", None) == "laplace":
                 laplace_path = make_laplace_path(
                     repo_id=cfg.dataset.repo_id,
-                    scope=laplace_cfg.laplace_scope,
-                    calib_fraction=laplace_cfg.calib_fraction,
+                    scope=cfg.uncertainty_sampler.active_config.laplace_scope,
+                    calib_fraction=cfg.uncertainty_sampler.active_config.calib_fraction,
                 )
                 if not laplace_path.exists():
                     laplace_calib_loader = create_laplace_flow_matching_calib_loader(
                         cfg=cfg,
                         policy=policy,
-                        calib_fraction=laplace_cfg.calib_fraction,
-                        batch_size=laplace_cfg.batch_size
+                        calib_fraction=cfg.uncertainty_sampler.active_config.calib_fraction,
+                        batch_size=cfg.uncertainty_sampler.active_config.batch_size
                     )
-                else:
-                    laplace_calib_loader = None
-            else:
-                laplace_calib_loader = None
-                laplace_path = None
-            policy._init_uncertainty_sampler(
+            policy.init_uncertainty_sampler(
                 laplace_calib_loader=laplace_calib_loader,
                 laplace_path=laplace_path,
             )
             scoring_metric = getattr(policy.uncertainty_sampler, 'scoring_metric', None)
 
             # ------------ ID Case ------------------
-            logging.info(f"Creating ID environment.")
+            logging.info("Creating ID environment.")
             seed = choose_seed(id_failure_pool, rng)
             cfg.env.ood.enabled = False
             id_env = make_single_env(cfg.env, seed)
@@ -455,7 +446,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             policy.reset()
 
             # ------------ OoD Case ------------------
-            logging.info(f"Creating OoD environment.")
+            logging.info("Creating OoD environment.")
             seed = choose_seed(ood_failure_pool, rng)
             cfg.env.ood.enabled = True
             ood_env = make_single_env(cfg.env, seed)

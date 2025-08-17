@@ -4,17 +4,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lerobot.common import envs, policies
-from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import (
-    CrossEnsembleSamplerConfig,
-    UncertaintySamplerConfig
+from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    CrossBayesianSamplerConfig,
+    UncertaintySamplerConfig,
 )
 from lerobot.configs import parser
-from lerobot.configs.default import (
-    ActionSeqVisConfig,
-    FlowVisConfig,
-    VectorFieldVisConfig,
-    VisConfig
-)
+from lerobot.configs.default import ActionSeqVisConfig, FlowVisConfig, VectorFieldVisConfig, VisConfig
 from lerobot.configs.policies import PreTrainedConfig
 
 
@@ -23,7 +18,7 @@ class VisualizeEnsemblePipelineConfig:
     env: envs.EnvConfig
     policy: PreTrainedConfig | None = None
     uncertainty_sampler: UncertaintySamplerConfig | None = field(default_factory=UncertaintySamplerConfig)
-    ensemble_sampler: CrossEnsembleSamplerConfig = field(default_factory=CrossEnsembleSamplerConfig)
+    ensemble_sampler: CrossBayesianSamplerConfig = field(default_factory=CrossBayesianSamplerConfig)
     vis: VisConfig = field(default_factory=VisConfig)
     action_seq: ActionSeqVisConfig = field(default_factory=ActionSeqVisConfig)
     flows: FlowVisConfig = field(default_factory=FlowVisConfig)
@@ -57,10 +52,11 @@ class VisualizeEnsemblePipelineConfig:
             self.flows.action_dim_names = self.vis.action_dim_names
 
 
-        # Plug in the composed sequence sampler config into the uncertainty sampler config to load the scorer model
+        # Plug in the composed sequence sampler config into the uncertainty sampler config to load the ensemble model
         # during the policy initialization
-        self.uncertainty_sampler.type = "cross_ensemble"
-        self.uncertainty_sampler.cross_ensemble_sampler = self.ensemble_sampler
+        self.uncertainty_sampler.type = "cross_bayesian"
+        self.ensemble_sampler.scorer_type = "ensemble"
+        self.uncertainty_sampler.cross_bayesian_sampler = self.ensemble_sampler
 
         if not self.job_name:
             if self.env is None:

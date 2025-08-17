@@ -14,11 +14,9 @@ vis:
   vis_types: [action_seq]
 
 uncertainty_sampler:
-  type: cross_laplace
-  cross_laplace_sampler:
-    laplace_scope: both
-    calib_fraction: 1.0
-    batch_size: 10
+  type: cross_bayesian
+  cross_bayesian_sampler:
+    scorer_type: laplace
 
 n_laplace_models: 3
 

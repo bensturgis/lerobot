@@ -3,8 +3,10 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs, policies
-from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
+from lerobot.common import envs
+from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
+)
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig, VisConfig
 from lerobot.configs.policies import PreTrainedConfig

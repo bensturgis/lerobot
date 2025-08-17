@@ -4,10 +4,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lerobot.common import envs
+from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
+)
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig, EvalUncertEstConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.common.policies.flow_matching.configuration_uncertainty_sampler import UncertaintySamplerConfig
+
 
 @dataclass
 class EvalUncertaintyEstimationPipelineConfig:
@@ -48,24 +51,44 @@ class EvalUncertaintyEstimationPipelineConfig:
 
     def validate(self):
         if (
-            ("cross_ensemble" in self.eval_uncert_est.uncert_est_methods or
-             "composed_cross_ensemble" in self.eval_uncert_est.uncert_est_methods) and
-            self.uncertainty_sampler.cross_ensemble_sampler.scorer_model_path is None
+            "cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
+            self.uncertainty_sampler.cross_bayesian_sampler.scorer_type == "ensemble" and
+            self.uncertainty_sampler.cross_bayesian_sampler.ensemble_model_path is None
         ):
-            raise ValueError(
-                "Cross-likelihood ensemble uncertainty sampler requested but no scorer "
-                "checkpoint provided."
+             raise ValueError(
+                "Cross-Bayesian uncertainty sampler with scorer_type=ensemble requested but no" \
+                "ensemble checkpoint provided."
             )
         
         if (
-            ("cross_laplace" in self.eval_uncert_est.uncert_est_methods or
-            "composed_cross_laplace" in self.eval_uncert_est.uncert_est_methods) and
+            "composed_cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
+            self.uncertainty_sampler.composed_cross_bayesian_sampler.scorer_type == "ensemble" and
+            self.uncertainty_sampler.composed_cross_bayesian_sampler.ensemble_model_path is None
+        ):
+            raise ValueError(
+                "Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requested but no " \
+                "ensemble checkpoint provided."
+            )
+        
+        if (
+            "cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
+            self.uncertainty_sampler.cross_bayesian_sampler.scorer_type == "laplace" and
             self.dataset is None
         ):
             raise ValueError(
-                "Cross-likelihood Laplace uncertainty sampler requested but no dataset "
+                "Cross-Bayesian uncertainty sampler with scorer_type=laplace requested but no dataset "
                 "config for Laplace approximation provided."
-            )  
+            )
+            
+        if (
+            "composed_cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
+            self.uncertainty_sampler.composed_cross_bayesian_sampler.scorer_type == "laplace" and
+            self.dataset is None
+        ):
+            raise ValueError(
+                "Composed Cross-Bayesian uncertainty sampler with scorer_type=laplace requested but no " \
+                "dataset config for Laplace approximation provided."
+            )
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

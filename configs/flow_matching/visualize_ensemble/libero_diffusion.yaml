@@ -22,7 +22,7 @@ flows:
 ensemble_sampler:
   scorer_model_path: outputs/train/flow_matching_libero_spatial_diffusion_02/checkpoints/last/pretrained_model
   num_action_seq_samples: 25
-  scoring_metric: intermediate_vel_diff
+  scoring_metric: inter_vel_diff
   velocity_eval_times: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 show: False

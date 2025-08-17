@@ -64,7 +64,7 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
     policy.eval()
 
     # Initialize the cross ensemble uncertainty sampler
-    policy._init_uncertainty_sampler()
+    policy.init_uncertainty_sampler()
 
     # Get cross ensemble uncertainty sampler
     cross_ensemble_sampler = policy.uncertainty_sampler
@@ -204,7 +204,7 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                     batch_size=num_samples, global_cond=scorer_global_cond.repeat(num_samples, 1), generator=generator
                 )
 
-                if cfg.ensemble_sampler.scoring_metric == "intermediate_vel_diff":
+                if cfg.ensemble_sampler.scoring_metric == "inter_vel_diff":
                     flow_visualizer.visualize_velocity_difference(
                         scorer_velocity_model=scorer_flow_matching_model.unet,
                         sampler_global_cond=sampler_global_cond,

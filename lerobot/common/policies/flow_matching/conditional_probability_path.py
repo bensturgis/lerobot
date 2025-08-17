@@ -3,6 +3,7 @@ import abc
 import torch
 from torch import Tensor
 
+
 class CondProbPath(abc.ABC):
     """
     Abstract base class for conditional probability paths used in flow matching.

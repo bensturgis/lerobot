@@ -6,7 +6,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 20
-  uncert_est_methods: [composed_sequence, cross_ensemble, cross_laplace]
+  uncert_est_methods: [composed_sequence, cross_bayesian]
   collapse_success_failure: True
   perturbation_config:
     enable: True
@@ -14,27 +14,18 @@ eval_uncert_est:
     patch_color: [0, 0, 0]
 
 uncertainty_sampler:
-  composed_cross_ensemble_sampler:
+  composed_cross_bayesian_sampler:
+    scorer_type: ensemble
     scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
     scoring_metric: terminal_vel_norm
-  
-  composed_cross_laplace_sampler:
-    laplace_scope: both
-    calib_fraction: 1.0
-    batch_size: 10
-    scoring_metric: terminal_vel_norm
-  
+    num_action_seq_samples: 5
   composed_sequence_sampler:
     scoring_metric: likelihood
-  
-  cross_laplace_sampler:
-    laplace_scope: both
-    calib_fraction: 1.0
-    batch_size: 10
-    scoring_metric: likelihood
-
-  cross_ensemble_sampler:
-    scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
-    scoring_metric: likelihood
+  cross_bayesian_sampler:
+    scorer_type: ensemble
+    ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
+    scoring_metric: inter_vel_diff
+    velocity_eval_times: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+    num_action_seq_samples: 5
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/200000/pretrained_model

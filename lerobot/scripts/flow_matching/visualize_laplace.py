@@ -1,31 +1,31 @@
 #!/usr/bin/env python
-import gymnasium as gym
 import logging
-import numpy as np
 import random
 import time
-import torch
-from laplace import Laplace
 from pathlib import Path
-from torch import nn
-from tqdm import trange
 from typing import Any, Dict, List, Optional
 
-from lerobot.configs import parser
-from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
-from lerobot.common.policies.factory import make_policy, make_flow_matching_visualizers
-from lerobot.common.policies.flow_matching.laplace_utils import (
+import gymnasium as gym
+import numpy as np
+import torch
+from tqdm import trange
+
+from lerobot.common.envs.factory import make_single_env
+from lerobot.common.envs.utils import preprocess_observation
+from lerobot.common.policies.factory import make_flow_matching_visualizers, make_policy
+from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
     draw_laplace_flow_matching_model,
     get_laplace_posterior,
     make_laplace_path,
 )
-from lerobot.common.envs.factory import make_single_env
-from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.live_window import LiveWindow
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
+from lerobot.configs import parser
+from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
+
 
 def capture_pusht_state(env: gym.Env) -> Dict[str, np.ndarray]:
     """Get state of Push-T env as [agent_x, agent_y, block_x, block_y, block_angle]
@@ -191,14 +191,10 @@ def main(cfg: VisualizeLaplacePipelineConfig):
     # ------------------------------------------
     flow_matching_model = policy.flow_matching
     # Get path to save or load the Laplace posterior
-    if cfg.uncertainty_sampler.type == "cross_laplace":
-        laplace_cfg = cfg.uncertainty_sampler.cross_laplace_sampler
-    elif cfg.uncertainty_sampler.type == "composed_cross_laplace":
-        laplace_cfg = cfg.uncertainty_sampler.composed_cross_laplace_sampler
     laplace_output_path = make_laplace_path(
         repo_id=cfg.dataset.repo_id,
-        scope=laplace_cfg.laplace_scope,
-        calib_fraction=laplace_cfg.calib_fraction,
+        scope=cfg.uncertainty_sampler.active_config.laplace_scope,
+        calib_fraction=cfg.uncertainty_sampler.active_config.calib_fraction,
     )
 
     # Create the Laplace calibration data loader if Laplace posterior if not stored
@@ -213,7 +209,7 @@ def main(cfg: VisualizeLaplacePipelineConfig):
     
     # Get the fitted Laplace posterior
     laplace_posterior = get_laplace_posterior(
-        cfg=laplace_cfg,
+        cfg=cfg.uncertainty_sampler.active_config,
         flow_matching_model=flow_matching_model,
         laplace_calib_loader=laplace_calib_loader,
         laplace_path=laplace_output_path,
