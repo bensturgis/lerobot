@@ -17,28 +17,31 @@ python lerobot/scripts/flow_matching/visualize.py \
     --show=true
 ``` 
 """
-import gymnasium as gym
 import logging
-import numpy as np
 import time
+
+import gymnasium as gym
+import numpy as np
 import torch
 from tqdm import trange
 
-from lerobot.configs import parser
-from lerobot.configs.visualize import VisualizePipelineConfig
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.visualizers import (
-    FlowMatchingVisualizer,
     ActionSeqVisualizer,
+    FlowMatchingVisualizer,
     FlowVisualizer,
+    NoiseToActionVisualizer,
     VectorFieldVisualizer,
 )
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.live_window import LiveWindow
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
+from lerobot.configs import parser
+from lerobot.configs.visualize import VisualizePipelineConfig
+
 
 @parser.wrap()
 def main(cfg: VisualizePipelineConfig): 
@@ -115,6 +118,15 @@ def main(cfg: VisualizePipelineConfig):
             visualizers.append(
                 FlowVisualizer(
                     cfg=cfg.flows,
+                    flow_matching_cfg=policy.config,
+                    velocity_model=policy.flow_matching.unet,
+                    output_root=ep_dir,
+                )
+            )
+        if "noise_to_action" in cfg.vis_types:
+            visualizers.append(
+                NoiseToActionVisualizer(
+                    cfg=cfg.noise_to_action,
                     flow_matching_cfg=policy.config,
                     velocity_model=policy.flow_matching.unet,
                     output_root=ep_dir,

@@ -1,5 +1,5 @@
-# Choose from "action_seq", "flows" and "vector_field"
-vis_types: [action_seq]
+# Choose from "action_seq", "flows", "noise_to_action" and "vector_field"
+vis_types: [noise_to_action]
 show: False
 
 env:
@@ -18,6 +18,11 @@ vis:
 flows:
   action_dims: [1, 2]
   axis_limits: [[-1, 1], [-1, 1]]
+
+noise_to_action:
+  action_dims: [0, 1]
+  axis_limits: [[-1, 1], [-1, 1]]
+  num_samples: 1
 
 vector_field:
   action_dims: [1, 2]

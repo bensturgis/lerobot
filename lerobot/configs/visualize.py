@@ -3,13 +3,14 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs, policies
+from lerobot.common import envs
 from lerobot.configs import parser
 from lerobot.configs.default import (
     ActionSeqVisConfig,
     FlowVisConfig,
+    NoiseToActionVisConfig,
     VectorFieldVisConfig,
-    VisConfig
+    VisConfig,
 )
 from lerobot.configs.policies import PreTrainedConfig
 
@@ -21,6 +22,7 @@ class VisualizePipelineConfig:
     vis: VisConfig = field(default_factory=VisConfig)
     action_seq: ActionSeqVisConfig = field(default_factory=ActionSeqVisConfig)
     flows: FlowVisConfig = field(default_factory=FlowVisConfig)
+    noise_to_action: NoiseToActionVisConfig = field(default_factory=NoiseToActionVisConfig)
     vector_field: VectorFieldVisConfig = field(default_factory=VectorFieldVisConfig)
 
     # Which visualizers to run (you can pick one or more)
@@ -54,6 +56,9 @@ class VisualizePipelineConfig:
         if "flows" in self.vis_types and self.flows.action_dim_names is None:
             self.flows.action_dim_names = self.vis.action_dim_names
 
+        if "noise_to_action" in self.vis_types and self.noise_to_action.action_dim_names is None:
+            self.noise_to_action.action_dim_names = self.vis.action_dim_names
+
         if "vector_field" in self.vis_types and self.vector_field.action_dim_names is None:
             self.vector_field.action_dim_names = self.vis.action_dim_names
 
@@ -77,7 +82,7 @@ class VisualizePipelineConfig:
 
     def validate(self):
         # vis_types check
-        allowed_vis = {"flows", "vector_field", "action_seq"}
+        allowed_vis = {"flows", "vector_field", "action_seq", "noise_to_action"}
         for v in self.vis_types:
             if v not in allowed_vis:
                 raise ValueError(
@@ -85,8 +90,13 @@ class VisualizePipelineConfig:
                     f"Allowed: {sorted(allowed_vis)}"
                 )
             
-        if (
-            {"flows", "vector_field"}.issubset(self.vis_types) and 
-            self.flows.action_dims != self.vector_field.action_dims
-        ):
-            logging.warning("Visualizing different action dimensions for the flow and vector field plot.")
+        active_action_dims = {
+            vis_type: tuple(getattr(self, vis_type).action_dims)
+            for vis_type in ("flows", "vector_field", "noise_to_action")
+            if vis_type in self.vis_types
+        }
+
+        if len(set(active_action_dims.values())) > 1:
+            logging.warning(
+                f"Visualizing different action dimensions across visualizers: {active_action_dims}"
+            )

@@ -1,8 +1,9 @@
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import imageio
 from matplotlib.axes import Axes
+from matplotlib.text import Annotation
 from torch import Tensor
 
 
@@ -44,14 +45,16 @@ def next_available_name(base_dir: Path, file_name_base: str, ext: str) -> str:
         run_idx += 1
     return base_dir / f"{file_name_base}_{run_idx:03d}.gif"
 
-def add_action_overlays(
+def add_actions(
     ax: Axes,
     action_data: Dict[str, Tensor],
     action_step: int,
-    action_dims: Sequence[int],
+    action_dims: int,
     colors: Optional[Iterable[str]] = None,
     zorder: int = 3,
     scale: float = 10.0,
+    marker: str = "o",
+    step_label: Optional[str] = None,
 ) -> Axes:
     """
     Overlay action samples on flow matching visualizations.
@@ -74,21 +77,49 @@ def add_action_overlays(
         x_positions = actions[:, action_step, x_dim].cpu().numpy()
         y_positions = actions[:, action_step, y_dim].cpu().numpy()
         label = name.replace("_", " ")
+
+        existing_labels = {lab for lab in ax.get_legend_handles_labels()[1] if not lab.startswith("_")}
+        label = label if label not in existing_labels else "_nolegend_"
         if is_3d:
             z_positions = actions[:, action_step, z_dim].cpu().numpy()
             # Presentation s=30
             ax.scatter(
                 x_positions, y_positions, z_positions, label=label,
-                color=color, s=scale, zorder=zorder,
+                color=color, s=scale, zorder=zorder, marker=marker,
             )
         else:
             # Presentation s=30
             ax.scatter(
                 x_positions, y_positions, label=label,
-                color=color, s=scale, zorder=zorder,    
+                color=color, s=scale, zorder=zorder,
+                marker=marker,
             )
 
-    # Draw legend using the prettified names
+        # Optional per-point labels
+        if step_label is not None:
+            num_points = len(x_positions)
+            for i in range(num_points):
+                if is_3d:
+                    ax.text(
+                        x_positions[i], y_positions[i], z_positions[i],
+                        step_label, zorder=zorder + 1)
+                else:
+                    ax.annotate(
+                        step_label, (x_positions[i], y_positions[i]),
+                        xytext=(0.2, 0.2), textcoords="offset points",
+                        zorder=zorder + 1, fontsize=11
+                    )
+
     # Presentation: fontsize=28
-    ax.legend()
     return ax.get_figure()
+
+def compute_axis_limits(ode_states: Tensor, action_dims: Sequence[int]) -> List[int]:
+    """Compute global axis limits to create plots of equal size."""
+    axis_limits = []
+    for i in range(len(action_dims)):
+        coords = ode_states[..., i]           # (num_samples, t, steps)
+        coord_min, coord_max = coords.min().cpu(), coords.max().cpu()
+        margin = 0.05 * (coord_max - coord_min)
+        axis_limits.append((coord_min - margin, coord_max + margin))
+
+    return axis_limits

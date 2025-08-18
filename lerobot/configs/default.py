@@ -17,6 +17,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+import torch
+from torch import Tensor
 
 from lerobot.common import (
     policies,  # noqa: F401
@@ -156,8 +158,28 @@ class ActionSeqVisConfig:
     # Whether to display plots live
     show: bool = False
 
-    # Parameters for action sequence visualization
+    # How many action sequences to visualize
     num_action_seq: int = 30
+
+@dataclass
+class NoiseToActionVisConfig:
+    # Whether to display plots live
+    show: bool = False
+
+    # How many noise samples to action sequences to visualize
+    num_samples: int = 3
+
+    # Two indices indicating which action dimensions to visualize
+    action_dims: list[int] = (0,1)
+
+    # Names of the action dimensions to visualize
+    action_dim_names: Optional[list[str]] = None
+
+    # Custom axis limits for each plotted dimension as a list of (min, max) tuples
+    axis_limits: Optional[list[tuple[float, float]]] = None
+    
+    # Time points along the ODE integration where noisy actions are visualized
+    ode_eval_times: Tensor = torch.linspace(0, 1, steps=11)
 
 @dataclass
 class VisConfig:

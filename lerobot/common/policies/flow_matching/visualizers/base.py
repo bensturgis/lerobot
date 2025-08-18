@@ -105,7 +105,7 @@ class FlowMatchingVisualizer(ABC):
             fig.savefig(filepath, dpi=300)
             self.log(f"Saved figure to {filepath}.")
 
-    def _create_gif(self, duration: float = 0.2):
+    def _create_gif(self, duration: float = 2.0):
         """
         Create an animated GIF from a sequence of saved flow
         or vector field plot images.

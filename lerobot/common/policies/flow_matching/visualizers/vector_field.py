@@ -4,15 +4,16 @@ from typing import Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
 from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import VectorFieldVisConfig
 
 from .base import FlowMatchingVisualizer
-from .utils import add_action_overlays
+from .utils import add_actions
 
 
 class VectorFieldVisualizer(FlowMatchingVisualizer):
@@ -23,7 +24,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         self,
         cfg: VectorFieldVisConfig,
         flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: nn.Module,
+        velocity_model: FlowMatchingConditionalUnet1d,
         output_root: Optional[Union[Path, str]],
         save: bool = True,
         create_gif: bool = True,
@@ -201,7 +202,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                 )
 
             if visualize_actions:
-                add_action_overlays(
+                add_actions(
                     ax=fig.axes[0],
                     action_data=action_data,
                     action_step=action_step,
@@ -410,6 +411,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         return fig
     
     def get_figure_filename(self, **kwargs) -> str:
+        """Get the figure filename for the current evaluation time."""
         if "time" not in kwargs:
             raise ValueError(
                 "`time` must be provided to get filename of vector field figure."

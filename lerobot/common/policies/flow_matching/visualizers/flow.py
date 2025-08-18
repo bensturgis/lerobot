@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.figure import Figure
-from torch import Tensor, nn
+from torch import Tensor
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
 from lerobot.common.policies.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
@@ -18,7 +19,7 @@ from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_
 from lerobot.configs.default import FlowVisConfig
 
 from .base import FlowMatchingVisualizer
-from .utils import add_action_overlays
+from .utils import add_actions, compute_axis_limits
 
 
 class FlowVisualizer(FlowMatchingVisualizer):
@@ -29,7 +30,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         self,
         cfg: FlowVisConfig,
         flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: nn.Module,
+        velocity_model: FlowMatchingConditionalUnet1d,
         output_root: Optional[Union[Path, str]],
         save: bool = True,
         create_gif: bool = True,
@@ -126,7 +127,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         return vel_eval_times, sampling_time_grid
 
     def _compute_vector_field(
-        self, velocity_model: nn.Module, global_cond: Tensor, paths: Tensor, eval_times: Tensor, 
+        self, velocity_model: FlowMatchingConditionalUnet1d, global_cond: Tensor, paths: Tensor, eval_times: Tensor, 
     ) -> Tensor:
         """
         Compute the model's velocity vectors along each trajectory.
@@ -144,15 +145,6 @@ class FlowVisualizer(FlowMatchingVisualizer):
             vector_field[p] = path_velocities
 
         return vector_field
-    
-    def _compute_axis_limits(self, path_positions: Tensor) :
-        """Compute global axis limits to create plots of equal size."""
-        self.axis_limits = []
-        for i in range(len(self.action_dims)):
-            coords = path_positions[..., i]           # (num_paths, t, steps)
-            coord_min, coord_max = coords.min().cpu(), coords.max().cpu()
-            margin = 0.05 * (coord_max - coord_min)
-            self.axis_limits.append((coord_min - margin, coord_max + margin))
 
     def _make_figure(self) -> Tuple[Figure, bool]:
         """Create 2D or 3D figure based on action_dims."""
@@ -173,7 +165,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         """Render the flow plots including overlaid actions."""
         # Compute global axis limits to create plots of equal size
         if self.axis_limits is None:
-            self._compute_axis_limits(path_positions=path_positions)
+            self.axis_limits = compute_axis_limits(ode_states=path_positions, action_dims=self.action_dims)
 
         # Create a separate figure for each action step
         for action_step in self.action_steps:
@@ -183,7 +175,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             fig, is_3d = self._make_figure()
 
             # Overlay ODE states as background
-            add_action_overlays(
+            add_actions(
                 ax=fig.axes[0],
                 action_data={"Sampler ODE States": ode_states.flatten(0, 1)},
                 action_step=action_step,
@@ -204,7 +196,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
             # Overlay the action samples from the sampler and scorer model
             for overlay in final_action_overlays:
-                add_action_overlays(
+                add_actions(
                     ax=fig.axes[0],
                     action_data={overlay["name"]: overlay["tensor"]},
                     action_step=action_step,
@@ -213,6 +205,9 @@ class FlowVisualizer(FlowMatchingVisualizer):
                     zorder=overlay.get("zorder", 3),
                     scale=overlay.get("scale", 30),
                 )
+
+            # Draw the legend
+            fig.axes[0].legend()
 
             # Show plot if requested
             if self.show:
@@ -284,7 +279,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             ode_states=ode_states,
             requested_times=vel_eval_times,
         )
-        paths = eval_ode_states.transpose(0, 1) # Shape: (num_paths, timesteps-1, horizon, action_dim)
+        paths = eval_ode_states.transpose(0, 1) # Shape: (num_paths, timesteps, horizon, action_dim)
         
         # Compute velocity at each position
         vector_field = self._compute_vector_field(
@@ -316,7 +311,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
     def visualize_velocity_difference(
         self,
-        scorer_velocity_model: nn.Module,
+        scorer_velocity_model: FlowMatchingConditionalUnet1d,
         sampler_global_cond: Tensor,
         scorer_global_cond: Tensor,
         velocity_eval_times: Optional[Tensor] = None,
@@ -526,3 +521,13 @@ class FlowVisualizer(FlowMatchingVisualizer):
             plt.ion()
 
         return fig
+    
+    def get_figure_filename(self, **kwargs) -> str:
+        """Get the figure filename for the current action step."""
+        if "action_step" not in kwargs:
+            raise ValueError(
+                "`action_step` must be provided to get filename of flows figure."
+            )
+        action_step = kwargs["action_step"]
+
+        return f"flows_action_{action_step+1:02d}.png"
