@@ -20,6 +20,16 @@ from .base_sampler import FlowMatchingUncertaintySampler
 
 
 class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
+    """
+    Splices newly sampled action sequence tails onto the previously executed prefix and evaluates
+    the full trajectories with a flow matching "scorer". The "scorer" model can be either an 
+    independently trained ensemble model or a Laplace posterior draw. Uncertainty can be measured
+    using several different metrics.
+
+    The class therefore mixes
+    - sequence composition from ComposedSequenceSampler and  
+    - cross bayesian epistemic scoring from CrossBayesianSampler.
+    """
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
@@ -43,12 +53,11 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
 
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
-            velocity_model=sampler_flow_matching_model.unet,
+            flow_matching_model=sampler_flow_matching_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             extra_sampling_times=extra_sampling_times,
         )
         self.method_name = "cross_bayesian"
-        self.sampler_flow_matching_model = sampler_flow_matching_model
 
         # Initialize scoring metric
         self.scoring_metric = make_flow_matching_uncertainty_scoring_metric(
@@ -112,7 +121,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         """
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
-        global_cond = self.sampler_flow_matching_model.prepare_global_conditioning(observation)
+        global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
         
         # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
@@ -142,7 +151,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             # Draw flow matching model from the Laplace posterior
             scorer_flow_matching_model = draw_laplace_flow_matching_model(
                 laplace_posterior=self.laplace_posterior,
-                flow_matching_model=self.sampler_flow_matching_model,
+                flow_matching_model=self.flow_matching_model,
                 generator=generator
             )
         else:

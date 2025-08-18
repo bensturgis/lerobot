@@ -4,7 +4,7 @@ from typing import Optional, Sequence, Tuple
 import torch
 from torch import Tensor
 
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 from ..configuration_flow_matching import FlowMatchingConfig
@@ -19,27 +19,28 @@ class FlowMatchingUncertaintySampler(ABC):
     def __init__(
         self,
         flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: FlowMatchingConditionalUnet1d,
+        flow_matching_model: FlowMatchingModel,
         num_action_seq_samples: int,
         extra_sampling_times: Optional[Sequence[float]] = None,
     ):
         """
         Args:
             flow_matching_cfg: Shared configuration object for Flow Matching settings.
-            velocity_model: The learned flow matching velocity model.
+            flow_matching_model: The learned flow matching model.
             num_action_seq_samples: How many action sequences and corresponding
                 uncertainty scores to sample.
             extra_sampling_times: Extra times at which the sampling ODE should be evaluated.
         """
         self.flow_matching_cfg = flow_matching_cfg
-        self.velocity_model = velocity_model
-        self.sampling_ode_solver = ODESolver(velocity_model)
+        self.flow_matching_model = flow_matching_model
+        self.velocity_model = flow_matching_model.unet
+        self.sampling_ode_solver = ODESolver(self.velocity_model)
         self.num_action_seq_samples = num_action_seq_samples
 
         self.horizon = self.flow_matching_cfg.horizon
         self.action_dim = self.flow_matching_cfg.action_feature.shape[0]
-        self.device = get_device_from_parameters(velocity_model)
-        self.dtype = get_dtype_from_parameters(velocity_model)
+        self.device = get_device_from_parameters(flow_matching_model)
+        self.dtype = get_dtype_from_parameters(flow_matching_model)
 
         # Store latest sampled action sequences and their uncertainty scores for logging
         self.latest_action_candidates: Optional[Tensor] = None

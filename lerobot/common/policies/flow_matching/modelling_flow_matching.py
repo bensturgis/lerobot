@@ -161,21 +161,9 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                 )
             
             # Sample action sequence candidates and compute their uncertainty scores.
-            if self.uncertainty_sampler_config.type in [
-                "composed_cross_bayesian", "cross_bayesian"
-            ]:
-                action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
-                    observation=batch, generator=generator
-                )
-            elif self.uncertainty_sampler_config.type == "composed_sequence":
-                # Encode image features and concatenate them all together along with the state vector.
-                global_cond = self.flow_matching.prepare_global_conditioning(batch)  # (B, global_cond_dim)
-                
-                action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
-                    global_cond=global_cond, generator=generator
-                )
-            else:
-                raise ValueError(f"Unknown uncertainty sampler type: {self.uncertainty_sampler_config.type}.")
+            action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
+                observation=batch, generator=generator
+            )
 
             tqdm.write(f"{self.uncertainty_sampler_config.type} uncertainty scores: {uncertainties}")
 

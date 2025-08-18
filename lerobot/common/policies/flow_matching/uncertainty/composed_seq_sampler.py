@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 
 from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     ComposedSequenceSamplerConfig,
 )
@@ -27,7 +27,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         self,
         flow_matching_cfg: FlowMatchingConfig,
         cfg: ComposedSequenceSamplerConfig,
-        velocity_model: FlowMatchingConditionalUnet1d,
+        flow_matching_model: FlowMatchingModel,
     ):
         """
         Args:
@@ -37,7 +37,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
 
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
-            velocity_model=velocity_model,
+            flow_matching_model=flow_matching_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             extra_sampling_times=extra_sampling_times,
         )
@@ -59,7 +59,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
 
     def conditional_sample_with_uncertainty(
         self,
-        global_cond: Tensor,
+        observation: dict[str, Tensor],
         generator: torch.Generator | None = None
     ) -> Tuple[Tensor, Tensor]:
         """
@@ -68,8 +68,15 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         the flow model.
 
         Args:
-            global_cond: Single conditioning feature vector for the velocity
-                model. Shape: [cond_dim,] or [1, cond_dim].
+            observation: Info about the environment used to create the conditioning vector for
+                the flow matching model. It has to contain the following items:
+                {
+                "observation.state": (B, n_obs_steps, state_dim)
+
+                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
+                    AND/OR
+                "observation.environment_state": (B, environment_dim)
+                }
             generator: PyTorch random number generator.
 
         Returns:
@@ -77,6 +84,10 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             - Uncertainty scores where a higher value means more uncertain.
                 Shape: [num_action_seq_samples,].
         """
+        # Encode image features and concatenate them all together along with the state vector
+        # to create the flow matching conditioning vectors
+        global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
+        
         # Adjust shape of conditioning vector
         global_cond = self._prepare_conditioning(global_cond)
 
@@ -117,7 +128,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
 
             # Compute uncertainty based on selected metric
             uncertainty_scores = self.scoring_metric(
-                scorer_velocity_model=self.velocity_model,
+                scorer_velocity_model=self.flow_matching_model.unet,
                 scorer_global_cond=self.prev_global_cond,
                 ode_states=composed_action_seq.unsqueeze(0),
                 sampler_global_cond=global_cond,

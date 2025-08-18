@@ -28,6 +28,7 @@ from lerobot.common.envs.utils import env_to_policy_features
 from lerobot.common.policies.act.configuration_act import ACTConfig
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
 from lerobot.common.policies.flow_matching.uncertainty.base_sampler import (
     FlowMatchingUncertaintySampler,
 )
@@ -122,8 +123,8 @@ def make_rgb_encoder(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
 def make_flow_matching_uncertainty_sampler(
     flow_matching_cfg: FlowMatchingConfig,
     uncertainty_sampler_cfg: UncertaintySamplerConfig,
-    flow_matching_model: nn.Module,
-    ensemble_flow_matching_model: Optional[nn.Module] = None,
+    flow_matching_model: FlowMatchingModel,
+    ensemble_flow_matching_model: Optional[FlowMatchingModel] = None,
     laplace_calib_loader: Optional[DataLoader] = None,
     laplace_path: Optional[Path] = None,
 ) -> FlowMatchingUncertaintySampler:
@@ -161,7 +162,7 @@ def make_flow_matching_uncertainty_sampler(
         return ComposedSequenceSampler(
             flow_matching_cfg=flow_matching_cfg, 
             cfg=uncertainty_sampler_cfg.composed_sequence_sampler,
-            velocity_model=flow_matching_model.unet
+            flow_matching_model=flow_matching_model
         )
     elif uncertainty_sampler_cfg.type == "cross_bayesian":
         from lerobot.common.policies.flow_matching.uncertainty.cross_bayesian_sampler import (
