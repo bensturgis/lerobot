@@ -57,7 +57,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             num_action_seq_samples=cfg.num_action_seq_samples,
             extra_sampling_times=extra_sampling_times,
         )
-        self.method_name = "cross_bayesian"
+        self.method_name = "composed_cross_bayesian"
 
         # Initialize scoring metric
         self.scoring_metric = make_flow_matching_uncertainty_scoring_metric(
@@ -87,10 +87,17 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         # Sampler-specific settings
         self.cfg = cfg
 
-        # Store the action sequence and conditioning vector from the previous action
+        # Store the conditioning vectors and ODE states from the previous action
         # sequence generation
-        self.prev_action_sequence = None
-        self.prev_global_cond = None
+        self.prev_global_cond: Optional[Tensor] = None
+        self.prev_ode_states: Optional[Tensor] = None
+        self.prev_scorer_global_cond: Optional[Tensor] = None
+
+       # Index of the selected action sequence from the previous actions batch
+        self.prev_selected_action_idx: Optional[int] = None
+
+        # Store scorer flow matching model from the previous action sequence generation
+        self.prev_scorer_flow_matching_model: Optional[FlowMatchingModel] = None
 
     def conditional_sample_with_uncertainty(
         self,
@@ -127,24 +134,35 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         global_cond = self._prepare_conditioning(global_cond)
 
         # Sample noise priors
-        noise_samples = torch.randn(
+        new_noise_sample = torch.randn(
             size=(self.num_action_seq_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
             generator=generator,
         )
+        if self.prev_selected_action_idx is not None:
+            # Reuse overlapping segment of noise from the previously selected trajectory
+            # so that the newly sampled noise remains consistent with already executed actions
+            new_noise_overlap_end = self.exec_start_idx + (self.horizon - self.exec_end_idx)
+            prev_noise_sample = self.prev_ode_states[0, self.prev_selected_action_idx]
+            prev_noise_sample_duplicated = prev_noise_sample.expand(
+                self.num_action_seq_samples, -1, -1
+            )
+            new_noise_sample[:, self.exec_start_idx:new_noise_overlap_end, :] = prev_noise_sample_duplicated[:, self.exec_end_idx:, :]
 
         # Solve ODE forward from noise to sample action sequences
-        sampled_action_seqs = self.sampling_ode_solver.sample(
-            x_0=noise_samples,
+        new_ode_states = self.sampling_ode_solver.sample(
+            x_0=new_noise_sample,
             global_cond=global_cond,
             method=self.flow_matching_cfg.ode_solver_method,
             atol=self.flow_matching_cfg.atol,
             rtol=self.flow_matching_cfg.rtol,
             time_grid=self.sampling_time_grid,
+            return_intermediate_states=True,
         )
 
         # Store sampled action sequences for logging
+        sampled_action_seqs = new_ode_states[-1]
         self.latest_action_candidates = sampled_action_seqs
 
         if self.cfg.scorer_type == "laplace":
@@ -157,7 +175,11 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         else:
             scorer_flow_matching_model = self.ensemble_flow_matching_model
 
-        if self.prev_action_sequence is None:
+        # Create and prepare the scorer conditioning vector
+        scorer_global_cond = scorer_flow_matching_model.prepare_global_conditioning(observation)
+        scorer_global_cond = self._prepare_conditioning(scorer_global_cond)  # (B, global_cond_dim)
+
+        if self.prev_selected_action_idx is None:
             # If no previous trajectory is stored, return placeholder uncertainties
             uncertainty_scores = torch.full(
                 (self.num_action_seq_samples,),
@@ -166,27 +188,40 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
                 device=self.device
             )
         else:
-            # Compose full action sequences from stored prefix and newly sampled
-            # action sequences
-            composed_action_seq = self.compose_action_seqs(
-                prev_action_seq=self.prev_action_sequence,
-                new_action_seq=sampled_action_seqs  
+            # Compose full ODE states from stored previous and new action generation
+            composed_ode_states = self.compose_ode_states(
+                prev_ode_states=self.prev_ode_states[
+                    :, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :
+                ],
+                new_ode_states=new_ode_states  
             )
-
-            # Create and prepare the scorer conditioning vector
-            scorer_global_cond = scorer_flow_matching_model.prepare_global_conditioning(observation)
-            scorer_global_cond = self._prepare_conditioning(scorer_global_cond)  # (B, global_cond_dim)
 
             # Compute uncertainty based on selected metric
-            uncertainty_scores = self.scoring_metric(
-                scorer_velocity_model=scorer_flow_matching_model.unet,
-                scorer_global_cond=scorer_global_cond,
-                ode_states=composed_action_seq.unsqueeze(0),
-                sampler_global_cond=global_cond,
-                generator=generator,
-            )
+            if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
+                uncertainty_scores = self.scoring_metric(
+                    action_sequences=composed_ode_states[-1],
+                    velocity_model=scorer_flow_matching_model.unet,
+                    global_cond=self.prev_scorer_global_cond,
+                )
+            elif self.scoring_metric.name == "inter_vel_diff":
+                uncertainty_scores = self.scoring_metric(
+                    ref_ode_states=self.prev_ode_states,
+                    ref_velocity_model=self.velocity_model,
+                    ref_global_cond=self.prev_global_cond,
+                    cmp_ode_states=composed_ode_states,
+                    cmp_velocity_model=self.prev_scorer_flow_matching_model.unet,
+                    cmp_global_cond=self.prev_scorer_global_cond,
+                )
+            else:
+                raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
 
         # Store uncertainty scores for logging
         self.latest_uncertainties = uncertainty_scores
+
+        # Store scorer model, conditioning vectors, ODE states from the previous action sampling step
+        self.prev_scorer_flow_matching_model = scorer_flow_matching_model
+        self.prev_scorer_global_cond = scorer_global_cond
+        self.prev_global_cond = global_cond
+        self.prev_ode_states = new_ode_states
         
         return sampled_action_seqs, uncertainty_scores

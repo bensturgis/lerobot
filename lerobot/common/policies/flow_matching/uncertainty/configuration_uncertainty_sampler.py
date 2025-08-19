@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Sequence
 
+# TODO: Update description
 """
 Explanation of shared uncertainy sampler attributes:
 - num_action_seq_samples: Number of candidate action sequences to sample.
@@ -145,7 +146,7 @@ class ComposedCrossBayesianSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric.metric_type,
             allowed=(
-                "likelihood", "mode_distance", "terminal_vel_norm",
+                "inter_vel_diff", "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
@@ -185,7 +186,7 @@ class CrossBayesianSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric.metric_type,
             allowed=(
-                "likelihood", "mode_distance", "terminal_vel_norm", "inter_vel_diff",
+                 "inter_vel_diff", "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
@@ -199,7 +200,7 @@ class ComposedSequenceSamplerConfig:
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
             metric=self.scoring_metric.metric_type,
             allowed=(
-                "likelihood", "mode_distance", "terminal_vel_norm",
+                 "inter_vel_diff", "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
@@ -228,9 +229,9 @@ class UncertaintySamplerConfig:
         }
         try:
             return mapping[self.type]
-        except KeyError:
+        except KeyError as err:
             valid = ", ".join(sorted(mapping.keys()))
             raise ValueError(
                 f"Unknown uncertainty sampler type {self.type}. "
                 f"Expected one of: {valid}."
-            )
+            ) from err

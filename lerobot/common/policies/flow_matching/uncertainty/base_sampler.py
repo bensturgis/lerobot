@@ -31,6 +31,7 @@ class FlowMatchingUncertaintySampler(ABC):
                 uncertainty scores to sample.
             extra_sampling_times: Extra times at which the sampling ODE should be evaluated.
         """
+        self.method_name = "base"
         self.flow_matching_cfg = flow_matching_cfg
         self.flow_matching_model = flow_matching_model
         self.velocity_model = flow_matching_model.unet
@@ -60,6 +61,10 @@ class FlowMatchingUncertaintySampler(ABC):
             )
         else:
             raise ValueError(f"Unknown ODE solver method: {flow_matching_cfg.ode_solver_method}.")
+        
+        # Indices marking the portion of the trajectory that will actually be executed
+        self.exec_start_idx = self.flow_matching_cfg.n_obs_steps - 1
+        self.exec_end_idx = self.exec_start_idx + self.flow_matching_cfg.n_action_steps
     
     def _prepare_conditioning(self, global_cond: Tensor) -> Tensor:
         """
@@ -74,43 +79,66 @@ class FlowMatchingUncertaintySampler(ABC):
             )
         return global_cond.repeat(self.num_action_seq_samples, 1)
     
-    def compose_action_seqs(
+    def compose_ode_states(
         self,
-        prev_action_seq: Tensor,
-        new_action_seq: Tensor
+        prev_ode_states: Tensor,
+        new_ode_states: Tensor
     ) -> Tensor:
         """
-        Stitch together a complete candidate action sequence by keeping the prefix that
-        has already been executed and appending the freshly sampled suffix.
+        Splice ODE states by keeping the executed prefix from the previous rollout and appending the freshly
+        sampled suffix from the new action generation. Inputs can be full ODE integration states with time
+        dimension or final sampled action sequences only.
 
         Args:
-            prev_action_seq: Sequence collected during the previous sampling step.
-                Shape: (batch_size, horizon, action_dim).
-            new_action_seq: Newly generated action sequence.
-                Shape: (batch_size, horizon, action_dim).
+            prev_action_seq: ODE states collected during the previous action generation step.
+                Shape: (timesteps, 1, horizon, action_dim) or (1, horizon, action_dim) for final action sequences.
+            new_action_seq: Newly generated action sequence or ODE states.
+                Shape: (timesteps, batch_size, horizon, action_dim) or (batch_size, horizon, action_dim) for
+                final action sequences.
 
         Returns:
-            The composed action sequence. Shape: (batch_size, horizon, action_dim).
-        """
-        # Indices where to split and recompose the trajectory
-        prev_action_seq_end = (
-            self.flow_matching_cfg.n_obs_steps - 1 + self.flow_matching_cfg.n_action_steps
-        )
-        new_action_seqs_start = self.flow_matching_cfg.n_obs_steps - 1
-        new_action_seqs_end = new_action_seqs_start + (self.horizon - prev_action_seq_end)
+            The composed ODE states. Shape: (timesteps, batch_size, horizon, action_dim) or
+                (batch_size, horizon, action_dim) for final action sequences.
+        """       
+        def add_time_dimension(ode_states: Tensor) -> tuple[Tensor, bool]:
+            if ode_states.ndim == 3:   # (batch_size, horizon, action_dim)
+                return ode_states.unsqueeze(0), False  # (1, batch_size, horizon, action_dim)
+            if ode_states.ndim == 4:   # (time_step, batch_size, horizon, action_dim)
+                return ode_states, True
+            raise ValueError(f"Expected 3D or 4D tensor, got shape {tuple(ode_states.shape)}")
         
-        # Repeat previous prefix to match batch dimension
-        prev_action_sequence_duplicated = prev_action_seq.expand(
-            self.num_action_seq_samples, -1, -1
-        )
-        
-        # Compose full action sequences from stored prefix and newly sampled action sequences
-        composed_action_seq = torch.cat([
-            prev_action_sequence_duplicated[:, :prev_action_seq_end, :],
-            new_action_seq[:, new_action_seqs_start:new_action_seqs_end, :]
-        ], dim=1)
+        prev_ode_states, prev_had_time_dim = add_time_dimension(prev_ode_states)
+        new_ode_states, new_had_time_dim = add_time_dimension(new_ode_states)
 
-        return composed_action_seq
+        if prev_ode_states.shape[1] != 1:
+            raise ValueError(
+                "Selected ODE states from previous action generation are expected to have batch size "
+                f"of one but got batch_size={prev_ode_states.shape[1]}."
+            )
+
+        if [prev_ode_states.size(i) for i in (0, 2, 3)] != [new_ode_states.size(i) for i in (0, 2, 3)]:
+            raise ValueError(
+                "ODE states to compose are expected to have the same time dimension, horizon, "
+                f"and action dimension. Got shapes {prev_ode_states.shape} and {new_ode_states.shape}."
+            )
+
+        new_action_seq_end = self.exec_start_idx + (self.horizon - self.exec_end_idx)
+        
+        # Repeat prefix from previous ODE states to match batch dimension
+        prev_ode_states_duplicated = prev_ode_states.expand(
+            -1, self.num_action_seq_samples, -1, -1
+        )
+        
+        # Compose from stored prefix and newly generated ODE states
+        composed_ode_states = torch.cat([
+            prev_ode_states_duplicated[:, :, :self.exec_end_idx, :],
+            new_ode_states[:, :, self.exec_start_idx:new_action_seq_end, :]
+        ], dim=2)
+
+        if not (prev_had_time_dim and new_had_time_dim):
+            return composed_ode_states.squeeze(0)
+        else:
+            return composed_ode_states
 
     @abstractmethod
     def conditional_sample_with_uncertainty(

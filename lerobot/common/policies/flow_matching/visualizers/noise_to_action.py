@@ -87,8 +87,8 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
         Create one figure per evaluation time and plot multiple overlays together.
 
         Each overlay dict should contain 'label', 'ode_states' with shape (num_samples, timesteps,
-        horizon, action_dim), 'step_labels' (optional), 'colors' (optional), 'zorder' (optional),
-        'scale' (optional), 'marker' (optional).
+        horizon, action_dim), 'step_labels' (optional), 'text_kwargs' (optional), 'colors' (optional),
+        'zorder' (optional), 'scale' (optional), 'marker' (optional).
         """
         if not action_overlays:
             return
@@ -125,6 +125,7 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
                         action_dims=self.action_dims,
                         colors=[step_color],
                         step_label=step_label,
+                        text_kwargs=spec.get("text_kwargs", {}),
                         zorder=spec.get("zorder", 3),
                         scale=spec.get("scale", 40.0),
                         marker=spec.get("marker", "o")

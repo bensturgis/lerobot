@@ -27,7 +27,7 @@ from tqdm import tqdm, trange
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.uncertainty.estimate_uncertainty import ComposedSequenceSampler
+from lerobot.common.policies.flow_matching.uncertainty.composed_seq_sampler import ComposedSequenceSampler
 from lerobot.common.policies.flow_matching.visualizers import (
     ActionSeqVisualizer,
     VectorFieldVisualizer,
@@ -193,9 +193,9 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
                 # Compose actions
                 if prev_actions is not None:
-                    composed_actions = composed_seq_sampler.compose_action_seqs(
-                        prev_action_seq=prev_actions,
-                        new_action_seq=new_actions
+                    composed_actions = composed_seq_sampler.compose_ode_states(
+                        prev_ode_states=prev_actions,
+                        new_ode_states=new_actions
                     )
                     action_data["action_samples"] = prev_actions
                     action_data["composed_actions"] = composed_actions[1:]

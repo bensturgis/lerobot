@@ -133,7 +133,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                 "composed_cross_bayesian", "composed_sequence"
             ]
         ):
-            self.uncertainty_sampler.prev_action_sequence = None
+            self.uncertainty_sampler.prev_selected_action_idx = None
 
     def generate_actions(
         self,
@@ -180,7 +180,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             if self.uncertainty_sampler_config.type in [
                 "composed_sequence", "composed_cross_bayesian"
             ]:
-                self.uncertainty_sampler.prev_action_sequence = actions
+                self.uncertainty_sampler.prev_selected_action_idx = rand_idx
         else:
             # Encode image features and concatenate them all together along with the state vector.
             global_cond = self.flow_matching.prepare_global_conditioning(batch)  # (B, global_cond_dim)

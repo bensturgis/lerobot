@@ -152,13 +152,23 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
         scorer_global_cond = self._prepare_conditioning(scorer_global_cond)  # (B, global_cond_dim)
 
         # Compute uncertainty based on selected metric
-        uncertainty_scores = self.scoring_metric(
-            scorer_velocity_model=scorer_flow_matching_model.unet,
-            scorer_global_cond=scorer_global_cond,
-            ode_states=ode_states,
-            sampler_global_cond=global_cond,
-            generator=generator,
-        )
+        if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
+            uncertainty_scores = self.scoring_metric(
+                action_sequences=sampled_action_seqs,
+                velocity_model=scorer_flow_matching_model.unet,
+                global_cond=scorer_global_cond,
+            )
+        elif self.scoring_metric.name == "inter_vel_diff":
+            uncertainty_scores = self.scoring_metric(
+                ref_ode_states=ode_states,
+                ref_velocity_model=self.velocity_model,
+                ref_global_cond=global_cond,
+                cmp_ode_states=ode_states,
+                cmp_velocity_model=scorer_flow_matching_model.unet,
+                cmp_global_cond=scorer_global_cond,
+            )
+        else:
+            raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
 
         # Store uncertainty scores for logging
         self.latest_uncertainties = uncertainty_scores

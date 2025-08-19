@@ -1,9 +1,8 @@
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import imageio
 from matplotlib.axes import Axes
-from matplotlib.text import Annotation
 from torch import Tensor
 
 
@@ -55,6 +54,7 @@ def add_actions(
     scale: float = 10.0,
     marker: str = "o",
     step_label: Optional[str] = None,
+    text_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Axes:
     """
     Overlay action samples on flow matching visualizations.
@@ -62,6 +62,9 @@ def add_actions(
     if colors is None:
         colors = ["red", "orange", "green", "purple", "magenta", "brown"]
     
+    if text_kwargs is None:
+        text_kwargs = {}
+
     # Figure out which dims to plot
     if len(action_dims) == 2:
         x_dim, y_dim = action_dims
@@ -104,10 +107,12 @@ def add_actions(
                         x_positions[i], y_positions[i], z_positions[i],
                         step_label, zorder=zorder + 1)
                 else:
+                    xytext = (0)
                     ax.annotate(
                         step_label, (x_positions[i], y_positions[i]),
-                        xytext=(0.2, 0.2), textcoords="offset points",
-                        zorder=zorder + 1, fontsize=11
+                        xytext=text_kwargs.get("xytext", (0.2, 0.2)),
+                        textcoords="offset points", zorder=zorder + 1,
+                        fontsize=11
                     )
 
     # Presentation: fontsize=28

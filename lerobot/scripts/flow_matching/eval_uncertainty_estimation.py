@@ -383,6 +383,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
         desc=f"Evaluating uncertainty estimation for {n_episods} episodes."
     )
     for episode in progbar:
+        seed = choose_seed(ood_failure_pool, rng)
         for uncert_est_method in cfg.eval_uncert_est.uncert_est_methods:
             logging.info("Loading policy")
             cfg.uncertainty_sampler.type = uncert_est_method
@@ -416,7 +417,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
 
             # ------------ ID Case ------------------
             logging.info("Creating ID environment.")
-            seed = choose_seed(id_failure_pool, rng)
+            # seed = choose_seed(id_failure_pool, rng)
             cfg.env.ood.enabled = False
             id_env = make_single_env(cfg.env, seed)
             id_ep_info = rollout(
@@ -447,7 +448,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
 
             # ------------ OoD Case ------------------
             logging.info("Creating OoD environment.")
-            seed = choose_seed(ood_failure_pool, rng)
+            # seed = choose_seed(ood_failure_pool, rng)
             cfg.env.ood.enabled = True
             ood_env = make_single_env(cfg.env, seed)
             ood_ep_info = rollout(
