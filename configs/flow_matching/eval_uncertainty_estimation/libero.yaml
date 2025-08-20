@@ -8,7 +8,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 500
-  uncert_est_methods: [cross_bayesian, composed_sequence, composed_cross_bayesian]
+  uncert_est_methods: [composed_sequence, composed_cross_bayesian]
 
 uncertainty_sampler:
   composed_cross_bayesian_sampler:
@@ -28,6 +28,6 @@ uncertainty_sampler:
       metric_type: inter_vel_diff
     num_action_seq_samples: 5
 
-seed: 221100
+seed: 42
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

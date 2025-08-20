@@ -45,7 +45,7 @@ class TerminalStateMetric(FlowMatchingUncertaintyMetric, ABC):
         flow matching model.
         Args:
             velocity_model: Flow matching velocity model for scoring.
-            scorer_global_cond: Conditioning vector for the scorer velocity model.
+            global_cond: Conditioning vector for the scorer velocity model.
                 Shape: (batch_size, cond_dim).
             action_sequence: Final action sequences to score. Shape: (batch_size,
                 horizon, action_dim).
@@ -331,7 +331,7 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
             )
         
         # Evaluate velocity difference between reference and comparison trajectory at each intermediate time point
-        batch_size = ref_ode_states[-1].shape[0]
+        batch_size = ref_ode_states.shape[1]
         inter_vel_diff_score: Tensor = torch.zeros(batch_size, device=self.device, dtype=self.dtype)
         for idx, (time, ref_inter_state, cmp_inter_state) in enumerate(zip(
             selected_ref_grid_times, selected_ref_ode_states, selected_cmp_ode_states, strict=False

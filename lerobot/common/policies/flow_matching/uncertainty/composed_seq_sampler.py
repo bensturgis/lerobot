@@ -161,6 +161,12 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                 new_ode_states=new_ode_states
             )
 
+            # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix
+            prev_selected_ode_states = (
+                self.prev_ode_states[:, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :]
+                    .expand(-1, self.num_action_seq_samples, -1, -1)
+            )
+
             # Compute uncertainty based on selected metric
             if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
                 uncertainty_scores = self.scoring_metric(
@@ -170,7 +176,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                 )
             elif self.scoring_metric.name == "inter_vel_diff":
                 uncertainty_scores = self.scoring_metric(
-                    ref_ode_states=self.prev_ode_states,
+                    ref_ode_states=prev_selected_ode_states,
                     ref_velocity_model=self.velocity_model,
                     ref_global_cond=self.prev_global_cond,
                     cmp_ode_states=composed_ode_states,
