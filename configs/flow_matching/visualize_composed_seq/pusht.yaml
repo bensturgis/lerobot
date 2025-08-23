@@ -1,0 +1,28 @@
+env:
+  type: pusht
+
+policy:
+  type: flow_matching
+  device: cuda
+
+vis:
+  num_rollouts: 1
+  action_dim_names: ["pos_x", "pos_y"]
+
+vector_field:
+  action_dims: [0, 1]
+  grid_size: 25
+
+noise_to_action:
+  action_dims: [0, 1]
+  axis_limits: [[-1, 1], [-1, 1]]
+
+composed_sequence_sampler:
+    scoring_metric:
+      metric_type: inter_vel_diff
+    num_action_seq_samples: 20
+
+show: False
+seed: 6
+
+# python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimation.py --config=configs/flow_matching/visualize_composed_seq/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model

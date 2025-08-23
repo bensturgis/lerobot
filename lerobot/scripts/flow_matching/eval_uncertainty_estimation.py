@@ -229,13 +229,10 @@ def rollout(
     device = get_device_from_parameters(policy)
 
     # Initialize random number generator to deterministically select actions
-    if seed is not None:
-        generator = torch.Generator(device=device).manual_seed(seed)
-    else:
-        generator = None
+    generator = torch.Generator(device=device).manual_seed(seed) if seed is not None else None
 
     ep_uncertainties = []
-    if env.camera_names is not None:
+    if hasattr(env, "camera_names") and env.camera_names is not None:
         ep_frames: Dict[str, list[np.ndarray]] = {
             cam: [] for cam in env.camera_names
         }
@@ -249,7 +246,7 @@ def rollout(
     policy.reset()
     observation, _ = env.reset(seed=seed)
 
-    if env.camera_names is not None:
+    if hasattr(env, "camera_names") and env.camera_names is not None:
         for camera in env.camera_names:
             ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
     else:
@@ -281,7 +278,7 @@ def rollout(
 
         # Apply the next action
         observation, _, terminated, truncated, info = env.step(action[0].cpu().numpy())
-        if env.camera_names is not None:
+        if hasattr(env, "camera_names") and env.camera_names is not None:
             for camera in env.camera_names:
                 ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
         else:
@@ -417,7 +414,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
 
             # ------------ ID Case ------------------
             logging.info("Creating ID environment.")
-            # seed = choose_seed(id_failure_pool, rng)
+            seed = choose_seed(id_failure_pool, rng)
             cfg.env.ood.enabled = False
             id_env = make_single_env(cfg.env, seed)
             id_ep_info = rollout(
@@ -448,7 +445,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
 
             # ------------ OoD Case ------------------
             logging.info("Creating OoD environment.")
-            # seed = choose_seed(ood_failure_pool, rng)
+            seed = choose_seed(ood_failure_pool, rng)
             cfg.env.ood.enabled = True
             ood_env = make_single_env(cfg.env, seed)
             ood_ep_info = rollout(

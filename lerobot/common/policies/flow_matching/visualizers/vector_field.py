@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -119,12 +119,13 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             rtol=self.flow_matching_cfg.rtol,
         )
 
+        action_data_colors: List[str] = []
         if visualize_actions and not action_data:
             action_data["action_samples"] = action_samples[1:]
             action_data_colors = ["red"]
         
-        if "base_action" not in action_data:
-            action_data["base_action"] = action_samples[0].unsqueeze(0)
+        if "Base Action" not in action_data:
+            action_data["Base Action"] = action_samples[0].unsqueeze(0)
             action_data_colors.append("cyan")
 
         # Build a 1-D lin-space once and reuse it for every axis we need
@@ -146,7 +147,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             device=device,
         ).item()
         action_step = self.action_steps[action_steps_idx]
-        positions = action_data["base_action"].repeat(x_grid.size, 1, 1)
+        positions = action_data["Base Action"].repeat(x_grid.size, 1, 1)
         positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
         positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)
         if len(self.action_dims) == 3:
@@ -209,6 +210,9 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_dims=self.action_dims,
                     colors=action_data_colors,                   
                 )
+
+            # Legend
+            fig.axes[0].legend()
 
             if self.show:
                 plt.show(block=True)

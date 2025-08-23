@@ -21,6 +21,7 @@ vis:
 
 noise_to_action:
   action_dims: [0, 1]
+  axis_limits: [[-1, 1], [-1, 1]]
   num_samples: 1
 
 flows:

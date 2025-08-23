@@ -179,7 +179,7 @@ class NoiseToActionVisConfig:
     axis_limits: Optional[list[tuple[float, float]]] = None
     
     # Time points along the ODE integration where noisy actions are visualized
-    ode_eval_times: Tensor = torch.linspace(0, 1, steps=11)
+    ode_eval_times: list | tuple  = (0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
 
 @dataclass
 class VisConfig:

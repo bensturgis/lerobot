@@ -4,6 +4,8 @@ from typing import Any, Dict, Optional, Sequence, Union
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import torch
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
 from torch import Tensor
 
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
@@ -64,7 +66,7 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
         self.ode_solver = ODESolver(self.velocity_model)
 
         # Create time grid for solving the ODE including the times where the noisy actions get visualized
-        self.ode_eval_times = cfg.ode_eval_times.to(self.device)
+        self.ode_eval_times = torch.as_tensor(cfg.ode_eval_times, device=self.device, dtype=self.dtype)
         ode_solver_method = self.flow_matching_cfg.ode_solver_method
         if ode_solver_method in FIXED_STEP_SOLVERS:
             self.sampling_time_grid = self.ode_solver.make_sampling_time_grid(
@@ -82,6 +84,8 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
     def plot_noise_to_action_overlays(
         self,
         action_overlays: Sequence[Dict[str, Any]],
+        mean_uncertainty: Optional[str] = None,
+        cbar_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Create one figure per evaluation time and plot multiple overlays together.
@@ -131,9 +135,33 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
                         marker=spec.get("marker", "o")
                     )
 
+            # Colorbar based on action step
+            if cbar_kwargs is not None:
+                norm = Normalize(vmin=0, vmax=cbar_kwargs["horizon"] - 1)
+                sm = ScalarMappable(cmap=cbar_kwargs["cmap"], norm=norm)
+                sm.set_array([])
+                cbar = fig.colorbar(sm, ax=ax, shrink=0.95)
+                cbar.ax.set_ylabel('Action Step', fontsize=12)
+
             # Axis labels
             ax.set_xlabel(labels[0], fontsize=14)
             ax.set_ylabel(labels[1], fontsize=14)
+
+            if mean_uncertainty:
+                ax.text(
+                    0.02, 0.98,
+                    f"Mean Uncertainty: {mean_uncertainty:.2f}",
+                    transform=ax.transAxes,
+                    fontsize=12,
+                    verticalalignment="top",
+                    bbox={
+                        "boxstyle": "round,pad=0.3",
+                        "facecolor": "white",
+                        "edgecolor": "none",
+                        "alpha": 0.8
+                    },
+                )
+
             # Axis limits
             ax.set_xlim(*self.axis_limits[0])
             ax.set_ylim(*self.axis_limits[1])
@@ -202,7 +230,8 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
         
         horizon = ode_eval_states.shape[2]
         # step_labels = ("t", *[f"t+{k}" for k in range(1, horizon)])
-        colors = cm.get_cmap('plasma')(torch.arange(horizon) / (horizon - 1))
+        cmap = cm.get_cmap('plasma')
+        colors = cmap(torch.arange(horizon) / (horizon - 1))
         noisy_action_overlay = [
             {
                 "label": "Noisy Actions",
@@ -210,7 +239,15 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
                 "colors": colors,
             },
         ]
-        self.plot_noise_to_action_overlays(action_overlays=noisy_action_overlay)
+        cbar_kwargs = {
+            "cmap": cmap,
+            "horizon": horizon,
+        }
+        self.plot_noise_to_action_overlays(
+            action_overlays=noisy_action_overlay,
+            cbar_kwargs=cbar_kwargs,
+            mean_uncertainty=kwargs.get("mean_uncertainty")
+        )
 
         if self.create_gif:
             self._create_gif()

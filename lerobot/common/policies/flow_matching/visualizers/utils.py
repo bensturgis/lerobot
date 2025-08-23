@@ -49,7 +49,7 @@ def add_actions(
     action_data: Dict[str, Tensor],
     action_step: int,
     action_dims: int,
-    colors: Optional[Iterable[str]] = None,
+    colors: Iterable[str] = [],
     zorder: int = 3,
     scale: float = 10.0,
     marker: str = "o",
@@ -59,7 +59,7 @@ def add_actions(
     """
     Overlay action samples on flow matching visualizations.
     """
-    if colors is None:
+    if len(colors) == 0:
         colors = ["red", "orange", "green", "purple", "magenta", "brown"]
     
     if text_kwargs is None:
@@ -107,7 +107,6 @@ def add_actions(
                         x_positions[i], y_positions[i], z_positions[i],
                         step_label, zorder=zorder + 1)
                 else:
-                    xytext = (0)
                     ax.annotate(
                         step_label, (x_positions[i], y_positions[i]),
                         xytext=text_kwargs.get("xytext", (0.2, 0.2)),

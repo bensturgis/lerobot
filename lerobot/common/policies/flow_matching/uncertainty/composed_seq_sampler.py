@@ -1,9 +1,5 @@
-
-import datetime as dt
-from pathlib import Path
 from typing import Optional, Tuple
 
-import matplotlib.cm as cm
 import torch
 from torch import Tensor
 
@@ -12,8 +8,6 @@ from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMa
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     ComposedSequenceSamplerConfig,
 )
-from lerobot.common.policies.flow_matching.visualizers import NoiseToActionVisualizer
-from lerobot.configs.default import NoiseToActionVisConfig
 
 from ..configuration_flow_matching import FlowMatchingConfig
 from .base_sampler import FlowMatchingUncertaintySampler
@@ -64,19 +58,6 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
 
         # Index of the selected action sequence from the previous actions batch
         self.prev_selected_action_idx: Optional[int] = None
-
-        # ------------------------------- DEBUGGING VISUALIZATION --------------------------------
-        # vis_config = NoiseToActionVisConfig()
-        # now = dt.datetime.now()
-        # vis_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_compsed_sequence_sampler_debugging"
-        # output_dir = Path("outputs/visualizations") / vis_dir
-        # self.visualizer = NoiseToActionVisualizer(
-        #     cfg=vis_config,
-        #     flow_matching_cfg=self.flow_matching_cfg,
-        #     velocity_model=self.flow_matching_model.unet,
-        #     output_root=output_dir,
-        # )
-        # ----------------------------------------------------------------------------------------
         
     def conditional_sample_with_uncertainty(
         self,
@@ -185,34 +166,6 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                 )
             else:
                 raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
-
-            # ------------------------------- DEBUGGING VISUALIZATION --------------------------------
-            # self.visualizer._update_run_dir()
-            # combined_horizon = 2 * self.horizon - new_noise_overlap_end
-            # colors = cm.get_cmap('plasma')(torch.arange(combined_horizon) / (combined_horizon - 1))
-            # step_labels = ("t", *[f"t+{k}" for k in range(1, combined_horizon)])
-            
-            # prev_actions_overlay = {
-            #     "label": "Previous ODE States",
-            #     "ode_states": self.prev_ode_states.transpose(0, 1),
-            #     "colors": colors[:self.horizon],
-            #     # "step_labels": step_labels[:self.horizon],
-            #     "text_kwargs": {"xytext": (-14, -12)},
-            #     "scale": 40,
-            # }
-            # new_actions_overlay = {
-            #     "label": "Current ODE States",
-            #     "ode_states": new_ode_states.transpose(0, 1),
-            #     "colors": colors[new_noise_overlap_end:],
-            #     # "step_labels": step_labels[new_noise_overlap_end:],
-            #     "text_kwargs": {"xytext": (2, 2)},
-            #     "scale": 50,
-            #     "marker": "x",
-            # }
-            # self.visualizer.plot_noise_to_action_overlays(
-            #     action_overlays=[prev_actions_overlay, new_actions_overlay]
-            # )
-            # ----------------------------------------------------------------------------------------
             
         # Store computed uncertainty scores for logging
         self.latest_uncertainties = uncertainty_scores

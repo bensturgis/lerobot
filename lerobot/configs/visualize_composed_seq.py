@@ -8,7 +8,12 @@ from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty
     ComposedSequenceSamplerConfig,
 )
 from lerobot.configs import parser
-from lerobot.configs.default import ActionSeqVisConfig, VectorFieldVisConfig, VisConfig
+from lerobot.configs.default import (
+    ActionSeqVisConfig,
+    NoiseToActionVisConfig,
+    VectorFieldVisConfig,
+    VisConfig,
+)
 from lerobot.configs.policies import PreTrainedConfig
 
 
@@ -16,10 +21,11 @@ from lerobot.configs.policies import PreTrainedConfig
 class VisualizeComposedSeqPipelineConfig:
     env: envs.EnvConfig
     policy: PreTrainedConfig | None = None
-    composed_seq_sampler: ComposedSequenceSamplerConfig = field(default_factory=ComposedSequenceSamplerConfig)
+    composed_sequence_sampler: ComposedSequenceSamplerConfig = field(default_factory=ComposedSequenceSamplerConfig)
     vis: VisConfig = field(default_factory=VisConfig)
     action_seq: ActionSeqVisConfig = field(default_factory=ActionSeqVisConfig)
     vector_field: VectorFieldVisConfig = field(default_factory=VectorFieldVisConfig)
+    noise_to_action: NoiseToActionVisConfig = field(default_factory=NoiseToActionVisConfig)
 
     seed: int | None = None
     job_name: str | None = None
@@ -46,6 +52,14 @@ class VisualizeComposedSeqPipelineConfig:
 
         if self.vector_field.action_dim_names is None:
             self.vector_field.action_dim_names = self.vis.action_dim_names
+
+        if self.noise_to_action.action_dim_names is None:
+            self.noise_to_action.action_dim_names = self.vis.action_dim_names
+
+        # Plot the velocity evaluation times of the composed sequence sampler in the noise-to-action visualization
+        self.noise_to_action.ode_eval_times = list(self.composed_sequence_sampler.scoring_metric.velocity_eval_times)
+        if self.noise_to_action.ode_eval_times[-1] != 1.0:
+            self.noise_to_action.ode_eval_times.append(1.0)
 
         if not self.job_name:
             if self.env is None:

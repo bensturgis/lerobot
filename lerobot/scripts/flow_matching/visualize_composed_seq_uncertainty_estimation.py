@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
 Visualize the composed action sequence uncertainty estimation method by creating a vector field
-plot overlaid by the composed action sequences.
+plots overlaid by the composed action sequences and  noise-to-action transformations
+for consecutive action generation steps.
 
 Usage example:
 
@@ -19,6 +20,7 @@ import time
 from typing import Dict
 
 import gymnasium as gym
+import matplotlib.cm as cm
 import numpy as np
 import torch
 from torch import Tensor
@@ -27,9 +29,14 @@ from tqdm import tqdm, trange
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.common.policies.flow_matching.uncertainty.composed_seq_sampler import ComposedSequenceSampler
+from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
+)
 from lerobot.common.policies.flow_matching.visualizers import (
     ActionSeqVisualizer,
+    NoiseToActionVisualizer,
     VectorFieldVisualizer,
 )
 from lerobot.common.utils.io_utils import write_video
@@ -48,7 +55,12 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
         rollout_seeds = list(range(cfg.seed, cfg.seed + cfg.vis.num_rollouts))
     else:
         rollout_seeds = None
-    
+
+    # Create uncertainty sampler config
+    uncertainty_sampler_config = UncertaintySamplerConfig()
+    uncertainty_sampler_config.type = "composed_sequence"
+    uncertainty_sampler_config.composed_sequence_sampler = cfg.composed_sequence_sampler
+
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":
         raise ValueError(
@@ -56,8 +68,15 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
             f"but got policy type '{cfg.policy.type}'."
         )
     device = get_safe_torch_device(cfg.policy.device, log=True)
-    policy = make_policy(cfg.policy, env_cfg=cfg.env).to(device)
+    policy: FlowMatchingPolicy = make_policy(
+        cfg=cfg.policy,
+        env_cfg=cfg.env,
+        uncertainty_sampler_cfg=uncertainty_sampler_config,
+    ).to(device)
     policy.eval()
+
+    # Initialize composed action sequence uncertainty sampler
+    policy.init_uncertainty_sampler()
 
     num_rollouts = cfg.vis.num_rollouts
     for ep in range(num_rollouts):
@@ -98,20 +117,19 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
         ep_dir = cfg.output_dir / f"rollout_{ep:03d}"
         ep_dir.mkdir(parents=True, exist_ok=True)
-
-        # Prepare composed action sequence uncertainty sampler
-        composed_seq_sampler = ComposedSequenceSampler(
-            flow_matching_cfg=policy.config, 
-            cfg=cfg.composed_seq_sampler,
-            velocity_model=policy.flow_matching.unet
-        )
         
         # Prepare visualizers
         action_seq_visualizer = ActionSeqVisualizer(
-            cfg.action_seq,
+            cfg=cfg.action_seq,
             flow_matching_cfg=policy.config,
             velocity_model=policy.flow_matching.unet,
             unnormalize_outputs=policy.unnormalize_outputs,
+            output_root=ep_dir,
+        )
+        noise_to_action_visualizer = NoiseToActionVisualizer(
+            cfg=cfg.noise_to_action,
+            flow_matching_cfg=policy.config,
+            velocity_model=policy.flow_matching.unet,
             output_root=ep_dir,
         )
         vector_field_visualizer = VectorFieldVisualizer(
@@ -121,7 +139,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
             output_root=ep_dir,
         )
         
-        # Only visualize the action steps that come from the next observation
+        # Only visualize the attached action steps of the composed action sequence
         prev_action_seq_end = (
             policy.config.n_obs_steps - 1 + policy.config.n_action_steps
         )
@@ -131,16 +149,16 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
             step for step in vector_field_visualizer.action_steps
             if step in attached_action_steps
         ]
-        if len( vector_field_visualizer.action_steps) == 0:
+        if len(vector_field_visualizer.action_steps) == 0:
             vector_field_visualizer.action_steps = list(range(prev_action_seq_end, horizon))
 
         # Initialize the dictionary of actions to visualize in the vector field plot
         action_data: Dict[str, Tensor] = {}
 
-        # At the beginning of an epsiode we don't have previous actions to compose with
+        # At the beginning of an epsiode we don't have previous ODE states to compose with
+        prev_ode_states: Tensor | None = None
         prev_global_cond: Tensor | None = None
-        prev_actions: Tensor | None = None
-        composed_seq_sampler.prev_action_sequence = None
+        prev_selected_action_idx: int | None = None
 
         # Roll through one episode
         max_episode_steps = env.spec.max_episode_steps
@@ -174,35 +192,33 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                 # Clear action data dictionary
                 action_data.clear()
                 
-                # Stack the history of observations
-                batch = {
-                    k: torch.stack(list(policy._queues[k]), dim=1)
-                    for k in policy._queues
-                    if k != "action"
-                }
-
-                # Build global-conditioning with the policy's helper
-                global_cond = policy.flow_matching.prepare_global_conditioning(batch)
-
-                # Get the newly sampled actions
-                new_actions, uncertainties = composed_seq_sampler.conditional_sample_with_uncertainty(
-                    global_cond=global_cond, generator=generator
-                )
-                tqdm.write(f"Compsed sequence sampler uncertainty scores: {uncertainties}")
+                # Get the ODE states, actions and uncertainties from the current action generation iteration
+                composed_seq_sampler: ComposedSequenceSampler = policy.uncertainty_sampler
+                new_ode_states = composed_seq_sampler.prev_ode_states
+                new_selected_action_idx = composed_seq_sampler.prev_selected_action_idx
+                new_global_cond = composed_seq_sampler.prev_global_cond[0]
+                uncertainties = composed_seq_sampler.latest_uncertainties
                 mean_uncertainty = float(uncertainties.mean().item())
-
-                # Compose actions
-                if prev_actions is not None:
-                    composed_actions = composed_seq_sampler.compose_ode_states(
-                        prev_ode_states=prev_actions,
-                        new_ode_states=new_actions
-                    )
-                    action_data["action_samples"] = prev_actions
-                    action_data["composed_actions"] = composed_actions[1:]
                 
-                    # Choose an action which will be used to generate the vector field plot
-                    action_data["base_action"] = composed_actions[0].unsqueeze(0) 
+                # Compose actions
+                if prev_ode_states is not None:
+                    composed_ode_states = composed_seq_sampler.compose_ode_states(
+                        prev_ode_states=prev_ode_states[
+                            :, prev_selected_action_idx:prev_selected_action_idx+1, :, :
+                        ],
+                        new_ode_states=new_ode_states
+                    )
 
+                    # Choose an action which will be used to generate the vector field plot
+                    action_data["Base Action"] = composed_ode_states[-1, 0].unsqueeze(0) 
+                    # Store action samples, composed action and the selected action sample for visualization
+                    action_data["Action Samples"] = torch.cat((
+                        prev_ode_states[-1, :prev_selected_action_idx],
+                        prev_ode_states[-1, prev_selected_action_idx+1:]
+                    ))
+                    action_data["Composed Actions"] = composed_ode_states[-1, 1:]
+                    action_data["Selected Action Sample"] = prev_ode_states[-1, prev_selected_action_idx].unsqueeze(0)
+                    
                     # Visualize vector field with composed action sequences
                     vector_field_visualizer.visualize(
                         global_cond=prev_global_cond,
@@ -212,13 +228,65 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                         generator=generator
                     )
 
+                    # Setup to visualize noise-to-action transformation
+                    noise_to_action_visualizer._update_run_dir()
+                    combined_horizon = horizon + policy.config.n_action_steps
+                    cmap = cm.get_cmap('plasma')
+                    colors = cmap(torch.arange(combined_horizon) / (combined_horizon - 1))
+                    step_labels = ("t", *[f"t+{k}" for k in range(1, combined_horizon)])
+
+                    # Extract the ODE states fitting the visualizer's evaluation times
+                    ode_solver = policy.flow_matching.ode_solver
+                    selected_prev_ode_states, noise_to_action_visualizer.ode_eval_times = ode_solver.select_ode_states(
+                        time_grid=composed_seq_sampler.sampling_time_grid,
+                        ode_states=prev_ode_states,
+                        requested_times=noise_to_action_visualizer.ode_eval_times,
+                    )
+
+                    selected_new_ode_states, noise_to_action_visualizer.ode_eval_times = ode_solver.select_ode_states(
+                        time_grid=composed_seq_sampler.sampling_time_grid,
+                        ode_states=new_ode_states,
+                        requested_times=noise_to_action_visualizer.ode_eval_times,
+                    )
+
+                    prev_actions_overlay = {
+                        "label": "Previous ODE States",
+                        "ode_states": selected_prev_ode_states.transpose(0, 1)[
+                            prev_selected_action_idx:prev_selected_action_idx+1, :, :, :
+                        ],
+                        "colors": colors[:horizon],
+                        # "step_labels": step_labels[:self.horizon],
+                        "text_kwargs": {"xytext": (-14, -12)},
+                        "scale": 60,
+                    }
+                    new_actions_overlay = {
+                        "label": "Current ODE States",
+                        "ode_states": selected_new_ode_states.transpose(0, 1)[
+                            new_selected_action_idx:new_selected_action_idx+1, :, :, :
+                        ],
+                        "colors": colors[(horizon - policy.config.n_action_steps):],
+                        # "step_labels": step_labels[new_noise_overlap_end:],
+                        "text_kwargs": {"xytext": (2, 2)},
+                        "scale": 80,
+                        "marker": "x",
+                    }
+                    cbar_kwargs = {
+                        "cmap": cmap,
+                        "horizon": combined_horizon,
+                    }
+                    noise_to_action_visualizer.plot_noise_to_action_overlays(
+                        action_overlays=[prev_actions_overlay, new_actions_overlay],
+                        mean_uncertainty=mean_uncertainty,
+                        cbar_kwargs=cbar_kwargs,
+                    )
+
                 # Visualize action sequence batch
-                action_seq_visualizer.visualize(global_cond=global_cond, env=env, generator=generator)
+                action_seq_visualizer.visualize(global_cond=new_global_cond, env=env, generator=generator)
 
                 # Set the previous global conditioning vector and the previous action sequences to compose with
-                prev_global_cond = global_cond
-                prev_actions = new_actions
-                composed_seq_sampler.prev_action_sequence = new_actions
+                prev_ode_states = new_ode_states
+                prev_global_cond = new_global_cond
+                prev_selected_action_idx = new_selected_action_idx
 
             # Apply the next action
             observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())
@@ -230,6 +298,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
         logging.info(f"Finished in {time.time() - start_time:.1f}s")
 
+        policy.reset()
         env.close()
 
         # Close the live visualization
