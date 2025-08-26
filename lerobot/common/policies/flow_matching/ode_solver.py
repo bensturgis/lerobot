@@ -1,13 +1,13 @@
 import itertools
 import logging
 import math
-import torch
 import time
 import warnings
-
-from torch import nn, Tensor
-from torchdiffeq import odeint
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+
+import torch
+from torch import Tensor, nn
+from torchdiffeq import odeint
 
 FIXED_STEP_SOLVERS = {
     "euler",

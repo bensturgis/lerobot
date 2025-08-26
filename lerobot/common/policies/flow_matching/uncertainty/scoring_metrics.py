@@ -273,7 +273,7 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
         if self.cond_vf_type == "vp":
             return (2 / self.cond_prob_path.get_beta(t))
         elif self.cond_vf_type == "ot":
-            return t
+            return t / (1 - t)
         else:
             raise ValueError(
                 "No intermediate velocity difference factor provided for conditional " \
