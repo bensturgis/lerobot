@@ -160,14 +160,14 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                     f"Sampling with uncertainty requires batch size of 1, but got {batch_size}."
                 )
             
-            # Sample action sequence candidates and compute their uncertainty scores.
+            # Sample action sequence candidates and compute their uncertainty.
             action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
                 observation=batch, generator=generator
             )
 
-            tqdm.write(f"{self.uncertainty_sampler_config.type} uncertainty scores: {uncertainties}")
+            tqdm.write(f"{self.uncertainty_sampler_config.type} uncertainty: {uncertainties}")
 
-            # Pick one action sequence at random
+            # Pick one action sequence at random.
             rand_idx = torch.randint(
                 low=0,
                 high=self.uncertainty_sampler.num_action_seq_samples,

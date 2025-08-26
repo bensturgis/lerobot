@@ -103,10 +103,11 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         self,
         observation: dict[str, Tensor],
         generator: Optional[torch.Generator] = None,
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> Tuple[Tensor, float]:
         """
-        Generates action sequences using a sampler flow matching model, then scores these
-        samples under a Laplace-sampled or an ensemble model to obtain epistemic uncertainty.
+        Sample candidate action sequences with the sampler flow-matching model, splice newly
+        sampled tails onto the executed prefix, and score them with the configured epistemic
+        scorer (ensemble or Laplace).
 
         Args:
             observation: Info about the environment used to create the conditioning vector for
@@ -121,17 +122,16 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             generator: PyTorch random number generator.
 
         Returns:
-            - sampled_action_seqs: Action sequences drawn from the sampler model.
+            - Action sequences drawn from the sampler model.
               Shape: [num_action_seq_samples, horizon, action_dim].
-            - uncertainty_scores: Uncertainty scores where a higher value means more
-              uncertain. Shape: [num_action_seq_samples,].      
+            - Uncertainty score where a higher value means more uncertain.      
         """
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
         
         # Adjust shape of conditioning vector
-        global_cond = self._prepare_conditioning(global_cond)
+        global_cond = self._reshape_conditioning(global_cond)
 
         # Sample noise priors
         new_noise_sample = torch.randn(
@@ -162,8 +162,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         )
 
         # Store sampled action sequences for logging
-        sampled_action_seqs = new_ode_states[-1]
-        self.latest_action_candidates = sampled_action_seqs
+        self.latest_action_candidates = new_ode_states[-1]
 
         if self.cfg.scorer_type == "laplace":
             # Draw flow matching model from the Laplace posterior
@@ -177,16 +176,11 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
 
         # Create and prepare the scorer conditioning vector
         scorer_global_cond = scorer_flow_matching_model.prepare_global_conditioning(observation)
-        scorer_global_cond = self._prepare_conditioning(scorer_global_cond)  # (B, global_cond_dim)
+        scorer_global_cond = self._reshape_conditioning(scorer_global_cond)  # (B, global_cond_dim)
 
         if self.prev_selected_action_idx is None:
-            # If no previous trajectory is stored, return placeholder uncertainties
-            uncertainty_scores = torch.full(
-                (self.num_action_seq_samples,),
-                float('-inf'),
-                dtype=self.dtype,
-                device=self.device
-            )
+            # If no previous trajectory is stored, return placeholder uncertainty
+            self.latest_uncertainty = float('-inf')
         else:
             # Compose full ODE states from stored previous and new action generation
             composed_ode_states = self.compose_ode_states(
@@ -221,8 +215,8 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             else:
                 raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
 
-        # Store uncertainty scores for logging
-        self.latest_uncertainties = uncertainty_scores
+            # Average uncertainty scores and store for logging
+            self.latest_uncertainty = uncertainty_scores.mean().item()
 
         # Store scorer model, conditioning vectors, ODE states from the previous action sampling step
         self.prev_scorer_flow_matching_model = scorer_flow_matching_model
@@ -230,4 +224,4 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         self.prev_global_cond = global_cond
         self.prev_ode_states = new_ode_states
         
-        return sampled_action_seqs, uncertainty_scores
+        return self.latest_action_candidates, self.latest_uncertainty

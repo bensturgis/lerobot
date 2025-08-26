@@ -85,10 +85,11 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
         self,
         observation: dict[str, Tensor],
         generator: Optional[torch.Generator] = None,
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> Tuple[Tensor, float]:
         """
         Generates action sequences using a sampler flow matching model, then scores these
-        samples under a Laplace-sampled or an ensemble model to obtain epistemic uncertainty.
+        samples under a Laplace-sampled or an ensemble model, and finally averages these score
+        to obtain an epistemic uncertainty meaure.
 
         Args:
             observation: Info about the environment used to create the conditioning vector for
@@ -103,17 +104,16 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
             generator: PyTorch random number generator.
 
         Returns:
-            - sampled_action_seqs: Action sequences drawn from the sampler model.
+            - Action sequences drawn from the sampler model.
               Shape: [num_action_seq_samples, horizon, action_dim].
-            - uncertainty_scores: Uncertainty scores where a higher value means more
-              uncertain. Shape: [num_action_seq_samples,].      
+            - Uncertainty score where a higher value means more uncertain.   
         """
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
         
         # Adjust shape of conditioning vector
-        global_cond = self._prepare_conditioning(global_cond)
+        global_cond = self._reshape_conditioning(global_cond)
 
         # Sample noise priors
         noise_samples = torch.randn(
@@ -134,8 +134,7 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
         )
 
         # Store sampled action sequences for logging
-        sampled_action_seqs = ode_states[-1]
-        self.latest_action_candidates = sampled_action_seqs
+        self.latest_action_candidates = ode_states[-1]
 
         if self.cfg.scorer_type == "laplace":
             # Draw flow matching model from the Laplace posterior
@@ -149,12 +148,12 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
 
         # Create and prepare the scorer conditioning vector
         scorer_global_cond = scorer_flow_matching_model.prepare_global_conditioning(observation)
-        scorer_global_cond = self._prepare_conditioning(scorer_global_cond)  # (B, global_cond_dim)
+        scorer_global_cond = self._reshape_conditioning(scorer_global_cond)  # (B, global_cond_dim)
 
         # Compute uncertainty based on selected metric
         if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
             uncertainty_scores = self.scoring_metric(
-                action_sequences=sampled_action_seqs,
+                action_sequences=self.latest_action_candidates,
                 velocity_model=scorer_flow_matching_model.unet,
                 global_cond=scorer_global_cond,
             )
@@ -170,7 +169,7 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
         else:
             raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
 
-        # Store uncertainty scores for logging
-        self.latest_uncertainties = uncertainty_scores
+        # Average uncertainty scores and store for logging
+        self.latest_uncertainty = uncertainty_scores.mean().item()
         
-        return sampled_action_seqs, uncertainty_scores
+        return self.latest_action_candidates, self.latest_uncertainty

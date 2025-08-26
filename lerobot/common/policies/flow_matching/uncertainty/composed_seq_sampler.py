@@ -62,8 +62,8 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
     def conditional_sample_with_uncertainty(
         self,
         observation: dict[str, Tensor],
-        generator: torch.Generator | None = None
-    ) -> Tuple[Tensor, Tensor]:
+        generator: Optional[torch.Generator] = None
+    ) -> Tuple[Tensor, float]:
         """
         Samples num_action_seq_samples many new action sequences and computes uncertainty
         scores by composing them with a previous action sequence and evaluating them under
@@ -83,15 +83,14 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
 
         Returns:
             - Action sequence samples. Shape: [num_action_seq_samples, horizon, action_dim].
-            - Uncertainty scores where a higher value means more uncertain.
-                Shape: [num_action_seq_samples,].
+            - Uncertainty score where a higher value means more uncertain.
         """
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
         
         # Adjust shape of conditioning vector
-        global_cond = self._prepare_conditioning(global_cond)
+        global_cond = self._reshape_conditioning(global_cond)
 
         # Sample noise priors        
         new_noise_sample = torch.randn(
@@ -122,17 +121,11 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         )
 
         # Store sampled action sequences for logging
-        sampled_action_seqs = new_ode_states[-1]
-        self.latest_action_candidates = sampled_action_seqs
+        self.latest_action_candidates = new_ode_states[-1]
 
         # If no previous trajectory is stored, return placeholder uncertainties
         if self.prev_selected_action_idx is None:
-            uncertainty_scores = torch.full(
-                (self.num_action_seq_samples,),
-                float('-inf'),
-                dtype=self.dtype,
-                device=self.device
-            )
+            self.latest_uncertainty = float('-inf')
         else:
             # Compose full ODE states from stored previous and new action generation
             composed_ode_states = self.compose_ode_states(
@@ -167,12 +160,12 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             else:
                 raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
             
-        # Store computed uncertainty scores for logging
-        self.latest_uncertainties = uncertainty_scores
+            # Average uncertainty scores and store for logging
+            self.latest_uncertainty = uncertainty_scores.mean().item()
 
         # Store conditioning vector and ODE states from the previous action sampling step
         self.prev_global_cond = global_cond
         self.prev_ode_states = new_ode_states
 
-        return sampled_action_seqs, uncertainty_scores
+        return self.latest_action_candidates, self.latest_uncertainty
     

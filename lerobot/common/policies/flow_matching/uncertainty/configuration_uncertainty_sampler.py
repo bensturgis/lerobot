@@ -205,6 +205,10 @@ class ComposedSequenceSamplerConfig:
         )
 
 @dataclass
+class EntropySamplerConfig:
+    num_action_seq_samples: int = 5
+
+@dataclass
 class UncertaintySamplerConfig:
     type: str = "composed_cross_bayesian"
     composed_cross_bayesian_sampler: ComposedCrossBayesianSamplerConfig = field(
@@ -216,6 +220,9 @@ class UncertaintySamplerConfig:
     cross_bayesian_sampler: CrossBayesianSamplerConfig = field(
         default_factory=CrossBayesianSamplerConfig
     )
+    entropy_sampler: EntropySamplerConfig = field(
+        default_factory=EntropySamplerConfig
+    )
 
     @property
     def active_config(self):
@@ -226,6 +233,7 @@ class UncertaintySamplerConfig:
             "composed_cross_bayesian": self.composed_cross_bayesian_sampler,
             "composed_sequence": self.composed_sequence_sampler,
             "cross_bayesian": self.cross_bayesian_sampler,
+            "entropy": self.entropy_sampler,
         }
         try:
             return mapping[self.type]

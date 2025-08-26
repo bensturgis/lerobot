@@ -1,7 +1,5 @@
 import itertools
-import logging
 import math
-import time
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -44,7 +42,7 @@ class ODESolver():
         step_size: Optional[float] = None,
         time_grid: Tensor = torch.tensor([0.0, 1.0]),
         return_intermediate_states: bool = False,
-        return_inter_vels: bool = False,
+        return_intermediate_vels: bool = False,
         enable_grad: bool = False,
     ) -> Union[
         Tensor,
@@ -69,14 +67,14 @@ class ODESolver():
             time_grid: Times at which ODE is evaluated. Integration runs from time_grid[0] to time_grid[-1].
                 Must start at 0.0 and end at 1.0 for flow matching sampling. 
             return_intermediate_states: If True then return intermediate evaluation points according to time_grid.
-            return_inter_vels: If True then return velocities at intermediate evaluation points acoording
+            return_intermediate_vels: If True then return velocities at intermediate evaluation points acoording
                 to time_grid.
             enable_grad: If True then compute gradients during sampling.
 
         Returns:
             - The solution of the ODE at time 1.0 when return_intermediate_states = False, otherwise all
             evaluation points specified in time_grid.
-            - If return_inter_vels = True, additionally the velocities at the intermediate evaluation
+            - If return_intermediate_vels = True, additionally the velocities at the intermediate evaluation
             points specified in time_grid.
         """
         if time_grid[0] != 0.0 or time_grid[-1] != 1.0:
@@ -128,9 +126,9 @@ class ODESolver():
         else:
             outputs.append(trajetory[-1])
 
-        if return_inter_vels:
+        if return_intermediate_vels:
             velocities = []
-            for t, x_t in zip(time_grid, trajetory):
+            for t, x_t in zip(time_grid, trajetory, strict=False):
                 t_batch = t.expand(x_t.shape[0])
                 velocities.append(self.velocity_model(x_t, t_batch, global_cond))
             outputs.append(torch.stack(velocities, dim=0))

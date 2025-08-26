@@ -37,11 +37,11 @@ from tqdm import trange
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
+from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
     make_laplace_path,
 )
-from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.random_utils import set_seed
@@ -223,7 +223,7 @@ def plot_all_uncertainties(
 
 def rollout(
     env: gym.Env,
-    policy: PreTrainedPolicy,
+    policy: FlowMatchingPolicy,
     seed: Optional[int],
 ) -> Dict[str, np.ndarray | bool]:
     device = get_device_from_parameters(policy)
@@ -272,7 +272,7 @@ def rollout(
             action = policy.select_action(observation, generator)
 
         if new_action_gen:
-            uncertainty = policy.uncertainty_sampler.latest_uncertainties.detach().cpu().mean().item()
+            uncertainty = policy.uncertainty_sampler.latest_uncertainty
             
             ep_uncertainties.append(uncertainty)
 

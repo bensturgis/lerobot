@@ -146,6 +146,7 @@ def make_flow_matching_uncertainty_sampler(
                     "Composed Cross-Bayesian uncertainty sampler with scorer_type=laplace requires a calibration data "
                     "to fit the Laplace posterior."
                 )
+            
         return ComposedCrossBayesianSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.composed_cross_bayesian_sampler,
@@ -182,6 +183,7 @@ def make_flow_matching_uncertainty_sampler(
                     "Cross-Bayesian uncertainty sampler with scorer_type=laplace requires a calibration data "
                     "to fit the Laplace posterior."
                 )
+            
         return CrossBayesianSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.cross_bayesian_sampler,
@@ -189,6 +191,16 @@ def make_flow_matching_uncertainty_sampler(
             ensemble_flow_matching_model=ensemble_flow_matching_model,
             laplace_calib_loader=laplace_calib_loader,
             laplace_path=laplace_path,
+        )
+    elif uncertainty_sampler_cfg.type == "entropy":
+        from lerobot.common.policies.flow_matching.uncertainty.entropy import (
+            EntropySampler,
+        )
+        
+        return EntropySampler(
+            flow_matching_cfg=flow_matching_cfg,
+            cfg=uncertainty_sampler_cfg.entropy_sampler,
+            flow_matching_model=flow_matching_model,
         )
     else:
         raise ValueError(f"Unknown uncertainty sampler {uncertainty_sampler_cfg.type}.")

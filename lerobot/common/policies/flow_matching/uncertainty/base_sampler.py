@@ -27,8 +27,8 @@ class FlowMatchingUncertaintySampler(ABC):
         Args:
             flow_matching_cfg: Shared configuration object for Flow Matching settings.
             flow_matching_model: The learned flow matching model.
-            num_action_seq_samples: How many action sequences and corresponding
-                uncertainty scores to sample.
+            num_action_seq_samples: How many action sequences to sample and use for uncertainty
+                estimation.
             extra_sampling_times: Extra times at which the sampling ODE should be evaluated.
         """
         self.method_name = "base"
@@ -43,9 +43,9 @@ class FlowMatchingUncertaintySampler(ABC):
         self.device = get_device_from_parameters(flow_matching_model)
         self.dtype = get_dtype_from_parameters(flow_matching_model)
 
-        # Store latest sampled action sequences and their uncertainty scores for logging
+        # Store latest sampled action sequences and the uncertainty score for logging
         self.latest_action_candidates: Optional[Tensor] = None
-        self.latest_uncertainties: Optional[Tensor] = None
+        self.latest_uncertainty: Optional[float] = None
 
         # Build time grid for sampling according to ODE solver method and scoring metric
         if flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
@@ -66,7 +66,7 @@ class FlowMatchingUncertaintySampler(ABC):
         self.exec_start_idx = self.flow_matching_cfg.n_obs_steps - 1
         self.exec_end_idx = self.exec_start_idx + self.flow_matching_cfg.n_action_steps
     
-    def _prepare_conditioning(self, global_cond: Tensor) -> Tensor:
+    def _reshape_conditioning(self, global_cond: Tensor) -> Tensor:
         """
         Reshape single global conditioning vector to (num_action_seq_samples, cond_dim).
         """
@@ -145,18 +145,18 @@ class FlowMatchingUncertaintySampler(ABC):
         self,
         global_cond: Tensor,
         generator: torch.Generator | None = None
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> Tuple[Tensor, float]:
         """
         Sample num_action_seq_samples many action sequences and compute their
         uncertainty score according to some specific metric.
 
         Args:
-            global_cond: Single conditioning feature vector for the velocity
-                model. Shape: [cond_dim,] or [1, cond_dim].
+            global_cond: Single conditioning feature vector for the velocity model.
+                Shape: [cond_dim,] or [1, cond_dim].
             generator: PyTorch random number generator.
 
         Returns:
             - Action sequences samples. Shape: [num_action_seq_samples, horizon, action_dim].
-            - Uncertainty scores. Shape: [num_action_seq_samples,]
+            - Uncertainty score.
         """
-        pass
+        raise NotImplementedError

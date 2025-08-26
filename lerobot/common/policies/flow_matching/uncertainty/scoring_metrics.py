@@ -262,8 +262,12 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
                 beta_min=uncertainty_sampler.flow_matching_cfg.beta_min,
                 beta_max=uncertainty_sampler.flow_matching_cfg.beta_max,
             )
-        else:
+        elif self.cond_vf_type == "ot":
             self.cond_prob_path = OTCondProbPath()
+        else:
+            raise ValueError(
+                f"Unknown conditional vector field type {self.cond_vf_type}."
+            )
     
     def _get_scaling_factor(self, t: Tensor) -> Tensor:
         """
@@ -271,7 +275,7 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
         based on conditional vector field type.
         """
         if self.cond_vf_type == "vp":
-            return (2 / self.cond_prob_path.get_beta(t))
+            return 2.0 / self.cond_prob_path.get_beta(t)
         elif self.cond_vf_type == "ot":
             return t / (1 - t)
         else:

@@ -8,7 +8,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 500
-  uncert_est_methods: [composed_sequence, composed_cross_bayesian]
+  uncert_est_methods: [entropy]
 
 uncertainty_sampler:
   composed_cross_bayesian_sampler:
@@ -27,6 +27,8 @@ uncertainty_sampler:
     scoring_metric:
       metric_type: inter_vel_diff
     num_action_seq_samples: 5
+  entropy_sampler:
+    num_action_seq_samples: 10
 
 seed: 112200
 

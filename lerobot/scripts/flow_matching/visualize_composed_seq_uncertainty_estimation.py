@@ -197,8 +197,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                 new_ode_states = composed_seq_sampler.prev_ode_states
                 new_selected_action_idx = composed_seq_sampler.prev_selected_action_idx
                 new_global_cond = composed_seq_sampler.prev_global_cond[0]
-                uncertainties = composed_seq_sampler.latest_uncertainties
-                mean_uncertainty = float(uncertainties.mean().item())
+                uncertainty = composed_seq_sampler.latest_uncertainty
                 
                 # Compose actions
                 if prev_ode_states is not None:
@@ -224,7 +223,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                         global_cond=prev_global_cond,
                         visualize_actions=True,
                         actions=action_data,
-                        mean_uncertainty=mean_uncertainty,
+                        mean_uncertainty=uncertainty,
                         generator=generator
                     )
 
@@ -276,7 +275,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                     }
                     noise_to_action_visualizer.plot_noise_to_action_overlays(
                         action_overlays=[prev_actions_overlay, new_actions_overlay],
-                        mean_uncertainty=mean_uncertainty,
+                        mean_uncertainty=uncertainty,
                         cbar_kwargs=cbar_kwargs,
                     )
 
