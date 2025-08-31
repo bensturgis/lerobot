@@ -2,7 +2,7 @@ import copy
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from laplace import Laplace
@@ -20,8 +20,8 @@ from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty
 )
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.utils.utils import get_safe_torch_device
-from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
-from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
+from lerobot.configs.default import DatasetConfig
+from lerobot.configs.policies import PreTrainedConfig
 
 
 @dataclass(frozen=True)
@@ -59,8 +59,8 @@ class FlowMatchingInput:
         return self.to("cpu")
 
 def make_laplace_collate(
-    policy:PreTrainedPolicy,
-    cfg: Union[EvalUncertaintyEstimationPipelineConfig, VisualizeLaplacePipelineConfig]
+    policy_cfg: PreTrainedConfig,
+    policy: PreTrainedPolicy,
 ):
     """
     Factory that builds a dataloader collate function tailored for laplace-torch
@@ -71,11 +71,11 @@ def make_laplace_collate(
     posterior using laplace-torch.
 
     Args:
-        policy: A trained flow matching policy.
-        cfg: Configuration object providing dataset construction parameters.
+        policy_cfg: Policy config.
+        policy: Trained flow matching policy providing normalization.
     """
     # Check device is available
-    device = get_safe_torch_device(cfg.policy.device)
+    device = get_safe_torch_device(policy_cfg.device)
 
     # Re-use the same OT path object for every batch
     ot_cond_prob_path = OTCondProbPath()
@@ -91,12 +91,12 @@ def make_laplace_collate(
         with torch.no_grad():
             batch = policy.normalize_inputs(batch)
 
-            if cfg.policy.image_features:
+            if policy_cfg.image_features:
                 batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
                 batch["observation.images"] = torch.stack(
-                    [batch[key] for key in cfg.policy.image_features], dim=-4
+                    [batch[key] for key in policy_cfg.image_features], dim=-4
                 )
-                if cfg.policy.n_obs_steps == 1:
+                if policy_cfg.n_obs_steps == 1:
                     batch["observation.images"] = batch["observation.images"].unsqueeze(1)
             batch = policy.normalize_targets(batch)
 
@@ -141,7 +141,8 @@ def make_laplace_collate(
 
 @torch.no_grad()
 def create_laplace_flow_matching_calib_loader(
-    cfg: Union[EvalUncertaintyEstimationPipelineConfig, VisualizeLaplacePipelineConfig],
+    dataset_cfg: DatasetConfig,
+    policy_cfg: PreTrainedConfig,
     policy: PreTrainedPolicy,
     calib_fraction: float,
     batch_size: int,
@@ -151,7 +152,8 @@ def create_laplace_flow_matching_calib_loader(
     including RGB encoder.
 
     Args:
-        cfg: Configuration object providing dataset construction parameters.
+        dataset_cfg: Dataset construction parameters.
+        policy_cfg: Policy configuration.
         policy: A trained flow matching policy.
         calib_fraction: Fraction of the full dataset to reserve for calibration
             (between 0 and 1).
@@ -164,7 +166,7 @@ def create_laplace_flow_matching_calib_loader(
         including RGB encoder. This data loader matches the 'laplace.LaPlace.fit()' method.
     """
     # Extract a subset of the full train dataset for calibration
-    train_dataset = make_dataset(cfg)
+    train_dataset = make_dataset(dataset_cfg=dataset_cfg, policy_cfg=policy_cfg)
     num_train_samples = len(train_dataset)
     num_calib_samples = int(calib_fraction * num_train_samples)
     calib_indices = torch.randperm(num_train_samples)[:num_calib_samples].tolist()
@@ -175,7 +177,7 @@ def create_laplace_flow_matching_calib_loader(
         batch_size=batch_size,
         shuffle=True,                  # shuffle within the subset
         num_workers=0,
-        collate_fn=make_laplace_collate(policy, cfg)
+        collate_fn=make_laplace_collate(policy_cfg=policy_cfg, policy=policy)
     )
 
     return calib_loader

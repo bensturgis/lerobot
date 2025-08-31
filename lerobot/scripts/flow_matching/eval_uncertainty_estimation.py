@@ -25,6 +25,7 @@ import logging
 import random
 import time
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -40,7 +41,11 @@ from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
+    get_laplace_posterior,
     make_laplace_path,
+)
+from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+    build_scorer_artifacts,
 )
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.io_utils import save_episode_video
@@ -357,30 +362,23 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             policy: FlowMatchingPolicy = make_policy(
                 cfg.policy,
                 env_cfg=cfg.env,
-                uncertainty_sampler_cfg=cfg.uncertainty_sampler
             ).to(device)
             policy.eval()
-            laplace_calib_loader = None
-            laplace_path = None
-            if getattr(cfg.uncertainty_sampler.active_config, "scorer_type", None) == "laplace":
-                laplace_path = make_laplace_path(
-                    repo_id=cfg.dataset.repo_id,
-                    scope=cfg.uncertainty_sampler.active_config.laplace_scope,
-                    calib_fraction=cfg.uncertainty_sampler.active_config.calib_fraction,
-                )
-                if not laplace_path.exists():
-                    laplace_calib_loader = create_laplace_flow_matching_calib_loader(
-                        cfg=cfg,
-                        policy=policy,
-                        calib_fraction=cfg.uncertainty_sampler.active_config.calib_fraction,
-                        batch_size=cfg.uncertainty_sampler.active_config.batch_size
-                    )
-            policy.init_uncertainty_sampler(
-                laplace_calib_loader=laplace_calib_loader,
-                laplace_path=laplace_path,
-            )
-            scoring_metric = getattr(policy.uncertainty_sampler, 'scoring_metric', None)
 
+            scorer_artifacts = build_scorer_artifacts(
+                uncertainty_sampler_cfg=cfg.uncertainty_sampler,
+                policy_cfg=cfg.policy,
+                env_cfg=cfg.env,
+                dataset_cfg=cfg.dataset,
+                policy=policy,
+            )
+
+            policy.init_uncertainty_sampler(
+                config=cfg.uncertainty_sampler,
+                scorer_artifacts=scorer_artifacts,
+            )
+
+            scoring_metric = getattr(policy.uncertainty_sampler, 'scoring_metric', None)
             # ------------ ID Case ------------------
             logging.info("Creating ID environment.")
             seed = choose_seed(id_failure_pool, rng)

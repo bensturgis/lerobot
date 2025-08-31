@@ -16,7 +16,7 @@
 import logging
 import random
 from pprint import pformat
-from typing import Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import torch
 from torch.utils.data import Subset
@@ -27,7 +27,7 @@ from lerobot.common.datasets.lerobot_dataset import (
     MultiLeRobotDataset,
 )
 from lerobot.common.datasets.transforms import ImageTransforms
-from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
+from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
 
@@ -71,7 +71,8 @@ def resolve_delta_timestamps(
 
 
 def make_dataset(
-    cfg: Union[TrainPipelineConfig, EvalUncertaintyEstimationPipelineConfig]
+    dataset_cfg: DatasetConfig,
+    policy_cfg: PreTrainedConfig,
 ) -> LeRobotDataset | MultiLeRobotDataset:
     """Handles the logic of setting up delta timestamps and image transforms before creating a dataset.
 
@@ -85,38 +86,38 @@ def make_dataset(
         LeRobotDataset | MultiLeRobotDataset
     """
     image_transforms = (
-        ImageTransforms(cfg.dataset.image_transforms) if cfg.dataset.image_transforms.enable else None
+        ImageTransforms(dataset_cfg.image_transforms) if dataset_cfg.image_transforms.enable else None
     )
 
-    if isinstance(cfg.dataset.repo_id, str):
+    if isinstance(dataset_cfg.repo_id, str):
         ds_meta = LeRobotDatasetMetadata(
-            cfg.dataset.repo_id, root=cfg.dataset.root, revision=cfg.dataset.revision
+            dataset_cfg.repo_id, root=dataset_cfg.root, revision=dataset_cfg.revision
         )
-        delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
+        delta_timestamps = resolve_delta_timestamps(policy_cfg, ds_meta)
         dataset = LeRobotDataset(
-            cfg.dataset.repo_id,
-            root=cfg.dataset.root,
-            episodes=cfg.dataset.episodes,
+            dataset_cfg.repo_id,
+            root=dataset_cfg.root,
+            episodes=dataset_cfg.episodes,
             delta_timestamps=delta_timestamps,
             image_transforms=image_transforms,
-            revision=cfg.dataset.revision,
-            video_backend=cfg.dataset.video_backend,
+            revision=dataset_cfg.revision,
+            video_backend=dataset_cfg.video_backend,
         )
     else:
         raise NotImplementedError("The MultiLeRobotDataset isn't supported for now.")
         dataset = MultiLeRobotDataset(
-            cfg.dataset.repo_id,
+            dataset_cfg.repo_id,
             # TODO(aliberts): add proper support for multi dataset
             # delta_timestamps=delta_timestamps,
             image_transforms=image_transforms,
-            video_backend=cfg.dataset.video_backend,
+            video_backend=dataset_cfg.video_backend,
         )
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "
             f"{pformat(dataset.repo_id_to_index, indent=2)}"
         )
 
-    if cfg.dataset.use_imagenet_stats:
+    if dataset_cfg.use_imagenet_stats:
         for key in dataset.meta.camera_keys:
             for stats_type, stats in IMAGENET_STATS.items():
                 dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32)

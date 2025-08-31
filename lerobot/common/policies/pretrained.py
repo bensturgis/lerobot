@@ -85,8 +85,6 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         pretrained_name_or_path: str | Path,
         *,
         config: PreTrainedConfig | None = None,
-        uncertainty_sampler_config: UncertaintySamplerConfig | None = None,
-        fiper_data_recorder_config: FiperDataRecorderConfig | None = None,
         force_download: bool = False,
         resume_download: bool | None = None,
         proxies: dict | None = None,
@@ -100,12 +98,7 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
         """
         The policy is set in evaluation mode by default using `policy.eval()` (dropout modules are
         deactivated). To train it, you should first set it back in training mode with `policy.train()`.
-        """
-        if uncertainty_sampler_config is not None and fiper_data_recorder_config is not None:
-            raise ValueError(
-                "Uncertainty sampling and FIPER data recording cannot be used at the same time."
-            )
-        
+        """        
         if config is None:
             config = PreTrainedConfig.from_pretrained(
                 pretrained_name_or_path=pretrained_name_or_path,
@@ -118,11 +111,6 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
                 revision=revision,
                 **kwargs,
             )
-        kwargs = {
-            **kwargs,
-            "uncertainty_sampler_config": uncertainty_sampler_config,
-            "fiper_data_recorder_config": fiper_data_recorder_config,
-        }
         instance = cls(config, **kwargs)
 
         def _load_weights(
@@ -152,35 +140,6 @@ class PreTrainedPolicy(nn.Module, HubMixin, abc.ABC):
                     ) from e
 
         _load_weights(instance, pretrained_name_or_path, revision)
-
-        if (
-            config.type == "flow_matching" and uncertainty_sampler_config is not None
-        ):
-            active_uncertainty_sampler_config = uncertainty_sampler_config.active_config
-            if getattr(active_uncertainty_sampler_config, "scorer_type", None) == "ensemble":
-                ensemble_model_path = getattr(active_uncertainty_sampler_config, "ensemble_model_path", None)
-                if not ensemble_model_path:
-                    raise ValueError(
-                        "Cross-Bayesian uncertainty sampler with ensemble scorer type requested "
-                        "but no scorer checkpoint provided."
-                    )
-                
-        if (
-            config.type == "flow_matching" and fiper_data_recorder_config is not None
-        ):
-            ensemble_model_path = getattr(fiper_data_recorder_config, "ensemble_model_path", None)
-            if not ensemble_model_path:
-                raise ValueError(
-                    "Path to ensemble model must be provided for FIPER data recording."
-                )
-                
-        if ensemble_model_path is not None:
-            scorer_policy = cls(config)
-            _load_weights(scorer_policy, ensemble_model_path)
-            instance.scorer.load_state_dict(scorer_policy.flow_matching.state_dict(), strict=True)
-            instance.scorer.eval()
-            for p in instance.scorer.parameters():
-                p.requires_grad_(False)
 
         instance.to(config.device)
         instance.eval()

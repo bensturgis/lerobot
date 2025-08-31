@@ -8,7 +8,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 500
-  uncert_est_methods: [entropy]
+  uncert_est_methods: [composed_cross_bayesian]
 
 uncertainty_sampler:
   composed_cross_bayesian_sampler:

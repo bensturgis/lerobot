@@ -1,10 +1,14 @@
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from torch import Tensor
+from torch.utils.data import DataLoader
 
+from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+    ScorerArtifacts,
+)
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 from ..configuration_flow_matching import FlowMatchingConfig
@@ -19,6 +23,7 @@ class FiperDataRecorder:
         config: FiperDataRecorderConfig,
         flow_matching_config: FlowMatchingConfig,
         flow_matching_model: FlowMatchingModel,
+        scorer_artifacts: ScorerArtifacts,
     ):
         self.config = config
         self.flow_matching_config = flow_matching_config

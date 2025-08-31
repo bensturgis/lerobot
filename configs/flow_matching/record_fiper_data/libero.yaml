@@ -11,4 +11,6 @@ fiper_data_recorder:
   ode_eval_times: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   ensemble_model_path: outputs/train/flow_matching_libero_spatial_02/checkpoints/035000/pretrained_model
 
-n_episodes: 100
+n_episodes: 300
+
+# python lerobot/scripts/flow_matching/record_fiper_data.py --config=configs/flow_matching/record_fiper_data/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

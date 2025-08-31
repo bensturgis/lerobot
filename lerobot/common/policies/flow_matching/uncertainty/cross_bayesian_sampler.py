@@ -1,9 +1,7 @@
-from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from torch.utils.data import DataLoader
 
 from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
@@ -12,7 +10,9 @@ from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty
 )
 from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
     draw_laplace_flow_matching_model,
-    get_laplace_posterior,
+)
+from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+    ScorerArtifacts,
 )
 
 from ..configuration_flow_matching import FlowMatchingConfig
@@ -30,24 +30,23 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
         self,
         flow_matching_cfg: FlowMatchingConfig,
         cfg: CrossBayesianSamplerConfig,
-        sampler_flow_matching_model: FlowMatchingModel,
-        ensemble_flow_matching_model: Optional[FlowMatchingModel] = None,
-        laplace_calib_loader: Optional[DataLoader] = None,
-        laplace_path: Optional[Union[str, Path]] = None,
+        sampler_model: FlowMatchingModel,
+        scorer_artifacts: ScorerArtifacts,
     ):
         """
         Args:
             cfg: Sampler-specific settings.
-            sampler_flow_matching_model: The full flow matching model including velocity and RGB encoder.
-            ensemble_flow_matching_model: Model to score sampled actions.
-            laplace_calib_loader: DataLoader providing samples for fitting the Laplace approximation.
-            laplace_path: Path to save or load the Laplace posterior.
+            sampler_model: The full flow matching model including velocity and RGB encoder.
+            ensemble_model: An auxiliary flow matching model used for scoring when the scorer
+                type is "ensemble".
+            laplace_posterior: A Laplace approximation posterior used for scoring when the
+                scorer type is "laplace".
         """
         extra_sampling_times = cfg.scoring_metric.velocity_eval_times if (cfg.scoring_metric.metric_type == "inter_vel_diff") else None
 
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
-            flow_matching_model=sampler_flow_matching_model,
+            flow_matching_model=sampler_model,
             num_action_seq_samples=cfg.num_action_seq_samples,
             extra_sampling_times=extra_sampling_times,
         )
@@ -59,25 +58,16 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
             uncertainty_sampler=self,
         )
         
-        if cfg.scorer_type == "ensemble":
-            if ensemble_flow_matching_model is None:
-                raise ValueError("ensemble_flow_matching_model is required for scorer_type='ensemble'.")
-            self.ensemble_flow_matching_model = ensemble_flow_matching_model
-        elif cfg.scorer_type == "laplace":
-            if laplace_calib_loader is None and (laplace_path is None or not laplace_path.exists()):
-                raise ValueError(
-                    "scorer_type='laplace' requires either an existing laplace_path "
-                    "or a laplace_calib_loader to fit a new posterior."
-                )
-            self.laplace_posterior = get_laplace_posterior(
-                cfg=cfg,
-                flow_matching_model=sampler_flow_matching_model,
-                laplace_calib_loader=laplace_calib_loader,
-                laplace_path=laplace_path,
-            )
-        else:
+        self.ensemble_model = scorer_artifacts.ensemble_model
+        self.laplace_posterior = scorer_artifacts.laplace_posterior
+        if cfg.scorer_type == "ensemble" and self.ensemble_model is None:
+            raise ValueError("ensemble_model is required for scorer_type='ensemble'.")
+        elif cfg.scorer_type == "laplace" and self.laplace_posterior is None:
+            raise ValueError("laplace_posterior is required for scorer_type='laplace'.")
+        elif cfg.scorer_type not in {"ensemble", "laplace"}:
             raise ValueError(f"Unknown scorer_type: {cfg.scorer_type!r}")
         
+
         # Sampler-specific settings
         self.cfg = cfg
 
@@ -144,7 +134,7 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
                 generator=generator
             )
         else:
-            scorer_flow_matching_model = self.ensemble_flow_matching_model
+            scorer_flow_matching_model = self.ensemble_model
 
         # Create and prepare the scorer conditioning vector
         scorer_global_cond = scorer_flow_matching_model.prepare_global_conditioning(observation)

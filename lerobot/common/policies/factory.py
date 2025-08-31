@@ -15,11 +15,8 @@
 # limitations under the License.
 
 import logging
-from pathlib import Path
-from typing import Optional
 
 from torch import nn
-from torch.utils.data import DataLoader
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.common.datasets.utils import dataset_to_policy_features
@@ -38,6 +35,9 @@ from lerobot.common.policies.flow_matching.uncertainty.base_uncertainty_sampler 
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     ScoringMetricConfig,
     UncertaintySamplerConfig,
+)
+from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+    ScorerArtifacts,
 )
 from lerobot.common.policies.flow_matching.uncertainty.scoring_metrics import FlowMatchingUncertaintyMetric
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
@@ -127,36 +127,28 @@ def make_flow_matching_uncertainty_sampler(
     flow_matching_cfg: FlowMatchingConfig,
     uncertainty_sampler_cfg: UncertaintySamplerConfig,
     flow_matching_model: FlowMatchingModel,
-    ensemble_flow_matching_model: Optional[FlowMatchingModel] = None,
-    laplace_calib_loader: Optional[DataLoader] = None,
-    laplace_path: Optional[Path] = None,
+    scorer_artifacts: ScorerArtifacts,
 ) -> FlowMatchingUncertaintySampler:
     if uncertainty_sampler_cfg.type == "composed_cross_bayesian":
         from lerobot.common.policies.flow_matching.uncertainty.composed_cross_bayesian_sampler import (
             ComposedCrossBayesianSampler,
         )
 
-        if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "ensemble" and ensemble_flow_matching_model is None:
-            raise ValueError("Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model.")
-        if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "laplace":
-            if laplace_path is None:
-                raise ValueError(
-                    "Composed Cross-Bayesian uncertainty sampler with scorer_type=laplace requires a path to save/load the "
-                    "Laplace posterior"
-                    )
-            if laplace_calib_loader is None and not laplace_path.exists():
-                raise ValueError(
-                    "Composed Cross-Bayesian uncertainty sampler with scorer_type=laplace requires a calibration data "
-                    "to fit the Laplace posterior."
-                )
-            
+        if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_model is None:
+            raise ValueError(
+                "Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model."
+            )
+        if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "laplace" and scorer_artifacts.laplace_posterior is None:
+            raise ValueError(
+                "Composed Cross-Bayesian uncertainty sampler with scorer_type=laplace requires Laplace posterior "
+                "to draw a scorer model from."
+            )
+        
         return ComposedCrossBayesianSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.composed_cross_bayesian_sampler,
-            sampler_flow_matching_model=flow_matching_model,
-            ensemble_flow_matching_model=ensemble_flow_matching_model,
-            laplace_calib_loader=laplace_calib_loader,
-            laplace_path=laplace_path,
+            sampler_model=flow_matching_model,
+            scorer_artifacts=scorer_artifacts,
         )
     if uncertainty_sampler_cfg.type == "composed_sequence":
         from lerobot.common.policies.flow_matching.uncertainty.composed_seq_sampler import (
@@ -173,27 +165,20 @@ def make_flow_matching_uncertainty_sampler(
             CrossBayesianSampler,
         )
 
-        if uncertainty_sampler_cfg.cross_bayesian_sampler.scorer_type == "ensemble" and ensemble_flow_matching_model is None:
-                raise ValueError("Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model.")
-        if uncertainty_sampler_cfg.cross_bayesian_sampler.scorer_type == "laplace":
-            if laplace_path is None:
-                raise ValueError(
-                    "Bayesian uncertainty sampler with scorer_type=laplace requires a path to save/load the "
-                    "Laplace posterior"
-                    )
-            if laplace_calib_loader is None and not laplace_path.exists():
-                raise ValueError(
-                    "Cross-Bayesian uncertainty sampler with scorer_type=laplace requires a calibration data "
-                    "to fit the Laplace posterior."
-                )
+        if uncertainty_sampler_cfg.cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_model is None:
+            raise ValueError(
+                "Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model."
+            )
+        if uncertainty_sampler_cfg.cross_bayesian_sampler.scorer_type == "laplace" and scorer_artifacts.laplace_posterior is None:
+            raise ValueError(
+                "Bayesian uncertainty sampler with scorer_type=laplace requires Laplace posterior to draw a scorer model from."
+            )
             
         return CrossBayesianSampler(
             flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.cross_bayesian_sampler,
-            sampler_flow_matching_model=flow_matching_model,
-            ensemble_flow_matching_model=ensemble_flow_matching_model,
-            laplace_calib_loader=laplace_calib_loader,
-            laplace_path=laplace_path,
+            sampler_model=flow_matching_model,
+            scorer_artifacts=scorer_artifacts,
         )
     elif uncertainty_sampler_cfg.type == "entropy":
         from lerobot.common.policies.flow_matching.uncertainty.entropy import (
@@ -243,8 +228,6 @@ def make_policy(
     cfg: PreTrainedConfig,
     ds_meta: LeRobotDatasetMetadata | None = None,
     env_cfg: EnvConfig | None = None,
-    uncertainty_sampler_cfg: UncertaintySamplerConfig | None = None,
-    fiper_data_recorder_cfg: FiperDataRecorderConfig | None = None,
 ) -> PreTrainedPolicy:
     """Make an instance of a policy class.
 
@@ -281,11 +264,6 @@ def make_policy(
             "Current implementation of VQBeT does not support `mps` backend. "
             "Please use `cpu` or `cuda` backend."
         )
-    
-    if uncertainty_sampler_cfg is not None and fiper_data_recorder_cfg is not None:
-        raise ValueError(
-            "Uncertainty sampling and FIPER data recording cannot be used at the same time."
-        )
 
     policy_cls = get_policy_class(cfg.type)
 
@@ -305,10 +283,6 @@ def make_policy(
     cfg.output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
     cfg.input_features = {key: ft for key, ft in features.items() if key not in cfg.output_features}
     kwargs["config"] = cfg
-
-    if cfg.type == "flow_matching":
-        kwargs["uncertainty_sampler_config"] = uncertainty_sampler_cfg
-        kwargs["fiper_data_recorder_config"] = fiper_data_recorder_cfg
 
     if cfg.pretrained_path:
         # Load a pretrained policy and override the config if needed (for example, if there are inference-time
