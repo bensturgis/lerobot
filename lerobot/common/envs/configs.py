@@ -13,18 +13,19 @@
 # limitations under the License.
 
 import abc
-import gymnasium as gym
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Tuple
 
 import draccus
+import gymnasium as gym
+from libero.libero import benchmark as lb_bench
 
 from lerobot.common.constants import ACTION, OBS_ENV, OBS_IMAGE, OBS_IMAGES, OBS_ROBOT
 from lerobot.common.envs.wrappers import PerturbationWrapper
 from lerobot.configs.types import FeatureType, PolicyFeature
-from libero.libero import benchmark as lb_bench
+
 
 @dataclass
 class OODConfig(abc.ABC):

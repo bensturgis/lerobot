@@ -7,7 +7,7 @@ from torch import Tensor
 from ..conditional_probability_path import OTCondProbPath, VPDiffusionCondProbPath
 from ..configuration_flow_matching import FlowMatchingConfig
 from ..modelling_flow_matching import FlowMatchingModel
-from .base_sampler import FlowMatchingUncertaintySampler
+from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
 from .configuration_uncertainty_sampler import EntropySamplerConfig
 
 
@@ -94,13 +94,13 @@ class EntropySampler(FlowMatchingUncertaintySampler):
         time_intervals = time_grid[1:] - time_grid[:-1]
 
         # Right rule on first interval
-        first = values[1] * time_intervals[0]  # (B,)
+        first = values[1] * time_intervals[0]
 
         # Trapezoid rule on interior intervals
         interior = 0.5 * (values[1:-2] + values[2:-1]) * time_intervals[1:-1]
 
         # Left rule on last interval
-        last = values[-2] * time_intervals[-1]  # (B,)
+        last = values[-2] * time_intervals[-1]
 
         return float(first + interior.sum() + last)
 

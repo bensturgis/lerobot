@@ -26,7 +26,7 @@ import random
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -43,7 +43,7 @@ from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
     make_laplace_path,
 )
 from lerobot.common.policies.utils import get_device_from_parameters
-from lerobot.common.utils.io_utils import write_video
+from lerobot.common.utils.io_utils import save_episode_video
 from lerobot.common.utils.random_utils import set_seed
 from lerobot.common.utils.utils import get_safe_torch_device, init_logging
 from lerobot.configs import parser
@@ -240,9 +240,9 @@ def rollout(
         ep_frames: list[np.ndarray] = []
     success = False
 
-    start_time = time.time() 
+    start_time = time.time()
 
-    # Reset the policy and environments.
+    # Reset the policy and environment
     policy.reset()
     observation, _ = env.reset(seed=seed)
 
@@ -253,7 +253,6 @@ def rollout(
         ep_frames.append(env.render())
     
     max_episode_steps = env.spec.max_episode_steps
-    # max_episode_steps = 30
     progbar = trange(
         max_episode_steps,
         desc=f"Running rollout with at most {max_episode_steps} steps."
@@ -325,36 +324,6 @@ def choose_seed(failure_pool: list[int], rng: Optional[random.Random] = None) ->
     return rng.randrange(2**31 - 1)
 
 
-def save_episode_video(
-    ep_frames: Union[List[np.ndarray], Dict[str, List[np.ndarray]]],
-    out_root: Path,
-    episode_idx: int,
-    fps: int,
-) -> None:
-    ep_str = f"rollout_ep{episode_idx:03d}.mp4"
-
-    if isinstance(ep_frames, list):
-        out_root.mkdir(parents=True, exist_ok=True)
-        write_video(
-            str(out_root / ep_str),
-            np.stack(ep_frames, axis=0),           # (T, H, W, C)
-            fps=fps,
-        )
-
-    elif isinstance(ep_frames, dict):
-        for cam, frames in ep_frames.items():
-            cam_dir = out_root / cam
-            cam_dir.mkdir(parents=True, exist_ok=True)
-            write_video(
-                str(cam_dir / ep_str),
-                np.stack(frames, axis=0),
-                fps=fps,
-            )
-
-    else:
-        raise TypeError(f"ep_frames must be list or dict, got {type(ep_frames)}")
-
-
 @parser.wrap()
 def main(cfg: EvalUncertaintyEstimationPipelineConfig): 
     # Set global seed
@@ -385,7 +354,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             logging.info("Loading policy")
             cfg.uncertainty_sampler.type = uncert_est_method
             device = get_safe_torch_device(cfg.policy.device, log=True)
-            policy = make_policy(
+            policy: FlowMatchingPolicy = make_policy(
                 cfg.policy,
                 env_cfg=cfg.env,
                 uncertainty_sampler_cfg=cfg.uncertainty_sampler

@@ -16,7 +16,7 @@ from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
 )
 
 from ..configuration_flow_matching import FlowMatchingConfig
-from .base_sampler import FlowMatchingUncertaintySampler
+from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
 
 
 class CrossBayesianSampler(FlowMatchingUncertaintySampler):

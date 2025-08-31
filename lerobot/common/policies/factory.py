@@ -28,8 +28,11 @@ from lerobot.common.envs.utils import env_to_policy_features
 from lerobot.common.policies.act.configuration_act import ACTConfig
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.common.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
+    FiperDataRecorderConfig,
+)
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.common.policies.flow_matching.uncertainty.base_sampler import (
+from lerobot.common.policies.flow_matching.uncertainty.base_uncertainty_sampler import (
     FlowMatchingUncertaintySampler,
 )
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
@@ -134,7 +137,7 @@ def make_flow_matching_uncertainty_sampler(
         )
 
         if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "ensemble" and ensemble_flow_matching_model is None:
-                raise ValueError("Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model.")
+            raise ValueError("Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model.")
         if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "laplace":
             if laplace_path is None:
                 raise ValueError(
@@ -241,6 +244,7 @@ def make_policy(
     ds_meta: LeRobotDatasetMetadata | None = None,
     env_cfg: EnvConfig | None = None,
     uncertainty_sampler_cfg: UncertaintySamplerConfig | None = None,
+    fiper_data_recorder_cfg: FiperDataRecorderConfig | None = None,
 ) -> PreTrainedPolicy:
     """Make an instance of a policy class.
 
@@ -277,6 +281,11 @@ def make_policy(
             "Current implementation of VQBeT does not support `mps` backend. "
             "Please use `cpu` or `cuda` backend."
         )
+    
+    if uncertainty_sampler_cfg is not None and fiper_data_recorder_cfg is not None:
+        raise ValueError(
+            "Uncertainty sampling and FIPER data recording cannot be used at the same time."
+        )
 
     policy_cls = get_policy_class(cfg.type)
 
@@ -299,6 +308,7 @@ def make_policy(
 
     if cfg.type == "flow_matching":
         kwargs["uncertainty_sampler_config"] = uncertainty_sampler_cfg
+        kwargs["fiper_data_recorder_config"] = fiper_data_recorder_cfg
 
     if cfg.pretrained_path:
         # Load a pretrained policy and override the config if needed (for example, if there are inference-time

@@ -16,12 +16,47 @@
 import json
 import warnings
 from pathlib import Path
-from typing import TypeVar
+from typing import Dict, List, TypeVar, Union
 
 import imageio
+import numpy as np
 
 JsonLike = str | int | float | bool | None | list["JsonLike"] | dict[str, "JsonLike"] | tuple["JsonLike", ...]
 T = TypeVar("T", bound=JsonLike)
+
+
+def save_episode_video(
+    ep_frames: Union[List[np.ndarray], Dict[str, List[np.ndarray]]],
+    out_root: Path,
+    episode_idx: int,
+    fps: int,
+) -> None:
+    """
+    Save episode frames as an .mp4 video. Supports single-camera (list of frames)
+    or multi-camera (dict of frame lists).
+    """
+    ep_str = f"rollout_ep{episode_idx:03d}.mp4"
+
+    if isinstance(ep_frames, list):
+        out_root.mkdir(parents=True, exist_ok=True)
+        write_video(
+            str(out_root / ep_str),
+            np.stack(ep_frames, axis=0),           # (T, H, W, C)
+            fps=fps,
+        )
+
+    elif isinstance(ep_frames, dict):
+        for cam, frames in ep_frames.items():
+            cam_dir = out_root / cam
+            cam_dir.mkdir(parents=True, exist_ok=True)
+            write_video(
+                str(cam_dir / ep_str),
+                np.stack(frames, axis=0),
+                fps=fps,
+            )
+
+    else:
+        raise TypeError(f"ep_frames must be list or dict, got {type(ep_frames)}")
 
 
 def write_video(video_path, stacked_frames, fps):

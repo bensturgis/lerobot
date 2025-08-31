@@ -13,7 +13,7 @@ from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMa
 from lerobot.common.policies.flow_matching.ode_solver import ADAPTIVE_SOLVERS, FIXED_STEP_SOLVERS, ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
-from .base_sampler import FlowMatchingUncertaintySampler
+from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
 from .configuration_uncertainty_sampler import ScoringMetricConfig
 
 

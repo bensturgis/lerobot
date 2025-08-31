@@ -33,7 +33,7 @@ class EvalUncertaintyEstimationPipelineConfig:
             self.policy.pretrained_path = policy_path
         else:
             logging.warning(
-                "No pretrained path was provided, visualized policy will be built from scratch (random weights)."
+                "No pretrained path was provided, policy for uncertainty evaluation will be built from scratch (random weights)."
             )
 
         if not self.job_name:

@@ -46,7 +46,6 @@ class ODESolver():
         enable_grad: bool = False,
     ) -> Union[
         Tensor,
-        Sequence[Tensor],
         Tuple[Tensor, Tensor]
     ]:
         """
