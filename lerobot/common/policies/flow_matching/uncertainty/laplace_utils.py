@@ -2,7 +2,7 @@ import copy
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import torch
 from laplace import Laplace
@@ -14,11 +14,10 @@ from torch.utils.data.dataloader import default_collate
 
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.policies.flow_matching.conditional_probability_path import OTCondProbPath
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
-    CrossBayesianSamplerConfig,
+from lerobot.common.policies.flow_matching.modelling_flow_matching import (
+    FlowMatchingModel,
+    FlowMatchingPolicy,
 )
-from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.utils.utils import get_safe_torch_device
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
@@ -60,7 +59,7 @@ class FlowMatchingInput:
 
 def make_laplace_collate(
     policy_cfg: PreTrainedConfig,
-    policy: PreTrainedPolicy,
+    policy: FlowMatchingPolicy,
 ):
     """
     Factory that builds a dataloader collate function tailored for laplace-torch
@@ -143,7 +142,7 @@ def make_laplace_collate(
 def create_laplace_flow_matching_calib_loader(
     dataset_cfg: DatasetConfig,
     policy_cfg: PreTrainedConfig,
-    policy: PreTrainedPolicy,
+    policy: FlowMatchingPolicy,
     calib_fraction: float,
     batch_size: int,
 ) -> DataLoader:
@@ -322,7 +321,7 @@ def make_laplace_path(
     return out_dir / fname
 
 def get_laplace_posterior(
-    cfg: CrossBayesianSamplerConfig,
+    laplace_scope: Literal["velocity_last", "rgb_last", "both"],
     flow_matching_model: nn.Module,
     laplace_calib_loader: Optional[torch.utils.data.DataLoader],
     laplace_path: str,
@@ -332,7 +331,10 @@ def get_laplace_posterior(
     flow matching model.
     
     Args:
-        cfg: Sampler-specific settings.
+        laplace_scope: Which part of the model to approximate
+            - "velocity_last": final layer of the velocity model
+            - "rgb_last": final layer of the RGB encoder
+            - "both": apply Laplace on both layers jointly
         flow_matching_model: The full flow matching model including velocity and RGB encoder.
         laplace_calib_loader: DataLoader providing samples for fitting the Laplace
                 approximation.
@@ -346,18 +348,18 @@ def get_laplace_posterior(
     """
     # Select target modules for Laplace approximation
     laplace_approx_targets: list[str] = []
-    if cfg.laplace_scope in ["velocity_last", "both"]:
+    if laplace_scope in ["velocity_last", "both"]:
         flow_matching_model.unet.final_conv[1] = PointwiseConv1dToLinear(
             flow_matching_model.unet.final_conv[1]
         )
         laplace_approx_targets.append("unet.final_conv.1.linear_layer")
 
-    if cfg.laplace_scope in ["rgb_last", "both"]:
+    if laplace_scope in ["rgb_last", "both"]:
         laplace_approx_targets.append("rgb_encoder.out")
 
     if not laplace_approx_targets:
         raise ValueError(
-            f"Unknown laplace_scope={cfg.laplace_scope}. "
+            f"Unknown laplace_scope={laplace_scope}. "
             "Choose from ['velocity_last', 'rgb_last', 'both']"
         )
 
@@ -396,7 +398,7 @@ def get_laplace_posterior(
         logging.info(f"Loading Laplace posterior from {laplace_path}")
         laplace_posterior.load_state_dict(torch.load(laplace_path))
     else:
-        logging.info(f"Fitting new Laplace posterior.")
+        logging.info("Fitting new Laplace posterior.")
         if laplace_calib_loader is None:
             raise ValueError("Calibration loader is required to fit Laplace.")
         laplace_posterior.fit(laplace_calib_loader)
@@ -405,3 +407,41 @@ def get_laplace_posterior(
         torch.save(laplace_posterior.state_dict(), laplace_path)
 
     return laplace_posterior
+
+def build_laplace_posterior_artifact(
+    laplace_scope: str,
+    calib_fraction: float,
+    batch_size: int,
+    dataset_cfg: DatasetConfig,
+    policy_cfg: PreTrainedConfig,
+    policy: FlowMatchingPolicy,
+) -> Laplace:
+    """
+    Construct or load a Laplace posterior for the given flow matching model.
+
+    Builds a calibration DataLoader if needed and fits a new posterior,
+    otherwise loads an existing one from disk.
+
+    Returns:
+        A fitted or loaded Laplace posterior.
+    """
+    laplace_path = make_laplace_path(
+        repo_id=dataset_cfg.repo_id,
+        scope=laplace_scope,
+        calib_fraction=calib_fraction,
+    )
+    calib_loader = None
+    if not laplace_path.exists():
+        calib_loader = create_laplace_flow_matching_calib_loader(
+            dataset_cfg=dataset_cfg,
+            policy_cfg=policy_cfg,
+            policy=policy,
+            calib_fraction=calib_fraction,
+            batch_size=batch_size,
+        )
+    return get_laplace_posterior(
+        laplace_scope=laplace_scope,
+        flow_matching_model=policy.flow_matching,
+        laplace_calib_loader=calib_loader,
+        laplace_path=laplace_path,
+    )

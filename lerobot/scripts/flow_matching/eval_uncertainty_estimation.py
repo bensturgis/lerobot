@@ -25,7 +25,6 @@ import logging
 import random
 import time
 from collections import defaultdict
-from dataclasses import replace
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -39,13 +38,8 @@ from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
-from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
-    create_laplace_flow_matching_calib_loader,
-    get_laplace_posterior,
-    make_laplace_path,
-)
 from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
-    build_scorer_artifacts,
+    build_scorer_artifacts_for_uncertainty_sampler,
 )
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.io_utils import save_episode_video
@@ -365,7 +359,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             ).to(device)
             policy.eval()
 
-            scorer_artifacts = build_scorer_artifacts(
+            scorer_artifacts = build_scorer_artifacts_for_uncertainty_sampler(
                 uncertainty_sampler_cfg=cfg.uncertainty_sampler,
                 policy_cfg=cfg.policy,
                 env_cfg=cfg.env,

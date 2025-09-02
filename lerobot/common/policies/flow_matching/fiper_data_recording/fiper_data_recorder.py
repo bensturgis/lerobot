@@ -1,10 +1,9 @@
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import Tensor
-from torch.utils.data import DataLoader
 
 from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
     ScorerArtifacts,
@@ -35,6 +34,14 @@ class FiperDataRecorder:
         self.device = get_device_from_parameters(self.flow_matching_model)
         self.dtype = get_dtype_from_parameters(self.flow_matching_model)
 
+        # Extract scorer artifacts
+        self.ensemble_model = scorer_artifacts.ensemble_model
+        self.laplace_posterior = scorer_artifacts.laplace_posterior
+        if self.ensemble_model is None:
+            raise ValueError("Ensemble model is required for FIPER data recording.")
+        elif self.laplace_posterior is None:
+            raise ValueError("Laplace posterior is required for FIPER data recording.")
+        
         # Build time grid for sampling according to ODE solver method and scoring metric
         if self.flow_matching_config.ode_solver_method in FIXED_STEP_SOLVERS:
             self.sampling_time_grid = self.ode_solver.make_sampling_time_grid(

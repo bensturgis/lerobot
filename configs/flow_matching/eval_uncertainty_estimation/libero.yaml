@@ -30,7 +30,6 @@ uncertainty_sampler:
   entropy_sampler:
     num_action_seq_samples: 1000
 
-job_name: entropy
 seed: 112200
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model

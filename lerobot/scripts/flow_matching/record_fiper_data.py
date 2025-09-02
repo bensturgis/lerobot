@@ -13,6 +13,9 @@ from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
+from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+    build_scorer_artifacts_for_fiper_recorder,
+)
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.io_utils import save_episode_video
 from lerobot.common.utils.random_utils import set_seed
@@ -133,10 +136,20 @@ def main(cfg: FiperDataRecordingPipelineConfig):
     policy: FlowMatchingPolicy = make_policy(
         cfg.policy,
         env_cfg=cfg.env,
-        fiper_data_recorder_cfg=cfg.fiper_data_recorder
     ).to(device)
     policy.eval()
-    policy.init_fiper_data_recorder()
+    
+    scorer_artifacts = build_scorer_artifacts_for_fiper_recorder(
+        fiper_data_recorder_cfg=cfg.fiper_data_recorder,
+        policy_cfg=cfg.policy,
+        env_cfg=cfg.env,
+        dataset_cfg=cfg.dataset,
+        policy=policy,
+    )
+    policy.init_fiper_data_recorder(
+        config=cfg.fiper_data_recorder,
+        scorer_artifacts=scorer_artifacts,
+    )
 
     is_ood_cycle = cycle([False, True])
 
