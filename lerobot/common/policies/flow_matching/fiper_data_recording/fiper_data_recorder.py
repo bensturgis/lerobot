@@ -138,4 +138,7 @@ class FiperDataRecorder:
         with output_path.open("wb") as f:
             pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+        # Reset rollout data after saving
+        self.rollout_data.clear()
+
         print(f"Saved FIPER data for episode {episode_idx} to {output_path}.")
