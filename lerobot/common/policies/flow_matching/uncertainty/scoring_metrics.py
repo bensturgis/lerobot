@@ -10,7 +10,11 @@ from lerobot.common.policies.flow_matching.conditional_probability_path import (
     VPDiffusionCondProbPath,
 )
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
-from lerobot.common.policies.flow_matching.ode_solver import ADAPTIVE_SOLVERS, FIXED_STEP_SOLVERS, ODESolver
+from lerobot.common.policies.flow_matching.ode_solver import (
+    ODESolver,
+    make_lik_estimation_time_grid,
+    select_ode_states,
+)
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
@@ -129,7 +133,7 @@ class ModeDistance(TerminalStateMetric):
         """
         device = get_device_from_parameters(velocity_model)
         dtype = get_dtype_from_parameters(velocity_model)
-        distances: list[float] = []
+        distances: list[Tensor] = []
         # Loop over each time in [0, 1) at which we want to probe the velocity field
         for time in self.velocity_eval_times:
             time_batch = torch.full(
@@ -163,7 +167,6 @@ class Likelihood(TerminalStateMetric):
             config: Scoring metric settings.
         """
         self.device = uncertainty_sampler.device
-        self.dtype = uncertainty_sampler.dtype
         # Noise distribution is an isotropic Gaussian
         horizon = uncertainty_sampler.horizon
         action_dim = uncertainty_sampler.action_dim
@@ -179,31 +182,10 @@ class Likelihood(TerminalStateMetric):
         self.lik_ode_solver_cfg = config.likelihood_ode_solver_cfg
 
         # Build time grid for likelihood estimation based on ODE solver method
-        self.lik_estimation_time_grid = self._get_lik_estimation_time_grid()        
-
-    def _get_lik_estimation_time_grid(self) -> Tensor:
-        """
-        Build time grid to estimate likelihood according to ODE solver method.
-
-        For a fixed step solver the time grid consists of a fine segment of 10 points evenly
-        spaced from 1.0 up to 0.93 and a coarse segment of 10 points evenly spaced from 0.9 up to 0.0.
-
-        Returns:
-            A 1D time grid.
-        """
-        if self.lik_ode_solver_cfg.method in FIXED_STEP_SOLVERS:
-            fine = torch.linspace(1.0, 0.93, steps=10, device=self.device, dtype=self.dtype)
-            coarse = torch.linspace(0.9, 0.0,  steps=10, device=self.device, dtype=self.dtype)
-            return torch.cat((fine, coarse))
-        elif self.lik_ode_solver_cfg.method in ADAPTIVE_SOLVERS:
-            lik_estimation_time_grid = torch.tensor([1.0, 0.0], device=self.device, dtype=self.dtype)
-        else:
-            raise ValueError(
-                f"Unknown ODE solver method {self.lik_ode_solver_cfg.method}. "
-                f"Expected one of {sorted(FIXED_STEP_SOLVERS | ADAPTIVE_SOLVERS)}."
-            )
-
-        return lik_estimation_time_grid
+        self.lik_estimation_time_grid = make_lik_estimation_time_grid(
+            ode_solver_method=self.lik_ode_solver_cfg.method,
+            device=self.device,    
+        )        
 
     def __call__(
         self,
@@ -318,12 +300,12 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
             disagreement between reference and comparison velocities. Shape: (batch_size,).
         """
         # Select the ODE states that correspond to the velocity evaluation times
-        selected_ref_ode_states, selected_ref_grid_times = self.ode_solver.select_ode_states(
+        selected_ref_ode_states, selected_ref_grid_times = select_ode_states(
             time_grid=self.sampling_time_grid,
             ode_states=ref_ode_states,
             requested_times=torch.tensor(self.velocity_eval_times, device=self.device, dtype=self.dtype)
         )
-        selected_cmp_ode_states, selected_cmp_grid_times = self.ode_solver.select_ode_states(
+        selected_cmp_ode_states, selected_cmp_grid_times = select_ode_states(
             time_grid=self.sampling_time_grid,
             ode_states=cmp_ode_states,
             requested_times=torch.tensor(self.velocity_eval_times, device=self.device, dtype=self.dtype)

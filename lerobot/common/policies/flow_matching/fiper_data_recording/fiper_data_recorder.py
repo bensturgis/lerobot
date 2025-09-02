@@ -2,21 +2,33 @@ import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import torch
 from torch import Tensor
+from torch.distributions import Independent, Normal
 
-from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
-    ScorerArtifacts,
-)
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 from ..configuration_flow_matching import FlowMatchingConfig
 from ..modelling_flow_matching import FlowMatchingModel
-from ..ode_solver import ADAPTIVE_SOLVERS, FIXED_STEP_SOLVERS, ODESolver
+from ..ode_solver import (
+    ADAPTIVE_SOLVERS,
+    FIXED_STEP_SOLVERS,
+    ODESolver,
+    make_lik_estimation_time_grid,
+    make_sampling_time_grid,
+)
+from ..uncertainty.laplace_utils import draw_laplace_flow_matching_model
+from ..uncertainty.scorer_artifacts import ScorerArtifacts
 from .configuration_fiper_data_recorder import FiperDataRecorderConfig
 
 
 class FiperDataRecorder:
+    """
+    Records data for evaluate failure prediction capabilities of uncertainty estimation
+    methods using framework FIPER:
+    https://github.com/ralfroemer99/fiper.
+    """
     def __init__(
         self,
         config: FiperDataRecorderConfig,
@@ -44,7 +56,7 @@ class FiperDataRecorder:
         
         # Build time grid for sampling according to ODE solver method and scoring metric
         if self.flow_matching_config.ode_solver_method in FIXED_STEP_SOLVERS:
-            self.sampling_time_grid = self.ode_solver.make_sampling_time_grid(
+            self.sampling_time_grid = make_sampling_time_grid(
                 step_size=self.flow_matching_config.ode_step_size,
                 extra_times=self.config.ode_eval_times,
                 device=self.device
@@ -57,22 +69,86 @@ class FiperDataRecorder:
         else:
             raise ValueError(f"Unknown ODE solver method: {self.flow_matching_config.ode_solver_method}.")
         
+        # Noise distribution is an isotropic Gaussian
+        self.gaussian_log_density = Independent(
+            Normal(
+                loc = torch.zeros(self.horizon, self.action_dim, device=self.device, dtype=self.dtype),
+                scale = torch.ones(self.horizon, self.action_dim, device=self.device, dtype=self.dtype),
+            ),
+            reinterpreted_batch_ndims=2
+        ).log_prob
+        
+        # Build time grid for likelihood estimation based on ODE solver method
+        self.lik_estimation_time_grid = make_lik_estimation_time_grid(
+            ode_solver_method=self.config.likelihood_ode_solver_cfg.method,
+            device=self.device,    
+        )
+        
         self.rollout_data: List[Dict[str, Any]] = []
+
+    def compute_log_likelihood(
+        self, 
+        action_samples: Tensor, 
+        flow_matching_model: FlowMatchingModel, 
+        global_cond: Tensor,
+        generator: Optional[torch.Generator] = None
+    ):
+        """Compute log-likelihood of sampled action sequences."""
+        scorer_ode_solver = ODESolver(flow_matching_model.unet)
+        _, log_probs = scorer_ode_solver.sample_with_log_likelihood(
+            x_init=action_samples,
+            time_grid=self.lik_estimation_time_grid,
+            global_cond=global_cond,
+            log_p_0=self.gaussian_log_density,
+            method=self.config.likelihood_ode_solver_cfg.method,
+            atol=self.config.likelihood_ode_solver_cfg.atol,
+            rtol=self.config.likelihood_ode_solver_cfg.rtol,
+            exact_divergence=self.config.likelihood_ode_solver_cfg.exact_divergence,
+            generator=generator,
+        )
+
+        return -log_probs
 
     def conditional_sample_with_recording(
         self,
         observation: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Tensor:
+        """
+        Sample an action sequence conditioned on an observation and record
+        intermediate artifacts needed for uncertainty estimation.
+
+        Args:
+            observation: Info about the environment used to create the conditioning vector for
+                the flow matching model. It has to contain the following items:
+                {
+                "observation.state": (B, n_obs_steps, state_dim)
+
+                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
+                    AND/OR
+                "observation.environment_state": (B, environment_dim)
+                }
+            generator: PyTorch random number generator.
+
+        Returns:
+            - Action sequence drawn from the flow matching model.
+              Shape: (horizon, action_dim).
+        """
         step_data: Dict[str, Any] = {}
         
+        # Draw flow matching model from the Laplace posterior
+        laplace_model = draw_laplace_flow_matching_model(
+            laplace_posterior=self.laplace_posterior,
+            flow_matching_model=self.flow_matching_model,
+            generator=generator
+        )
+
         # Encode image features and concatenate them all together along with the state vector
-        # to create the flow matching conditioning vectors
+        # to create the flow matching conditioning vectors for the sampler and scorer models
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
+        ensemble_global_cond = self.ensemble_model.prepare_global_conditioning(observation)
+        laplace_global_cond = laplace_model.prepare_global_conditioning(observation)
         step_data["obs_embedding"] = global_cond.squeeze(0).cpu().numpy()
-        
-        # Adjust shape of conditioning vector to match batch size of noise samples
-        global_cond = global_cond.repeat(self.config.num_uncertainty_sequences, 1)
 
         # Sample noise priors
         noise_samples = torch.randn(
@@ -85,7 +161,7 @@ class FiperDataRecorder:
         # Solve ODE forward from noise to sample action sequences
         ode_states = self.ode_solver.sample(
             x_0=noise_samples,
-            global_cond=global_cond,
+            global_cond=global_cond.repeat(self.config.num_uncertainty_sequences, 1),
             method=self.flow_matching_config.ode_solver_method,
             atol=self.flow_matching_config.atol,
             rtol=self.flow_matching_config.rtol,
@@ -96,6 +172,39 @@ class FiperDataRecorder:
 
         action_candidates = ode_states[-1]  # (num_uncertainty_sequences, horizon, action_dim)
         step_data["action_pred"] = action_candidates.cpu().numpy()
+
+        # Evaluate scorers' velocities on the final sampled action sequence
+        ensemble_terminal_vels: list[Tensor] = []
+        laplace_terminal_vels: list[Tensor] = []
+        for time in self.config.terminal_vel_eval_times:
+            time_batch = torch.full(
+                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
+            )
+            ensemble_terminal_vels.append(self.ensemble_model.unet(
+                action_candidates, time_batch, ensemble_global_cond.repeat(self.config.num_uncertainty_sequences, 1)
+            ))
+            laplace_terminal_vels.append(laplace_model.unet(
+                action_candidates, time_batch, laplace_global_cond.repeat(self.config.num_uncertainty_sequences, 1)
+            ))
+        step_data["terminal_vel_eval_times"] = np.array(self.config.terminal_vel_eval_times)
+        step_data["ensemble_terminal_vels"] = torch.stack(ensemble_terminal_vels, dim=0).cpu().numpy()
+        step_data["laplace_terminal_vels"] = torch.stack(laplace_terminal_vels, dim=0).cpu().numpy()
+
+        # Compute log-likelihood of sampled action sequences under ensemble and laplace model
+        ensemble_log_likelihood = self.compute_log_likelihood(
+            action_samples=action_candidates,
+            flow_matching_model=self.ensemble_model,
+            global_cond=ensemble_global_cond.repeat(self.config.num_uncertainty_sequences, 1),
+            generator=generator,
+        )
+        step_data["ensemble_log_likelihood"] = ensemble_log_likelihood
+        laplace_log_likelihood = self.compute_log_likelihood(
+            action_samples=action_candidates,
+            flow_matching_model=laplace_model,
+            global_cond=laplace_global_cond.repeat(self.config.num_uncertainty_sequences, 1),
+            generator=generator,
+        )
+        step_data["laplace_log_likelihood"] = laplace_log_likelihood
 
         # Pick one action sequence at random to return
         action_selection_idx = torch.randint(
@@ -128,7 +237,9 @@ class FiperDataRecorder:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = output_dir / f"episode_{episode_idx:04d}.pkl"
+        success_flag = "s" if episode_metadata["successful"] else "f"
+
+        output_path = output_dir / f"episode_{success_flag}_{episode_idx:04d}.pkl"
 
         data = {
             "metadata": episode_metadata,

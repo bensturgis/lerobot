@@ -14,6 +14,8 @@ from lerobot.common.policies.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
     ODESolver,
+    make_sampling_time_grid,
+    select_ode_states,
 )
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import NoiseToActionVisConfig
@@ -69,7 +71,7 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
         self.ode_eval_times = torch.as_tensor(cfg.ode_eval_times, device=self.device, dtype=self.dtype)
         ode_solver_method = self.flow_matching_cfg.ode_solver_method
         if ode_solver_method in FIXED_STEP_SOLVERS:
-            self.sampling_time_grid = self.ode_solver.make_sampling_time_grid(
+            self.sampling_time_grid = make_sampling_time_grid(
                 step_size=self.flow_matching_cfg.ode_step_size,
                 extra_times=self.ode_eval_times,
                 device=self.device,
@@ -221,7 +223,7 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
         ) # Shape: (timesteps, num_paths, horizon, action_dim)
 
         # Extract the noisy action to visualize
-        ode_eval_states, self.ode_eval_times = self.ode_solver.select_ode_states(
+        ode_eval_states, self.ode_eval_times = select_ode_states(
             time_grid=self.sampling_time_grid,
             ode_states=ode_states,
             requested_times=self.ode_eval_times,

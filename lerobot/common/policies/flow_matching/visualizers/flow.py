@@ -14,6 +14,8 @@ from lerobot.common.policies.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
     ODESolver,
+    make_sampling_time_grid,
+    select_ode_states,
 )
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import FlowVisConfig
@@ -112,7 +114,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
         method = self.flow_matching_cfg.ode_solver_method
         if method in FIXED_STEP_SOLVERS:
-            sampling_time_grid = ode_solver.make_sampling_time_grid(
+            sampling_time_grid = make_sampling_time_grid(
                 step_size=self.flow_matching_cfg.ode_step_size,
                 extra_times=vel_eval_times,
                 device=device,
@@ -274,7 +276,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         final_sample = ode_states[-1] # Shape: (num_paths, horizon, action_dim)
 
         # Extract the flow paths from the ODE states
-        eval_ode_states, vel_eval_times = ode_solver.select_ode_states(
+        eval_ode_states, vel_eval_times = select_ode_states(
             time_grid=sampling_time_grid,
             ode_states=ode_states,
             requested_times=vel_eval_times,
@@ -359,7 +361,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         final_sample = sampler_ode_states[-1] # Shape: (num_paths, horizon, action_dim)
 
         # Select the ODE states that correspond to the velocity evaluation times
-        eval_ode_states, velocity_eval_times = sampler_ode_solver.select_ode_states(
+        eval_ode_states, velocity_eval_times = select_ode_states(
             time_grid=sampling_time_grid,
             ode_states=sampler_ode_states,
             requested_times=velocity_eval_times,

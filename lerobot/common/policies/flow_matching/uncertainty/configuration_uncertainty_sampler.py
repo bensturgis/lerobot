@@ -76,6 +76,7 @@ def process_velocity_eval_times(
 
 @dataclass
 class LikelihoodODESolverConfig:
+    """Configuration for the ODE solver used in likelihood estimation."""
     method: str = "euler"
     atol: float | None = None
     rtol: float | None = None

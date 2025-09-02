@@ -30,6 +30,7 @@ from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
+from lerobot.common.policies.flow_matching.ode_solver import select_ode_states
 from lerobot.common.policies.flow_matching.uncertainty.composed_seq_sampler import ComposedSequenceSampler
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     UncertaintySamplerConfig,
@@ -236,13 +237,13 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
 
                     # Extract the ODE states fitting the visualizer's evaluation times
                     ode_solver = policy.flow_matching.ode_solver
-                    selected_prev_ode_states, noise_to_action_visualizer.ode_eval_times = ode_solver.select_ode_states(
+                    selected_prev_ode_states, noise_to_action_visualizer.ode_eval_times = select_ode_states(
                         time_grid=composed_seq_sampler.sampling_time_grid,
                         ode_states=prev_ode_states,
                         requested_times=noise_to_action_visualizer.ode_eval_times,
                     )
 
-                    selected_new_ode_states, noise_to_action_visualizer.ode_eval_times = ode_solver.select_ode_states(
+                    selected_new_ode_states, noise_to_action_visualizer.ode_eval_times = select_ode_states(
                         time_grid=composed_seq_sampler.sampling_time_grid,
                         ode_states=new_ode_states,
                         requested_times=noise_to_action_visualizer.ode_eval_times,

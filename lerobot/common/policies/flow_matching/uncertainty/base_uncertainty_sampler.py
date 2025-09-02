@@ -8,7 +8,7 @@ from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMa
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 from ..configuration_flow_matching import FlowMatchingConfig
-from ..ode_solver import ADAPTIVE_SOLVERS, FIXED_STEP_SOLVERS, ODESolver
+from ..ode_solver import ADAPTIVE_SOLVERS, FIXED_STEP_SOLVERS, ODESolver, make_sampling_time_grid
 
 
 class FlowMatchingUncertaintySampler(ABC):
@@ -49,7 +49,7 @@ class FlowMatchingUncertaintySampler(ABC):
 
         # Build time grid for sampling according to ODE solver method and scoring metric
         if flow_matching_cfg.ode_solver_method in FIXED_STEP_SOLVERS:
-            self.sampling_time_grid = self.sampling_ode_solver.make_sampling_time_grid(
+            self.sampling_time_grid = make_sampling_time_grid(
                 step_size=flow_matching_cfg.ode_step_size,
                 extra_times=extra_sampling_times,
                 device=self.device
