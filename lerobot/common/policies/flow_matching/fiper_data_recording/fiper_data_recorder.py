@@ -17,6 +17,7 @@ from ..ode_solver import (
     ODESolver,
     make_lik_estimation_time_grid,
     make_sampling_time_grid,
+    select_ode_states
 )
 from ..uncertainty.laplace_utils import draw_laplace_flow_matching_model
 from ..uncertainty.scorer_artifacts import ScorerArtifacts
@@ -55,15 +56,18 @@ class FiperDataRecorder:
             raise ValueError("Laplace posterior is required for FIPER data recording.")
         
         # Build time grid for sampling according to ODE solver method and scoring metric
+        extra_times = []
+        if self.config.ode_eval_times is not None:
+            extra_times = [t for t in self.config.ode_eval_times if 0.0 < t < 1.0]
         if self.flow_matching_config.ode_solver_method in FIXED_STEP_SOLVERS:
             self.sampling_time_grid = make_sampling_time_grid(
                 step_size=self.flow_matching_config.ode_step_size,
-                extra_times=self.config.ode_eval_times,
+                extra_times=extra_times,
                 device=self.device
             )
         elif self.flow_matching_config.ode_solver_method in ADAPTIVE_SOLVERS:
             self.sampling_time_grid = torch.tensor(
-                [0.0, *([] if self.config.ode_eval_times is None else self.config.ode_eval_times), 1.0],
+                [0.0, *extra_times, 1.0],
                 device=self.device, dtype=self.dtype
             )
         else:
@@ -107,7 +111,7 @@ class FiperDataRecorder:
             generator=generator,
         )
 
-        return -log_probs
+        return log_probs
 
     def conditional_sample_with_recording(
         self,
@@ -148,7 +152,12 @@ class FiperDataRecorder:
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
         ensemble_global_cond = self.ensemble_model.prepare_global_conditioning(observation)
         laplace_global_cond = laplace_model.prepare_global_conditioning(observation)
-        step_data["obs_embedding"] = global_cond.squeeze(0).cpu().numpy()
+        step_data["obs_embedding"] = global_cond.squeeze(0).cpu()
+        
+        # Broadcast conditioning to match the number of action samples
+        global_cond = global_cond.expand(self.config.num_uncertainty_sequences, -1)
+        ensemble_global_cond = ensemble_global_cond.expand(self.config.num_uncertainty_sequences, -1)
+        laplace_global_cond = laplace_global_cond.expand(self.config.num_uncertainty_sequences, -1)
 
         # Sample noise priors
         noise_samples = torch.randn(
@@ -161,17 +170,16 @@ class FiperDataRecorder:
         # Solve ODE forward from noise to sample action sequences
         ode_states = self.ode_solver.sample(
             x_0=noise_samples,
-            global_cond=global_cond.repeat(self.config.num_uncertainty_sequences, 1),
+            global_cond=global_cond,
             method=self.flow_matching_config.ode_solver_method,
             atol=self.flow_matching_config.atol,
             rtol=self.flow_matching_config.rtol,
             time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
-        step_data["ode_states"] = ode_states.cpu().numpy()
 
         action_candidates = ode_states[-1]  # (num_uncertainty_sequences, horizon, action_dim)
-        step_data["action_pred"] = action_candidates.cpu().numpy()
+        step_data["action_pred"] = action_candidates.cpu()
 
         # Evaluate scorers' velocities on the final sampled action sequence
         ensemble_terminal_vels: list[Tensor] = []
@@ -181,30 +189,68 @@ class FiperDataRecorder:
                 (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
             )
             ensemble_terminal_vels.append(self.ensemble_model.unet(
-                action_candidates, time_batch, ensemble_global_cond.repeat(self.config.num_uncertainty_sequences, 1)
+                action_candidates, time_batch, ensemble_global_cond
             ))
             laplace_terminal_vels.append(laplace_model.unet(
-                action_candidates, time_batch, laplace_global_cond.repeat(self.config.num_uncertainty_sequences, 1)
+                action_candidates, time_batch, laplace_global_cond
             ))
-        step_data["terminal_vel_eval_times"] = np.array(self.config.terminal_vel_eval_times)
-        step_data["ensemble_terminal_vels"] = torch.stack(ensemble_terminal_vels, dim=0).cpu().numpy()
-        step_data["laplace_terminal_vels"] = torch.stack(laplace_terminal_vels, dim=0).cpu().numpy()
+        step_data["terminal_eval_times"] = self.config.terminal_vel_eval_times
+        step_data["ensemble_terminal_velocities"] = torch.stack(ensemble_terminal_vels, dim=0).cpu()
+        step_data["laplace_terminal_velocities"] = torch.stack(laplace_terminal_vels, dim=0).cpu()
 
         # Compute log-likelihood of sampled action sequences under ensemble and laplace model
         ensemble_log_likelihood = self.compute_log_likelihood(
             action_samples=action_candidates,
             flow_matching_model=self.ensemble_model,
-            global_cond=ensemble_global_cond.repeat(self.config.num_uncertainty_sequences, 1),
+            global_cond=ensemble_global_cond,
             generator=generator,
         )
         step_data["ensemble_log_likelihood"] = ensemble_log_likelihood
         laplace_log_likelihood = self.compute_log_likelihood(
             action_samples=action_candidates,
             flow_matching_model=laplace_model,
-            global_cond=laplace_global_cond.repeat(self.config.num_uncertainty_sequences, 1),
+            global_cond=laplace_global_cond,
             generator=generator,
         )
         step_data["laplace_log_likelihood"] = laplace_log_likelihood
+
+        # Select the ODE states that correspond to the ODE evaluation times
+        selected_ode_states, selected_grid_times = select_ode_states(
+            time_grid=self.sampling_time_grid,
+            ode_states=ode_states,
+            requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
+        )
+        if not torch.equal(
+            selected_grid_times, torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
+        ):
+            raise ValueError(
+                f"Did not find all ODE evaluation times {self.config.ode_eval_times} "
+                f"in sampling time grid {self.sampling_time_grid.tolist()}."
+            )
+        step_data["ode_states"] = selected_ode_states.cpu()
+        step_data["ode_eval_times"] = self.config.ode_eval_times
+
+        # Compute velocities at intermediate ODE states for sampler, ensemble and laplace model
+        sampler_vels: List[Tensor] = []
+        ensemble_vels: List[Tensor] = []
+        laplace_vels: List[Tensor] = []
+        for timestep, time in enumerate(self.config.ode_eval_times):
+            ode_state = selected_ode_states[timestep]
+            time_batch = torch.full(
+                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
+            )
+            sampler_vels.append(
+                self.flow_matching_model.unet(ode_state, time_batch, global_cond)
+            )
+            ensemble_vels.append(
+                self.ensemble_model.unet(ode_state, time_batch, ensemble_global_cond)
+            )
+            laplace_vels.append(
+                laplace_model.unet(ode_state,time_batch, laplace_global_cond)
+            )
+        step_data["velocities"] = torch.stack(sampler_vels, dim=0).cpu()
+        step_data["ensemble_velocities"] = torch.stack(ensemble_vels, dim=0).cpu()
+        step_data["laplace_velocities"] = torch.stack(laplace_vels, dim=0).cpu()
 
         # Pick one action sequence at random to return
         action_selection_idx = torch.randint(

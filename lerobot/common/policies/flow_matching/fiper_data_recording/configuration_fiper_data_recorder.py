@@ -8,13 +8,13 @@ def process_ode_eval_times(
     """
     Clean and normalize ODE evaluation times.
 
-    - Removes endpoints (0.0 and 1.0) and any values outside (0, 1).
+    - Removes any values outside (0, 1).
     - Sorts the list in ascending order and removes duplicates.
     """
-    # Remove endpoints 0 and 1 as well as points outside the range of (0,1)
+    # Remove points outside the range of (0,1)
     processed_ode_eval_times: list[float] = []
     for t in ode_eval_times:
-        if round(t, 3) <= 0.0 or round(t, 3) >= 1.0:
+        if round(t, 3) < 0.0 or round(t, 3) > 1.0:
             continue
         processed_ode_eval_times.append(round(t, 3))
 
