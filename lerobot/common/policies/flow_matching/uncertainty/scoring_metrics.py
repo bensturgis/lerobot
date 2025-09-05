@@ -338,7 +338,7 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
                 time_batch,
                 cmp_global_cond,
             )
-            # L2 norm across time and action dims gives magnitude of velocity difference
+            # L2 norm across horizon and action dims gives magnitude of velocity difference
             velocity_difference = torch.norm(ref_velocity - cmp_velocity, dim=(1, 2)) ** 2
             
             # Scale velocity difference by factor that depends on conditional vector field type

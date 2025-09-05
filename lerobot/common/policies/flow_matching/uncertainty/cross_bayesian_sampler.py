@@ -66,7 +66,6 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
             raise ValueError("laplace_posterior is required for scorer_type='laplace'.")
         elif cfg.scorer_type not in {"ensemble", "laplace"}:
             raise ValueError(f"Unknown scorer_type: {cfg.scorer_type!r}")
-        
 
         # Sampler-specific settings
         self.cfg = cfg

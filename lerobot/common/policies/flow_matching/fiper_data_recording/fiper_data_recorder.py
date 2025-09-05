@@ -2,13 +2,16 @@ import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import torch
 from torch import Tensor
 from torch.distributions import Independent, Normal
 
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
+from ..conditional_probability_path import (
+    OTCondProbPath,
+    VPDiffusionCondProbPath,
+)
 from ..configuration_flow_matching import FlowMatchingConfig
 from ..modelling_flow_matching import FlowMatchingModel
 from ..ode_solver import (
@@ -17,7 +20,7 @@ from ..ode_solver import (
     ODESolver,
     make_lik_estimation_time_grid,
     make_sampling_time_grid,
-    select_ode_states
+    select_ode_states,
 )
 from ..uncertainty.laplace_utils import draw_laplace_flow_matching_model
 from ..uncertainty.scorer_artifacts import ScorerArtifacts
@@ -87,6 +90,20 @@ class FiperDataRecorder:
             ode_solver_method=self.config.likelihood_ode_solver_cfg.method,
             device=self.device,    
         )
+
+        # Select conditional probability path for computing the intermediate velocity difference scaling factors
+        self.cond_vf_type = self.flow_matching_config.cond_vf_type
+        if self.cond_vf_type == "vp":
+            self.cond_prob_path = VPDiffusionCondProbPath(
+                beta_min=self.flow_matching_config.beta_min,
+                beta_max=self.flow_matching_config.beta_max,
+            )
+        elif self.cond_vf_type == "ot":
+            self.cond_prob_path = OTCondProbPath()
+        else:
+            raise ValueError(
+                f"Unknown conditional vector field type {self.cond_vf_type}."
+            )
         
         self.rollout_data: List[Dict[str, Any]] = []
 
@@ -112,6 +129,22 @@ class FiperDataRecorder:
         )
 
         return log_probs
+    
+    def get_inter_vel_diff_scaling_factor(self, t: Tensor) -> Tensor:
+        """
+        Compute scaling factor used to weight velocity differences in the intermediate velocity 
+        difference score based on the time and the conditional vector field type used to train 
+        the flow matching model.
+        """
+        if self.cond_vf_type == "vp":
+            return 2.0 / self.cond_prob_path.get_beta(t)
+        elif self.cond_vf_type == "ot":
+            return t / (1 - t)
+        else:
+            raise ValueError(
+                "No intermediate velocity difference factor provided for conditional " \
+                f"VF type: {self.cond_vf_type}."
+            )
 
     def conditional_sample_with_recording(
         self,
@@ -234,6 +267,7 @@ class FiperDataRecorder:
         sampler_vels: List[Tensor] = []
         ensemble_vels: List[Tensor] = []
         laplace_vels: List[Tensor] = []
+        vel_diff_scaling_factors: List[float] = []
         for timestep, time in enumerate(self.config.ode_eval_times):
             ode_state = selected_ode_states[timestep]
             time_batch = torch.full(
@@ -248,9 +282,11 @@ class FiperDataRecorder:
             laplace_vels.append(
                 laplace_model.unet(ode_state,time_batch, laplace_global_cond)
             )
+            vel_diff_scaling_factors.append(self.get_inter_vel_diff_scaling_factor(t=time))
         step_data["velocities"] = torch.stack(sampler_vels, dim=0).cpu()
         step_data["ensemble_velocities"] = torch.stack(ensemble_vels, dim=0).cpu()
         step_data["laplace_velocities"] = torch.stack(laplace_vels, dim=0).cpu()
+        step_data["vel_diff_scaling"] = vel_diff_scaling_factors
 
         # Pick one action sequence at random to return
         action_selection_idx = torch.randint(
