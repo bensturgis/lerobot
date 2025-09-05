@@ -279,11 +279,11 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
         Compute the average velocity discrepancy between two trajectories at intermediate ODE states.
 
         For each evaluation time t, this metric computes the L2 difference between the velocity 
-        predicted by the reference model at `x_ref(t)` and the comparison model at `x_cmp(t)`:
+        predicted by the reference model at x_ref(t) and the comparison model at x_cmp(t):
 
             ||v_ref(x_ref(t), t) - v_cmp(x_cmp(t), t)||
 
-        The discrepancies are integrated over time and averaged across the evaluation times.
+        The discrepancies are integrated over time.
 
         Args:
             ref_ode_states: ODE integration states of the reference trajectory.

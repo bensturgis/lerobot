@@ -2,6 +2,7 @@ import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import torch
 from torch import Tensor
 from torch.distributions import Independent, Normal
@@ -113,7 +114,7 @@ class FiperDataRecorder:
         flow_matching_model: FlowMatchingModel, 
         global_cond: Tensor,
         generator: Optional[torch.Generator] = None
-    ):
+    ) -> Tensor:
         """Compute log-likelihood of sampled action sequences."""
         scorer_ode_solver = ODESolver(flow_matching_model.unet)
         _, log_probs = scorer_ode_solver.sample_with_log_likelihood(
@@ -227,7 +228,7 @@ class FiperDataRecorder:
             laplace_terminal_vels.append(laplace_model.unet(
                 action_candidates, time_batch, laplace_global_cond
             ))
-        step_data["terminal_eval_times"] = self.config.terminal_vel_eval_times
+        step_data["terminal_eval_times"] = np.asarray(self.config.terminal_vel_eval_times)
         step_data["ensemble_terminal_velocities"] = torch.stack(ensemble_terminal_vels, dim=0).cpu()
         step_data["laplace_terminal_velocities"] = torch.stack(laplace_terminal_vels, dim=0).cpu()
 
@@ -238,14 +239,14 @@ class FiperDataRecorder:
             global_cond=ensemble_global_cond,
             generator=generator,
         )
-        step_data["ensemble_log_likelihood"] = ensemble_log_likelihood
+        step_data["ensemble_log_likelihood"] = ensemble_log_likelihood.cpu()
         laplace_log_likelihood = self.compute_log_likelihood(
             action_samples=action_candidates,
             flow_matching_model=laplace_model,
             global_cond=laplace_global_cond,
             generator=generator,
         )
-        step_data["laplace_log_likelihood"] = laplace_log_likelihood
+        step_data["laplace_log_likelihood"] = laplace_log_likelihood.cpu()
 
         # Select the ODE states that correspond to the ODE evaluation times
         selected_ode_states, selected_grid_times = select_ode_states(
@@ -261,7 +262,7 @@ class FiperDataRecorder:
                 f"in sampling time grid {self.sampling_time_grid.tolist()}."
             )
         step_data["ode_states"] = selected_ode_states.cpu()
-        step_data["ode_eval_times"] = self.config.ode_eval_times
+        step_data["ode_eval_times"] = np.asarray(self.config.ode_eval_times)
 
         # Compute velocities at intermediate ODE states for sampler, ensemble and laplace model
         sampler_vels: List[Tensor] = []
@@ -286,7 +287,7 @@ class FiperDataRecorder:
         step_data["velocities"] = torch.stack(sampler_vels, dim=0).cpu()
         step_data["ensemble_velocities"] = torch.stack(ensemble_vels, dim=0).cpu()
         step_data["laplace_velocities"] = torch.stack(laplace_vels, dim=0).cpu()
-        step_data["vel_diff_scaling"] = vel_diff_scaling_factors
+        step_data["vel_diff_scaling"] = np.asarray(vel_diff_scaling_factors)
 
         # Pick one action sequence at random to return
         action_selection_idx = torch.randint(
