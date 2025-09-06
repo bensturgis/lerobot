@@ -8,10 +8,10 @@ from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMa
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
 )
-from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
+from lerobot.common.policies.flow_matching.uncertainty.utils.laplace_utils import (
     draw_laplace_flow_matching_model,
 )
-from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+from lerobot.common.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
     ScorerArtifacts,
 )
 

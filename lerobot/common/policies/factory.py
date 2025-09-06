@@ -25,9 +25,6 @@ from lerobot.common.envs.utils import env_to_policy_features
 from lerobot.common.policies.act.configuration_act import ACTConfig
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.common.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
-    FiperDataRecorderConfig,
-)
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
 from lerobot.common.policies.flow_matching.uncertainty.base_uncertainty_sampler import (
     FlowMatchingUncertaintySampler,
@@ -36,10 +33,10 @@ from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty
     ScoringMetricConfig,
     UncertaintySamplerConfig,
 )
-from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+from lerobot.common.policies.flow_matching.uncertainty.scoring_metrics import FlowMatchingUncertaintyMetric
+from lerobot.common.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
     ScorerArtifacts,
 )
-from lerobot.common.policies.flow_matching.uncertainty.scoring_metrics import FlowMatchingUncertaintyMetric
 from lerobot.common.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.common.policies.pretrained import PreTrainedPolicy
@@ -181,7 +178,7 @@ def make_flow_matching_uncertainty_sampler(
             scorer_artifacts=scorer_artifacts,
         )
     elif uncertainty_sampler_cfg.type == "entropy":
-        from lerobot.common.policies.flow_matching.uncertainty.entropy import (
+        from lerobot.common.policies.flow_matching.uncertainty.entropy_sampler import (
             EntropySampler,
         )
         

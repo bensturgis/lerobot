@@ -35,6 +35,7 @@ from lerobot.common.policies.flow_matching.uncertainty.composed_seq_sampler impo
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     UncertaintySamplerConfig,
 )
+from lerobot.common.policies.flow_matching.uncertainty.utils.sampler_utils import compose_ode_states
 from lerobot.common.policies.flow_matching.visualizers import (
     ActionSeqVisualizer,
     NoiseToActionVisualizer,
@@ -202,11 +203,12 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                 
                 # Compose actions
                 if prev_ode_states is not None:
-                    composed_ode_states = composed_seq_sampler.compose_ode_states(
+                    composed_ode_states = compose_ode_states(
                         prev_ode_states=prev_ode_states[
                             :, prev_selected_action_idx:prev_selected_action_idx+1, :, :
                         ],
-                        new_ode_states=new_ode_states
+                        new_ode_states=new_ode_states,
+                        flow_matching_cfg=policy.config,
                     )
 
                     # Choose an action which will be used to generate the vector field plot

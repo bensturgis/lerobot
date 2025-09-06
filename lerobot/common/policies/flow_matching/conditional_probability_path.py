@@ -10,7 +10,7 @@ class CondProbPath(abc.ABC):
 
     Defines the interface for sampling from a time-dependent conditional probability
     path and computing the corresponding conditional velocity field.
-    """
+    """   
     @abc.abstractmethod
     def sample(self, x_1: Tensor, t: Tensor) -> Tensor:
         """
@@ -22,6 +22,13 @@ class CondProbPath(abc.ABC):
     def velocity(self, x_t: Tensor, x_1: Tensor, t: Tensor) -> Tensor:
         """
         Compute the conditional velocity vector u_t(x|x_1).
+        """
+        raise NotImplementedError
+    
+    def get_vel_diff_scaling_factor(self, t: Tensor) -> Tensor:
+        """
+        Compute the time-dependent scaling factor used to weight velocity differences 
+        in the intermediate velocity difference score.
         """
         raise NotImplementedError
 
@@ -53,6 +60,13 @@ class OTCondProbPath(CondProbPath):
         """
         return (x_1 - (1 - self.sigma_min) * x_t) / (1 - (1 - self.sigma_min) * t)
     
+    def get_vel_diff_scaling_factor(self, t: Tensor) -> Tensor:
+        """
+        Compute the time-dependent scaling factor used to weight velocity differences 
+        in the intermediate velocity difference score.
+        """
+        return t / (1 - t)
+        
 
 class VPDiffusionCondProbPath(CondProbPath):
     """
@@ -135,3 +149,10 @@ class VPDiffusionCondProbPath(CondProbPath):
         d_sigma = self.get_dsigma(t)
   
         return (d_sigma / sigma) * (x_t - alpha * x_1) + d_alpha * x_1
+    
+    def get_vel_diff_scaling_factor(self, t: Tensor) -> Tensor:
+        """
+        Compute the time-dependent scaling factor used to weight velocity differences 
+        in the intermediate velocity difference score.
+        """
+        return 2.0 / self.get_beta(t)

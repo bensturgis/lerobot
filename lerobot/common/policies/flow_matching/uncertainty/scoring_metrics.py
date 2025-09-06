@@ -250,21 +250,6 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
             raise ValueError(
                 f"Unknown conditional vector field type {self.cond_vf_type}."
             )
-    
-    def _get_scaling_factor(self, t: Tensor) -> Tensor:
-        """
-        Compute the time-dependent scaling factor used to weight velocity differences 
-        based on conditional vector field type.
-        """
-        if self.cond_vf_type == "vp":
-            return 2.0 / self.cond_prob_path.get_beta(t)
-        elif self.cond_vf_type == "ot":
-            return t / (1 - t)
-        else:
-            raise ValueError(
-                "No intermediate velocity difference factor provided for conditional " \
-                f"VF type: {self.cond_vf_type}."
-            )
 
     def __call__(
         self,
@@ -343,7 +328,7 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
             
             # Scale velocity difference by factor that depends on conditional vector field type
             inter_vel_diff_score += (
-                self._get_scaling_factor(time)
+                self.cond_prob_path.get_vel_diff_scaling_factor(time)
                 * velocity_difference
                 * dt
             )

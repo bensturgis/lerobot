@@ -1,32 +1,24 @@
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 from laplace import Laplace
 
 from lerobot.common import envs
-from lerobot.common.utils.utils import get_safe_torch_device
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
 
-from ..fiper_data_recording.configuration_fiper_data_recorder import (
+from ...fiper_data_recording.configuration_fiper_data_recorder import (
     FiperDataRecorderConfig,
 )
-from ..modelling_flow_matching import (
+from ...modelling_flow_matching import (
     FlowMatchingModel,
     FlowMatchingPolicy,
 )
-from .configuration_uncertainty_sampler import UncertaintySamplerConfig
+from ..configuration_uncertainty_sampler import UncertaintySamplerConfig
 from .ensemble_utils import build_ensemble_model
-from .laplace_utils import (
-    build_laplace_posterior_artifact,
-    create_laplace_flow_matching_calib_loader,
-    get_laplace_posterior,
-    make_laplace_path,
-)
+from .laplace_utils import build_laplace_posterior_artifact
 
 
 @dataclass

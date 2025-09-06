@@ -2,16 +2,17 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
+from utils.sampler_utils import compose_ode_states, splice_noise_with_prev
 
 from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
 from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
 )
-from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
+from lerobot.common.policies.flow_matching.uncertainty.utils.laplace_utils import (
     draw_laplace_flow_matching_model,
 )
-from lerobot.common.policies.flow_matching.uncertainty.scorer_artifacts import (
+from lerobot.common.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
     ScorerArtifacts,
 )
 
@@ -132,12 +133,11 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         if self.prev_selected_action_idx is not None:
             # Reuse overlapping segment of noise from the previously selected trajectory
             # so that the newly sampled noise remains consistent with already executed actions
-            new_noise_overlap_end = self.exec_start_idx + (self.horizon - self.exec_end_idx)
-            prev_noise_sample = self.prev_ode_states[0, self.prev_selected_action_idx]
-            prev_noise_sample_duplicated = prev_noise_sample.expand(
-                self.num_action_seq_samples, -1, -1
+            new_noise_sample = splice_noise_with_prev(
+                new_noise_sample=new_noise_sample,
+                prev_noise_sample=self.prev_ode_states[0, self.prev_selected_action_idx],
+                flow_matching_cfg=self.flow_matching_cfg
             )
-            new_noise_sample[:, self.exec_start_idx:new_noise_overlap_end, :] = prev_noise_sample_duplicated[:, self.exec_end_idx:, :]
 
         # Solve ODE forward from noise to sample action sequences
         new_ode_states = self.sampling_ode_solver.sample(
@@ -172,11 +172,12 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             self.latest_uncertainty = float('-inf')
         else:
             # Compose full ODE states from stored previous and new action generation
-            composed_ode_states = self.compose_ode_states(
+            composed_ode_states = compose_ode_states(
                 prev_ode_states=self.prev_ode_states[
                     :, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :
                 ],
-                new_ode_states=new_ode_states  
+                new_ode_states=new_ode_states,
+                flow_matching_cfg=self.flow_matching_cfg, 
             )
 
             # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix

@@ -13,7 +13,7 @@ from tqdm import trange
 from lerobot.common.envs.factory import make_single_env
 from lerobot.common.envs.utils import preprocess_observation
 from lerobot.common.policies.factory import make_flow_matching_visualizers, make_policy
-from lerobot.common.policies.flow_matching.uncertainty.laplace_utils import (
+from lerobot.common.policies.flow_matching.uncertainty.utils.laplace_utils import (
     create_laplace_flow_matching_calib_loader,
     draw_laplace_flow_matching_model,
     get_laplace_posterior,
