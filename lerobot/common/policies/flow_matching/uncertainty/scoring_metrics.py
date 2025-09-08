@@ -277,8 +277,10 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
             ref_global_cond: Conditioning vector for the reference model.
                 Shape: (batch_size, cond_dim).
             cmp_ode_states: ODE integration states of the comparison trajectory.
+                Shape: (timesteps, batch_size, horizon, action_dim).
             cmp_velocity_model: Velocity model associated with the comparison trajectory.
             cmp_global_cond: Conditioning vector for the comparison model.
+                Shape: (batch_size, cond_dim).
 
         Returns:
             Uncertainty scores per trajectory sample, where larger values indicate stronger

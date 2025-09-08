@@ -107,3 +107,22 @@ def compose_ode_states(
         return composed_ode_states.squeeze(0)
     else:
         return composed_ode_states
+    
+def select_and_expand_ode_states(
+    ode_states: torch.Tensor,
+    traj_idx: int,
+) -> torch.Tensor:
+    """
+    Select a single trajectory from the ODE states (by index) and 
+    broadcast it across the batch dimension.
+
+    Args:
+        ode_states:  ODE states. Shape: (timesteps, batch_size, horizon, action_dim).
+        traj_idx: Index of the trajectory to select from the batch dimension.
+
+    Returns:
+        Selected trajectory duplicated across all batch entries.
+        Shape: (timesteps, batch_size, horizon, action_dim),
+    """
+    num_repeats = ode_states.shape[1]
+    return ode_states[:, traj_idx:traj_idx+1, ...].expand(-1, num_repeats, -1, -1)

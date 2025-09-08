@@ -184,10 +184,13 @@ def main(cfg: FiperDataRecordingPipelineConfig):
             **rollout_info,
             "episode": episode,
         }
+
         policy.fiper_data_recorder.save_data(
             output_dir=cfg.output_dir,
             episode_metadata=ep_metadata,
         )
+
+        policy.fiper_data_recorder.reset()
         
 
 if __name__ == "__main__":

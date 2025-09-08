@@ -10,7 +10,7 @@ class CondProbPath(abc.ABC):
 
     Defines the interface for sampling from a time-dependent conditional probability
     path and computing the corresponding conditional velocity field.
-    """   
+    """
     @abc.abstractmethod
     def sample(self, x_1: Tensor, t: Tensor) -> Tensor:
         """

@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from utils.sampler_utils import compose_ode_states, splice_noise_with_prev
+from utils.sampler_utils import compose_ode_states, select_and_expand_ode_states, splice_noise_with_prev
 
 from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
@@ -137,9 +137,9 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             )
 
             # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix
-            prev_selected_ode_states = (
-                self.prev_ode_states[:, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :]
-                    .expand(-1, self.num_action_seq_samples, -1, -1)
+            prev_selected_ode_states = select_and_expand_ode_states(
+                ode_states=self.prev_ode_states,
+                traj_idx=self.prev_selected_action_idx,
             )
 
             # Compute uncertainty based on selected metric
