@@ -506,11 +506,13 @@ class FiperDataRecorder:
         ).item()
         action_sample = action_candidates[action_selection_idx : action_selection_idx+1]  # (1, horizon, action_dim)
 
-        # Store conditioning vector, ODE states and selected action index from the previous sampling step
+        # Store conditioning vectors, ODE states and selected action index from the previous sampling step
         self.prev_global_cond = global_cond
         self.prev_ode_states = ode_states
         self.prev_selected_action_idx = action_selection_idx
         self.prev_laplace_model = laplace_model
+        self.prev_ensemble_global_cond = ensemble_global_cond
+        self.prev_laplace_global_cond = laplace_global_cond
 
         # Store data from this action generation step
         self.rollout_data.append(step_data)
