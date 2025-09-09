@@ -1,6 +1,6 @@
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -125,6 +125,66 @@ class FiperDataRecorder:
         # Store data from action generation steps across rollout
         self.rollout_data: List[Dict[str, Any]] = []
 
+    def record_terminal_vels(
+        self,
+        action_samples: Tensor,
+        composed_action_samples: Optional[Tensor],
+        laplace_model: FlowMatchingModel,
+        ensemble_global_cond: Tensor,
+        laplace_global_cond: Tensor,
+    ) -> Dict[str, Union[np.ndarray, Tensor]]:
+        """
+        Evaluate terminal velocities at configured times for ensemble/laplace on the
+        current samples, and for sampler/ensemble/laplace on composed samples.
+        Returns the recorded data in a dict.
+        """
+        # Store scorers' velocities on the final sampled action sequence
+        ensemble_terminal_vels: List[Tensor] = []
+        laplace_terminal_vels: List[Tensor] = []
+        # Store sampler's velocities on composed action sequence
+        composed_terminal_vels: List[Tensor] = []
+        # Store scorers' velocities on composed action sequence
+        composed_ensemble_terminal_vels: List[Tensor] = []
+        composed_laplace_terminal_vels: List[Tensor] = []
+        for time in self.config.terminal_vel_eval_times:
+            time_batch = torch.full(
+                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
+            )
+            ensemble_terminal_vels.append(self.ensemble_model.unet(
+                action_samples, time_batch, ensemble_global_cond
+            ))
+            laplace_terminal_vels.append(laplace_model.unet(
+                action_samples, time_batch, laplace_global_cond
+            ))
+            if self.prev_selected_action_idx is not None:
+                composed_terminal_vels.append(self.flow_matching_model.unet(
+                    composed_action_samples, time_batch, self.prev_global_cond
+                ))
+                composed_ensemble_terminal_vels.append(self.ensemble_model.unet(
+                    composed_action_samples, time_batch, self.prev_global_cond
+                ))
+                composed_laplace_terminal_vels.append(self.prev_laplace_model.unet(
+                    composed_action_samples, time_batch, self.prev_global_cond
+                ))
+            else:
+                composed_terminal_vels.append(
+                    torch.full_like(action_samples, float('nan'))
+                )
+                composed_ensemble_terminal_vels.append(
+                    torch.full_like(action_samples, float('nan'))
+                )
+                composed_laplace_terminal_vels.append(
+                    torch.full_like(action_samples, float('nan'))
+                )
+        return {
+            "terminal_eval_times": np.asarray(self.config.terminal_vel_eval_times),
+            "ensemble_terminal_velocities": torch.stack(ensemble_terminal_vels, dim=0).cpu(),
+            "laplace_terminal_velocities": torch.stack(laplace_terminal_vels, dim=0).cpu(),
+            "composed_terminal_velocities": torch.stack(composed_terminal_vels, dim=0).cpu(),
+            "composed_ensemble_terminal_velocities": torch.stack(composed_ensemble_terminal_vels, dim=0).cpu(),
+            "composed_laplace_terminal_velocities": torch.stack(composed_laplace_terminal_vels, dim=0).cpu(),
+        }
+
     def compute_log_likelihood(
         self, 
         action_samples: Tensor, 
@@ -147,6 +207,168 @@ class FiperDataRecorder:
         )
 
         return log_probs
+    
+    def record_log_likelihoods(
+        self,
+        action_samples: Tensor,
+        composed_action_samples: Optional[Tensor],
+        laplace_model: FlowMatchingModel,
+        ensemble_global_cond: Tensor,
+        laplace_global_cond: Tensor,
+        generator: Optional[torch.Generator] = None
+    ) -> Dict[str, Tensor]:
+        """
+        Compute log-likelihoods of the current samples under ensemble/laplace and,
+        if a composed trajectory exists, log-likelihoods of composed samples under
+        sampler/ensemble/laplace. Returns the recorded data in a dict.
+        """
+        # Compute log-likelihood of sampled action sequences under ensemble and laplace model
+        ensemble_log_likelihood = self.compute_log_likelihood(
+            action_samples=action_samples,
+            flow_matching_model=self.ensemble_model,
+            global_cond=ensemble_global_cond,
+            generator=generator,
+        )
+        laplace_log_likelihood = self.compute_log_likelihood(
+            action_samples=action_samples,
+            flow_matching_model=laplace_model,
+            global_cond=laplace_global_cond,
+            generator=generator,
+        )
+        # Compute log-likelihood of composed action sequence under sampler model
+        if self.prev_selected_action_idx is not None:
+            composed_log_likelihood = self.compute_log_likelihood(
+                action_samples=composed_action_samples,
+                flow_matching_model=self.flow_matching_model,
+                global_cond=self.prev_global_cond,
+                generator=generator,
+            )
+        else:
+            composed_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
+        # Compute log-likelihood of composed action sequence under ensemble and laplace model
+        if self.prev_selected_action_idx is not None:
+            composed_ensemble_log_likelihood = self.compute_log_likelihood(
+                action_samples=composed_action_samples,
+                flow_matching_model=self.ensemble_model,
+                global_cond=self.prev_global_cond,
+                generator=generator,
+            )
+            composed_laplace_log_likelihood = self.compute_log_likelihood(
+                action_samples=composed_action_samples,
+                flow_matching_model=self.prev_laplace_model,
+                global_cond=self.prev_global_cond,
+                generator=generator,
+            )
+        else:
+            composed_ensemble_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
+            composed_laplace_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
+        
+        return {
+            "ensemble_log_likelihood": ensemble_log_likelihood.cpu(),
+            "laplace_log_likelihood": laplace_log_likelihood.cpu(),
+            "composed_log_likelihood": composed_log_likelihood.cpu(),
+            "composed_ensemble_log_likelihood": composed_ensemble_log_likelihood.cpu(),
+            "composed_laplace_log_likelihood": composed_laplace_log_likelihood.cpu(),
+        }
+    
+    def record_inter_vel_diffs(
+        self,
+        ode_states: Tensor,
+        composed_ode_states: Optional[Tensor],
+        laplace_model: FlowMatchingModel,
+        global_cond: Tensor,
+        ensemble_global_cond: Tensor,
+        laplace_global_cond: Tensor,
+    ) -> Dict[str, Union[np.ndarray, Tensor]]:
+        """
+        Select intermediate ODE states at configured times and evaluate velocities for
+        sampler/ensemble/laplace. If available, also evaluate on previous/composed states.
+        Returns the recorded data in a dict.
+        """
+        # Select the ODE states that correspond to the ODE evaluation times
+        selected_ode_states, _ = select_ode_states(
+            time_grid=self.sampling_time_grid,
+            ode_states=ode_states,
+            requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
+        )
+        if self.prev_selected_action_idx is not None:
+            selected_prev_ode_states, _ = select_ode_states(
+                time_grid=self.sampling_time_grid,
+                ode_states=select_and_expand_ode_states(self.prev_ode_states, self.prev_selected_action_idx),
+                requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
+            )
+            selected_composed_ode_states, _ = select_ode_states(
+                time_grid=self.sampling_time_grid,
+                ode_states=composed_ode_states,
+                requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
+            )
+
+        # Compute velocities at intermediate ODE states for sampler, ensemble and laplace model
+        sampler_vels: List[Tensor] = []
+        ensemble_vels: List[Tensor] = []
+        laplace_vels: List[Tensor] = []
+        # Compute velocities at original and composed intermediate ODE states for sampler model
+        prev_sampler_vels: List[Tensor] = []
+        composed_sampler_vels: List[Tensor] = []
+        # Compute velocities at original and composed intermediate ODE states for ensemble and laplace model
+        composed_ensemble_vels: List[Tensor] = []
+        composed_laplace_vels: List[Tensor] = []
+        vel_diff_scaling_factors: List[float] = []
+        for timestep, time in enumerate(self.config.ode_eval_times):
+            ode_state = selected_ode_states[timestep]
+            time_batch = torch.full(
+                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
+            )
+            sampler_vels.append(
+                self.flow_matching_model.unet(ode_state, time_batch, global_cond)
+            )
+            ensemble_vels.append(
+                self.ensemble_model.unet(ode_state, time_batch, ensemble_global_cond)
+            )
+            laplace_vels.append(
+                laplace_model.unet(ode_state, time_batch, laplace_global_cond)
+            )
+            if self.prev_selected_action_idx is not None:
+                prev_ode_state = selected_prev_ode_states[timestep]
+                composed_ode_state = selected_composed_ode_states[timestep]
+                prev_sampler_vels.append(
+                    self.flow_matching_model.unet(prev_ode_state, time_batch, self.prev_global_cond)
+                )
+                composed_sampler_vels.append(
+                    self.flow_matching_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
+                )
+                composed_ensemble_vels.append(
+                    self.ensemble_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
+                )
+                composed_laplace_vels.append(
+                    self.prev_laplace_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
+                )
+            else:
+                prev_sampler_vels.append(
+                    torch.full_like(ode_state, float('nan'))
+                )
+                composed_sampler_vels.append(
+                    torch.full_like(ode_state, float('nan'))
+                )
+                composed_ensemble_vels.append(
+                    torch.full_like(ode_state, float('nan'))
+                )
+                composed_laplace_vels.append(
+                    torch.full_like(ode_state, float('nan'))
+                )
+            vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
+
+        return {
+            "ode_eval_times": np.asarray(self.config.ode_eval_times),
+            "velocities": torch.stack(sampler_vels, dim=0).cpu(),
+            "ensemble_velocities": torch.stack(ensemble_vels, dim=0).cpu(),
+            "laplace_velocities": torch.stack(laplace_vels, dim=0).cpu(),
+            "prev_velocities": torch.stack(prev_sampler_vels, dim=0).cpu(),
+            "composed_velocities": torch.stack(composed_sampler_vels, dim=0).cpu(),
+            "composed_ensemble_velocities": torch.stack(composed_ensemble_vels, dim=0).cpu(),
+            "composed_laplace_velocities": torch.stack(composed_laplace_vels, dim=0).cpu(),
+            "vel_diff_scaling": np.asarray(vel_diff_scaling_factors),
+        }
 
     def conditional_sample_with_recording(
         self,
@@ -233,179 +455,41 @@ class FiperDataRecorder:
                 flow_matching_cfg=self.flow_matching_config,
             )
             composed_action_samples = composed_ode_states[-1] # (num_uncertainty_sequences, horizon, action_dim)
+        else:
+            composed_ode_states = None
+            composed_action_samples = None
 
-        # Store scorers' velocities on the final sampled action sequence
-        ensemble_terminal_vels: List[Tensor] = []
-        laplace_terminal_vels: List[Tensor] = []
-        # Store sampler's velocities on composed action sequence
-        composed_terminal_vels: List[Tensor] = []
-        # Store scorers' velocities on composed action sequence
-        composed_ensemble_terminal_vels: List[Tensor] = []
-        composed_laplace_terminal_vels: List[Tensor] = []
-        for time in self.config.terminal_vel_eval_times:
-            time_batch = torch.full(
-                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
-            )
-            ensemble_terminal_vels.append(self.ensemble_model.unet(
-                action_candidates, time_batch, ensemble_global_cond
-            ))
-            laplace_terminal_vels.append(laplace_model.unet(
-                action_candidates, time_batch, laplace_global_cond
-            ))
-            if self.prev_selected_action_idx is not None:
-                composed_terminal_vels.append(self.flow_matching_model.unet(
-                    composed_action_samples, time_batch, self.prev_global_cond
-                ))
-                composed_ensemble_terminal_vels.append(self.ensemble_model.unet(
-                    composed_action_samples, time_batch, self.prev_global_cond
-                ))
-                composed_laplace_terminal_vels.append(self.prev_laplace_model.unet(
-                    composed_action_samples, time_batch, self.prev_global_cond
-                ))
-            else:
-                composed_terminal_vels.append(
-                    torch.full_like(action_candidates, float('nan'))
-                )
-                composed_ensemble_terminal_vels.append(
-                    torch.full_like(action_candidates, float('nan'))
-                )
-                composed_laplace_terminal_vels.append(
-                    torch.full_like(action_candidates, float('nan'))
-                )
-        step_data["terminal_eval_times"] = np.asarray(self.config.terminal_vel_eval_times)
-        step_data["ensemble_terminal_velocities"] = torch.stack(ensemble_terminal_vels, dim=0).cpu()
-        step_data["laplace_terminal_velocities"] = torch.stack(laplace_terminal_vels, dim=0).cpu()
-        step_data["composed_terminal_velocities"] = torch.stack(composed_terminal_vels, dim=0).cpu()
-        step_data["composed_ensemble_terminal_velocities"] = torch.stack(composed_ensemble_terminal_vels, dim=0).cpu()
-        step_data["composed_laplace_terminal_velocities"] = torch.stack(composed_laplace_terminal_vels, dim=0).cpu()
-
-        # Compute log-likelihood of sampled action sequences under ensemble and laplace model
-        ensemble_log_likelihood = self.compute_log_likelihood(
+        # Record terminal velocities
+        terminal_vels_data = self.record_terminal_vels(
             action_samples=action_candidates,
-            flow_matching_model=self.ensemble_model,
-            global_cond=ensemble_global_cond,
+            composed_action_samples=composed_action_samples,
+            laplace_model=laplace_model,
+            ensemble_global_cond=ensemble_global_cond,
+            laplace_global_cond=laplace_global_cond,
+        )
+        step_data.update(terminal_vels_data)
+
+        # Record log-likelihoods
+        log_likelihood_data = self.record_log_likelihoods(
+            action_samples=action_candidates,
+            composed_action_samples=composed_action_samples,
+            laplace_model=laplace_model,
+            ensemble_global_cond=ensemble_global_cond,
+            laplace_global_cond=laplace_global_cond,
             generator=generator,
         )
-        step_data["ensemble_log_likelihood"] = ensemble_log_likelihood.cpu()
-        laplace_log_likelihood = self.compute_log_likelihood(
-            action_samples=action_candidates,
-            flow_matching_model=laplace_model,
-            global_cond=laplace_global_cond,
-            generator=generator,
-        )
-        step_data["laplace_log_likelihood"] = laplace_log_likelihood.cpu()
-        # Compute log-likelihood of composed action sequence under sampler model
-        if self.prev_selected_action_idx is not None:
-            composed_log_likelihood = self.compute_log_likelihood(
-                action_samples=composed_action_samples,
-                flow_matching_model=self.flow_matching_model,
-                global_cond=self.prev_global_cond,
-                generator=generator,
-            )
-        else:
-            composed_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
-        step_data["composed_log_likelihood"] = composed_log_likelihood.cpu()
-        # Compute log-likelihood of composed action sequence under ensemble and laplace model
-        if self.prev_selected_action_idx is not None:
-            composed_ensemble_log_likelihood = self.compute_log_likelihood(
-                action_samples=composed_action_samples,
-                flow_matching_model=self.ensemble_model,
-                global_cond=self.prev_global_cond,
-                generator=generator,
-            )
-            composed_laplace_log_likelihood = self.compute_log_likelihood(
-                action_samples=composed_action_samples,
-                flow_matching_model=self.prev_laplace_model,
-                global_cond=self.prev_global_cond,
-                generator=generator,
-            )
-        else:
-            composed_ensemble_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
-            composed_laplace_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
-        step_data["composed_ensemble_log_likelihood"] = composed_ensemble_log_likelihood.cpu()
-        step_data["composed_laplace_log_likelihood"] = composed_laplace_log_likelihood.cpu()
+        step_data.update(log_likelihood_data)
 
-        # Select the ODE states that correspond to the ODE evaluation times
-        selected_ode_states, _ = select_ode_states(
-            time_grid=self.sampling_time_grid,
+        # Record intermediate velocity differences
+        inter_vel_diff_data = self.record_inter_vel_diffs(
             ode_states=ode_states,
-            requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
+            composed_ode_states=composed_ode_states,
+            laplace_model=laplace_model,
+            global_cond=global_cond,
+            ensemble_global_cond=ensemble_global_cond,
+            laplace_global_cond=laplace_global_cond,
         )
-        if self.prev_selected_action_idx is not None:
-            selected_prev_ode_states, _ = select_ode_states(
-                time_grid=self.sampling_time_grid,
-                ode_states=select_and_expand_ode_states(self.prev_ode_states, self.prev_selected_action_idx),
-                requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
-            )
-            selected_composed_ode_states, _ = select_ode_states(
-                time_grid=self.sampling_time_grid,
-                ode_states=composed_ode_states,
-                requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
-            )
-        step_data["ode_eval_times"] = np.asarray(self.config.ode_eval_times)
-
-        # Compute velocities at intermediate ODE states for sampler, ensemble and laplace model
-        sampler_vels: List[Tensor] = []
-        ensemble_vels: List[Tensor] = []
-        laplace_vels: List[Tensor] = []
-        # Compute velocities at original and composed intermediate ODE states for sampler model
-        prev_sampler_vels: List[Tensor] = []
-        composed_sampler_vels: List[Tensor] = []
-        # Compute velocities at original and composed intermediate ODE states for ensemble and laplace model
-        composed_ensemble_vels: List[Tensor] = []
-        composed_laplace_vels: List[Tensor] = []
-        vel_diff_scaling_factors: List[float] = []
-        for timestep, time in enumerate(self.config.ode_eval_times):
-            ode_state = selected_ode_states[timestep]
-            time_batch = torch.full(
-                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
-            )
-            sampler_vels.append(
-                self.flow_matching_model.unet(ode_state, time_batch, global_cond)
-            )
-            ensemble_vels.append(
-                self.ensemble_model.unet(ode_state, time_batch, ensemble_global_cond)
-            )
-            laplace_vels.append(
-                laplace_model.unet(ode_state, time_batch, laplace_global_cond)
-            )
-            if self.prev_selected_action_idx is not None:
-                prev_ode_state = selected_prev_ode_states[timestep]
-                composed_ode_state = selected_composed_ode_states[timestep]
-                prev_sampler_vels.append(
-                    self.flow_matching_model.unet(prev_ode_state, time_batch, self.prev_global_cond)
-                )
-                composed_sampler_vels.append(
-                    self.flow_matching_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
-                )
-                composed_ensemble_vels.append(
-                    self.ensemble_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
-                )
-                composed_laplace_vels.append(
-                    self.prev_laplace_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
-                )
-            else:
-                prev_sampler_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
-                composed_sampler_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
-                composed_ensemble_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
-                composed_laplace_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
-            vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
-        step_data["velocities"] = torch.stack(sampler_vels, dim=0).cpu()
-        step_data["ensemble_velocities"] = torch.stack(ensemble_vels, dim=0).cpu()
-        step_data["laplace_velocities"] = torch.stack(laplace_vels, dim=0).cpu()
-        step_data["prev_velocities"] = torch.stack(prev_sampler_vels, dim=0).cpu()
-        step_data["composed_velocities"] = torch.stack(composed_sampler_vels, dim=0).cpu()
-        step_data["composed_ensemble_vels"] = torch.stack(composed_ensemble_vels, dim=0).cpu()
-        step_data["composed_laplace_vels"] = torch.stack(composed_laplace_vels, dim=0).cpu()
-        step_data["vel_diff_scaling"] = np.asarray(vel_diff_scaling_factors)
+        step_data.update(inter_vel_diff_data)
 
         # Pick one action sequence at random to return
         action_selection_idx = torch.randint(
