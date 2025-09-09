@@ -111,10 +111,10 @@ class FiperDataRecorder:
                 f"Unknown conditional vector field type {self.cond_vf_type}."
             )
         
-        # Store the conditioning vector and ODE states from the previous action
+        # Store the ODE states and conditioning vectors from the previous action
         # sequence generation
-        self.prev_global_cond: Optional[Tensor] = None
         self.prev_ode_states: Optional[Tensor] = None
+        self.prev_global_cond: Optional[Tensor] = None
 
         # Index of the selected action sequence from the previous actions batch
         self.prev_selected_action_idx: Optional[int] = None
@@ -122,6 +122,11 @@ class FiperDataRecorder:
         # Store scorer flow matching model from the previous action sequence generation
         self.prev_laplace_model: Optional[FlowMatchingModel] = None
         
+        # Store the conditioning vectors of the ensemble and laplace model from the
+        # previous action sequence generation
+        self.prev_ensemble_global_cond: Optional[Tensor] = None
+        self.prev_laplace_global_cond: Optional[Tensor] = None
+
         # Store data from action generation steps across rollout
         self.rollout_data: List[Dict[str, Any]] = []
 
@@ -161,10 +166,10 @@ class FiperDataRecorder:
                     composed_action_samples, time_batch, self.prev_global_cond
                 ))
                 composed_ensemble_terminal_vels.append(self.ensemble_model.unet(
-                    composed_action_samples, time_batch, self.prev_global_cond
+                    composed_action_samples, time_batch, self.prev_ensemble_global_cond
                 ))
                 composed_laplace_terminal_vels.append(self.prev_laplace_model.unet(
-                    composed_action_samples, time_batch, self.prev_global_cond
+                    composed_action_samples, time_batch, self.prev_laplace_global_cond
                 ))
             else:
                 composed_terminal_vels.append(
@@ -250,13 +255,13 @@ class FiperDataRecorder:
             composed_ensemble_log_likelihood = self.compute_log_likelihood(
                 action_samples=composed_action_samples,
                 flow_matching_model=self.ensemble_model,
-                global_cond=self.prev_global_cond,
+                global_cond=self.prev_ensemble_global_cond,
                 generator=generator,
             )
             composed_laplace_log_likelihood = self.compute_log_likelihood(
                 action_samples=composed_action_samples,
                 flow_matching_model=self.prev_laplace_model,
-                global_cond=self.prev_global_cond,
+                global_cond=self.prev_laplace_global_cond,
                 generator=generator,
             )
         else:
@@ -338,10 +343,10 @@ class FiperDataRecorder:
                     self.flow_matching_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
                 )
                 composed_ensemble_vels.append(
-                    self.ensemble_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
+                    self.ensemble_model.unet(composed_ode_state, time_batch, self.prev_ensemble_global_cond)
                 )
                 composed_laplace_vels.append(
-                    self.prev_laplace_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
+                    self.prev_laplace_model.unet(composed_ode_state, time_batch, self.prev_laplace_global_cond)
                 )
             else:
                 prev_sampler_vels.append(
