@@ -139,6 +139,9 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         ):
             self.uncertainty_sampler.prev_selected_action_idx = None
 
+        if self.fiper_data_recorder is not None:
+            self.fiper_data_recorder.reset()
+
     def generate_actions(
         self,
         batch: dict[str, Tensor],

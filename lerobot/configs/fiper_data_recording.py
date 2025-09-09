@@ -19,7 +19,8 @@ class FiperDataRecordingPipelineConfig:
     policy: PreTrainedConfig | None = None
     dataset: DatasetConfig | None = None
 
-    n_episodes: int = 100
+    n_calib_episodes: int = 60
+    n_test_episodes: int = 240
     seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None

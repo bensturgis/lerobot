@@ -151,47 +151,116 @@ def main(cfg: FiperDataRecordingPipelineConfig):
         scorer_artifacts=scorer_artifacts,
     )
 
-    is_ood_cycle = cycle([False, True])
+    # Alternate ID/OOD for test set, calibration set only contains ID rollouts
+    test_is_ood_cycle = cycle([False, True])
 
-    n_episodes = cfg.n_episodes
+    # Counters for collected rollouts in calibration and test set
+    n_collected_calib_eps: int = 0
+    n_collected_test_eps: int = 0
+
+    # Alternate between collecting calibration and test episodes until quotas are met
+    total_num_eps = cfg.n_calib_episodes + cfg.n_test_episodes
     progbar = trange(
-        n_episodes,
-        desc=f"Recording FIPER data for {n_episodes} episodes."
+        total_num_eps,
+        desc=f"Recording FIPER data for {total_num_eps} episodes."
     )
-    for episode in progbar:
-        is_ood = next(is_ood_cycle)
-        distribution_label = "OOD" if is_ood else "ID"
-        logging.info(f"Creating {distribution_label} environment.")
-        seed = choose_seed(rng)
-        cfg.env.ood.enabled = is_ood
-        env = make_single_env(cfg.env, seed)
-        rollout_info, ep_frames = rollout(
-            env=env,
-            policy=policy,
-            seed=seed,
-        )
+    for _ in progbar:        
+        # Decide whether to collect a calibration or test episode next
+        collect_calib = n_collected_calib_eps < cfg.n_calib_episodes
+        collect_test = n_collected_test_eps < cfg.n_test_episodes
+        
+        if collect_calib and collect_test:
+            # Prioritize collection of calibration set
+            target_split = "calibration" if n_collected_calib_eps <= 2 * n_collected_test_eps else "test"
+        elif collect_calib:
+            target_split = "calibration"
+        elif collect_test:
+            target_split = "test"
+        else:
+            break
 
-        if cfg.save_videos:
-            save_episode_video(
-                ep_frames=ep_frames,
-                out_root=cfg.output_dir / "videos",
-                episode_idx=episode + 1,
-                fps=env.metadata["render_fps"],
+        if target_split == "calibration":
+            while True:
+                # Reset the FIPER data recorder before a new episode
+                policy.fiper_data_recorder.reset()
+
+                logging.info("Creating ID environment for calibration set.")
+                cfg.env.ood.enabled = False
+                seed = choose_seed(rng)
+                env = make_single_env(cfg.env, seed)
+                info, frames = rollout(
+                    env=env, 
+                    policy=policy, 
+                    seed=seed
+                )
+                env.close()
+
+                # Accept only successful ID rollouts for calibration set
+                if info["successful"]: 
+                    calib_dir = cfg.output_dir / "calibration"
+                    if cfg.save_videos:
+                        save_episode_video(
+                            ep_frames=frames,
+                            out_root=calib_dir / "videos",
+                            episode_idx=n_collected_calib_eps + 1,
+                            fps=env.metadata["render_fps"],
+                        )
+                    ep_metadata = {
+                        **run_metadata,
+                        **info,
+                        "episode": n_collected_calib_eps,
+                        "rollout_type": "calibration",
+                        "rollout_subtype": "ca",
+                    }
+                    policy.fiper_data_recorder.save_data(
+                        output_dir=calib_dir,
+                        episode_metadata=ep_metadata
+                    )
+                    n_collected_calib_eps += 1
+                    break
+                else:
+                    logging.info("Calibration episode was not successful; retrying...")
+        elif target_split == "test":
+            # Reset the FIPER data recorder before a new episode
+            policy.fiper_data_recorder.reset()
+
+            is_ood = next(test_is_ood_cycle)
+            distribution_label = "OOD" if is_ood else "ID"
+            logging.info(f"Creating {distribution_label} environment for test set.")
+
+            seed = choose_seed(rng)
+            cfg.env.ood.enabled = is_ood
+            env = make_single_env(cfg.env, seed)
+            rollout_info, ep_frames = rollout(
+                env=env, 
+                policy=policy, 
+                seed=seed
+            )
+            env.close()
+
+            test_dir = cfg.output_dir / "test"
+            if cfg.save_videos:
+                save_episode_video(
+                    ep_frames=ep_frames,
+                    out_root=test_dir / "videos",
+                    episode_idx=n_collected_test_eps + 1,
+                    fps=env.metadata["render_fps"],
+                )
+
+            ep_metadata = {
+                **run_metadata,
+                **rollout_info,
+                "episode": n_collected_test_eps,
+                "rollout_type": "test",
+                "rollout_subtype": distribution_label.lower(),
+            }
+
+            policy.fiper_data_recorder.save_data(
+                output_dir=test_dir,
+                episode_metadata=ep_metadata,
             )
 
-        ep_metadata = {
-            **run_metadata,
-            **rollout_info,
-            "episode": episode,
-        }
-
-        policy.fiper_data_recorder.save_data(
-            output_dir=cfg.output_dir,
-            episode_metadata=ep_metadata,
-        )
-
-        policy.fiper_data_recorder.reset()
-        
+            n_collected_test_eps += 1
 
 if __name__ == "__main__":
     init_logging()
