@@ -179,6 +179,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
         else:
             break
 
+        # Data recording for calibration set
         if target_split == "calibration":
             while True:
                 # Reset the FIPER data recorder before a new episode
@@ -220,6 +221,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
                     break
                 else:
                     logging.info("Calibration episode was not successful; retrying...")
+        # Data recording for test set
         elif target_split == "test":
             # Reset the FIPER data recorder before a new episode
             policy.fiper_data_recorder.reset()
