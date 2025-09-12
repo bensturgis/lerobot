@@ -465,36 +465,39 @@ class FiperDataRecorder:
             composed_action_samples = None
 
         # Record terminal velocities
-        terminal_vels_data = self.record_terminal_vels(
-            action_samples=action_candidates,
-            composed_action_samples=composed_action_samples,
-            laplace_model=laplace_model,
-            ensemble_global_cond=ensemble_global_cond,
-            laplace_global_cond=laplace_global_cond,
-        )
-        step_data.update(terminal_vels_data)
+        if "mode_distance" in self.config.scoring_metrics:
+            terminal_vels_data = self.record_terminal_vels(
+                action_samples=action_candidates,
+                composed_action_samples=composed_action_samples,
+                laplace_model=laplace_model,
+                ensemble_global_cond=ensemble_global_cond,
+                laplace_global_cond=laplace_global_cond,
+            )
+            step_data.update(terminal_vels_data)
 
         # Record log-likelihoods
-        log_likelihood_data = self.record_log_likelihoods(
-            action_samples=action_candidates,
-            composed_action_samples=composed_action_samples,
-            laplace_model=laplace_model,
-            ensemble_global_cond=ensemble_global_cond,
-            laplace_global_cond=laplace_global_cond,
-            generator=generator,
-        )
-        step_data.update(log_likelihood_data)
+        if "likelihood" in self.config.scoring_metrics:
+            log_likelihood_data = self.record_log_likelihoods(
+                action_samples=action_candidates,
+                composed_action_samples=composed_action_samples,
+                laplace_model=laplace_model,
+                ensemble_global_cond=ensemble_global_cond,
+                laplace_global_cond=laplace_global_cond,
+                generator=generator,
+            )
+            step_data.update(log_likelihood_data)
 
         # Record intermediate velocity differences
-        inter_vel_diff_data = self.record_inter_vel_diffs(
-            ode_states=ode_states,
-            composed_ode_states=composed_ode_states,
-            laplace_model=laplace_model,
-            global_cond=global_cond,
-            ensemble_global_cond=ensemble_global_cond,
-            laplace_global_cond=laplace_global_cond,
-        )
-        step_data.update(inter_vel_diff_data)
+        if "inter_vel_diff" in self.config.scoring_metrics:
+            inter_vel_diff_data = self.record_inter_vel_diffs(
+                ode_states=ode_states,
+                composed_ode_states=composed_ode_states,
+                laplace_model=laplace_model,
+                global_cond=global_cond,
+                ensemble_global_cond=ensemble_global_cond,
+                laplace_global_cond=laplace_global_cond,
+            )
+            step_data.update(inter_vel_diff_data)
 
         # Pick one action sequence at random to return
         action_selection_idx = torch.randint(
