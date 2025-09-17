@@ -2,7 +2,6 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from utils.sampler_utils import compose_ode_states, select_and_expand_ode_states, splice_noise_with_prev
 
 from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
 from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
@@ -12,6 +11,7 @@ from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty
 
 from ..configuration_flow_matching import FlowMatchingConfig
 from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
+from .utils.sampler_utils import compose_ode_states, select_and_expand_ode_states, splice_noise_with_prev
 
 
 class ComposedSequenceSampler(FlowMatchingUncertaintySampler):

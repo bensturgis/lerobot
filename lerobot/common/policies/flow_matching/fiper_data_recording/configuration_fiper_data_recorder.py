@@ -43,7 +43,7 @@ class FiperDataRecorderConfig:
     num_uncertainty_sequences: int = 256
 
     # Scoring metrics to be recorded, choose from "mode_distance", "inter_vel_diff" and "likelihood"
-    scoring_metrics = ["mode_distance", "inter_vel_diff", "likelihood"]
+    scoring_metrics: tuple = ("mode_distance", "inter_vel_diff", "likelihood")
 
     # Parameters for the ensemble model
     ensemble_model_path: str | Path | None = None

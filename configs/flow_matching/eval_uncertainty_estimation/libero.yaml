@@ -7,8 +7,8 @@ env:
   benchmark: libero_spatial
 
 eval_uncert_est:
-  n_episodes: 200
-  uncert_est_methods: [cross_bayesian, composed_cross_bayesian]
+  n_episodes: 50
+  uncert_est_methods: [composed_sequence, cross_bayesian, composed_cross_bayesian]
 
 uncertainty_sampler:
   composed_cross_bayesian_sampler:
@@ -19,7 +19,7 @@ uncertainty_sampler:
     num_action_seq_samples: 5
   composed_sequence_sampler:
     scoring_metric:
-      metric_type: inter_vel_diff
+      metric_type: mode_distance
     num_action_seq_samples: 5
   cross_bayesian_sampler:
     scorer_type: ensemble
@@ -30,6 +30,6 @@ uncertainty_sampler:
   entropy_sampler:
     num_action_seq_samples: 1000
 
-seed: 112200
+seed: 42
 
 # python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model
