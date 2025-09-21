@@ -71,10 +71,10 @@ class FlowMatchingConfig(PreTrainedConfig):
             "ACTION": NormalizationMode.MIN_MAX,
         }
     )
-    
+
     # Architecture / modeling.
     # Vision backbone. Must also be registered in FINAL_FEATURE_MAP_MODULE constant.
-    vision_backbone: str = "resnet18" 
+    vision_backbone: str = "resnet18"
     crop_shape: tuple[int, int] | None = (84, 84)
     crop_is_random: bool = True
     pretrained_backbone_weights: str | None = None
@@ -93,12 +93,12 @@ class FlowMatchingConfig(PreTrainedConfig):
     cond_vf_type: str = "ot"
 
     # Only used for optimal transport conditional vector field
-    sigma_min: float = 0.0  
+    sigma_min: float = 0.0
 
     # Only used for variance-preserving diffusion conditional vector field
-    beta_min: float = 0.1  
+    beta_min: float = 0.1
     beta_max: float = 20.0
-    
+
     # ODE solver.
     ode_step_size: float | None = 0.1
     ode_solver_method: str = "euler"
@@ -133,7 +133,7 @@ class FlowMatchingConfig(PreTrainedConfig):
                 "The horizon should be an integer multiple of the downsampling factor (which is determined "
                 f"by `len(down_dims)`). Got {self.horizon=} and {self.down_dims=}"
             )
-        
+
         if self.cond_vf_type not in ["ot", "vp"]:
             raise ValueError(f"Unknown conditional vector field type {self.cond_vf_type}")
 
@@ -171,7 +171,7 @@ class FlowMatchingConfig(PreTrainedConfig):
                 raise ValueError(
                     f"`{key}` does not match `{first_image_key}`, but we expect all image shapes to match."
                 )
-            
+
     @property
     def observation_delta_indices(self) -> list:
         return list(range(1 - self.n_obs_steps, 1))

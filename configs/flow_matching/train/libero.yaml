@@ -12,8 +12,8 @@ eval:
 policy:
   type: flow_matching
   device: cuda
-  cond_vf_type: vp
-  ode_step_size: 0.01
+  cond_vf_type: ot
+  ode_step_size: 0.1
   horizon: 16
   n_action_steps: 8
   crop_shape: null
@@ -22,11 +22,12 @@ policy:
   push_to_hub: false
 
 
-output_dir: outputs/train/flow_matching_libero_diffusion
+output_dir: outputs/train/flow_matching_libero_upstream_integration
 batch_size: 32
 steps: 125000
 eval_freq: 5000
 save_freq: 5000
+val_ratio: 0.025
 seed: 261099
 wandb:
   enable: true

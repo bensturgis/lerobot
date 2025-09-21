@@ -34,6 +34,7 @@ from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
+from lerobot.processor import PolicyProcessorPipeline
 from lerobot.scripts.eval import eval_policy
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
 from lerobot.utils.random_utils import set_seed
@@ -57,6 +58,7 @@ from lerobot.utils.wandb_utils import WandBLogger
 def compute_val_loss(
     policy: PreTrainedPolicy,
     val_loader: torch.utils.data.DataLoader,
+    preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     device: torch.device,
     use_amp: bool = False,
 ) -> float:
@@ -77,11 +79,7 @@ def compute_val_loss(
 
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
         for batch in val_loader:
-            # Move all tensors in the batch to the correct device
-            for key, value in batch.items():
-                if isinstance(value, torch.Tensor):
-                    batch[key] = value.to(device, non_blocking=True)
-
+            batch = preprocessor(batch)
             loss, _ = policy.forward(batch)
             batch_size = batch[next(iter(batch))].size(0)
             loss_meter.update(loss.item(), n=batch_size)
@@ -338,6 +336,7 @@ def train(cfg: TrainPipelineConfig):
             val_loss = compute_val_loss(
                 policy=policy,
                 val_loader=val_loader,
+                preprocessor=preprocessor,
                 device=device,
                 use_amp=cfg.policy.use_amp
             )
