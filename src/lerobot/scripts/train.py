@@ -27,10 +27,9 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.factory import make_dataset
+from lerobot.datasets.factory import make_dataset, make_train_val_split
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle
-from lerobot.envs.factory import make_env
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -200,7 +199,11 @@ def train(cfg: TrainPipelineConfig):
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("Creating dataset")
-    full_dataset = make_dataset(cfg)
+    full_dataset = make_dataset(
+        dataset_cfg=cfg.dataset,
+        policy_cfg=cfg.policy,
+        num_workers=cfg.num_workers,
+    )
     if cfg.enable_val_loss:
         train_val_split = make_train_val_split(full_dataset, cfg)
         train_dataset, val_dataset = train_val_split.train_dataset, train_val_split.val_dataset
@@ -220,7 +223,7 @@ def train(cfg: TrainPipelineConfig):
     processor_kwargs = {}
     if not (cfg.resume and cfg.policy.pretrained_path):
         # Only provide dataset_stats when not resuming from saved processor state
-        processor_kwargs["dataset_stats"] = dataset.meta.stats
+        processor_kwargs["dataset_stats"] = full_dataset.meta.stats
 
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=cfg.policy, pretrained_path=cfg.policy.pretrained_path, **processor_kwargs
@@ -251,8 +254,8 @@ def train(cfg: TrainPipelineConfig):
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
         sampler = EpisodeAwareSampler(
-            dataset.meta.episodes["dataset_from_index"],
-            dataset.meta.episodes["dataset_to_index"],
+            full_dataset.meta.episodes["dataset_from_index"],
+            full_dataset.meta.episodes["dataset_to_index"],
             drop_n_last_frames=cfg.policy.drop_n_last_frames,
             shuffle=True,
         )
@@ -278,7 +281,7 @@ def train(cfg: TrainPipelineConfig):
             num_workers=cfg.num_workers,
             batch_size=cfg.batch_size,
             shuffle=False,
-            pin_memory=device.type != "cpu",
+            pin_memory=device.type == "cuda",
             drop_last=False,
         )
     if cfg.val_freq is None:
@@ -361,7 +364,7 @@ def train(cfg: TrainPipelineConfig):
             if wandb_logger:
                 wandb_logger.log_policy(checkpoint_dir)
 
-        if cfg.env and is_eval_step:            
+        if cfg.env and is_eval_step:
             step_id = get_step_identifier(step, cfg.steps)
             logging.info(f"Eval policy at step {step}")
             with (
@@ -369,11 +372,13 @@ def train(cfg: TrainPipelineConfig):
                 torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext(),
             ):
                 eval_info = eval_policy(
-                    env=eval_env,
+                    env_cfg=cfg.env,
                     policy=policy,
                     preprocessor=preprocessor,
                     postprocessor=postprocessor,
                     n_episodes=cfg.eval.n_episodes,
+                    batch_size=cfg.eval.batch_size,
+                    use_async_envs=cfg.eval.use_async_envs,
                     videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
                     max_episodes_rendered=10,
                     start_seed=cfg.seed,

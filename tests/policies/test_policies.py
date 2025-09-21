@@ -154,7 +154,11 @@ def test_policy(ds_repo_id, env_name, env_kwargs, policy_name, policy_kwargs):
     train_cfg.validate()
 
     # Check that we can make the policy object.
-    dataset = make_dataset(train_cfg)
+    dataset = make_dataset(
+        dataset_cfg=train_cfg.dataset,
+        policy_cfg=train_cfg.policy,
+        num_workers=train_cfg.num_workers,
+    )
     preprocessor, _ = make_pre_post_processors(train_cfg.policy, None)
     policy = make_policy(train_cfg.policy, ds_meta=dataset.meta)
     assert isinstance(policy, PreTrainedPolicy)
@@ -227,7 +231,11 @@ def test_rgb_encoder(ds_repo_id, policy_name, policy_kwargs):
         dataset=dataset_config,
         policy=policy_config,
     )
-    dataset = make_dataset(train_cfg)
+    dataset = make_dataset(
+        dataset_cfg=train_cfg.dataset,
+        policy_cfg=train_cfg.policy,
+        num_workers=train_cfg.num_workers,
+    )
     dataloader = torch.utils.data.DataLoader(
         dataset,
         num_workers=0,
@@ -292,7 +300,11 @@ def test_act_backbone_lr():
     assert cfg.policy.optimizer_lr == 0.01
     assert cfg.policy.optimizer_lr_backbone == 0.001
 
-    dataset = make_dataset(cfg)
+    dataset = dataset = make_dataset(
+        dataset_cfg=cfg.dataset,
+        policy_cfg=cfg.policy,
+        num_workers=cfg.num_workers,
+    )
     preprocessor, _ = make_pre_post_processors(cfg.policy, None)
     policy = make_policy(cfg.policy, ds_meta=dataset.meta)
     optimizer, _ = make_optimizer_and_scheduler(cfg, policy)

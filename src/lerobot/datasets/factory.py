@@ -21,6 +21,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import torch
 from torch.utils.data import Subset
 
+from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.lerobot_dataset import (
@@ -73,17 +74,18 @@ def resolve_delta_timestamps(
 def make_dataset(
     dataset_cfg: DatasetConfig,
     policy_cfg: PreTrainedConfig,
+    num_workers: int = 16,
 ) -> LeRobotDataset | MultiLeRobotDataset:
-    """Handles the logic of setting up delta timestamps and image transforms before creating a dataset.
+    """
+    Create a LeRobot dataset instance with proper delta timestamp resolution and optional image transforms.
 
     Args:
-        cfg (TrainPipelineConfig): A TrainPipelineConfig config which contains a DatasetConfig and a PreTrainedConfig.
-
-    Raises:
-        NotImplementedError: The MultiLeRobotDataset is currently deactivated.
+        dataset_cfg: Dataset configuration.
+        policy_cfg: Policy configuration used to resolve delta timestamps.
+        num_workers: Number of workers for streaming datasets.
 
     Returns:
-        LeRobotDataset | MultiLeRobotDataset
+        LeRobotDataset | MultiLeRobotDataset: A dataset object ready for training or evaluation.
     """
     image_transforms = (
         ImageTransforms(dataset_cfg.image_transforms) if dataset_cfg.image_transforms.enable else None
@@ -93,26 +95,25 @@ def make_dataset(
         ds_meta = LeRobotDatasetMetadata(
             dataset_cfg.repo_id, root=dataset_cfg.root, revision=dataset_cfg.revision
         )
-        delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
-        if not cfg.dataset.streaming:
+        delta_timestamps = resolve_delta_timestamps(policy_cfg, ds_meta)
+        if not dataset_cfg.streaming:
             dataset = LeRobotDataset(
-                cfg.dataset.repo_id,
-                root=cfg.dataset.root,
-                episodes=cfg.dataset.episodes,
+                dataset_cfg.repo_id,
+                root=dataset_cfg.root,
+                episodes=dataset_cfg.episodes,
                 delta_timestamps=delta_timestamps,
                 image_transforms=image_transforms,
-                revision=cfg.dataset.revision,
-                video_backend=cfg.dataset.video_backend,
+                revision=dataset_cfg.revision,
+                video_backend=dataset_cfg.video_backend,
             )
         else:
             dataset = StreamingLeRobotDataset(
-                cfg.dataset.repo_id,
-                root=cfg.dataset.root,
-                episodes=cfg.dataset.episodes,
+                dataset_cfg.repo_id,
+                root=dataset_cfg.root,
                 delta_timestamps=delta_timestamps,
                 image_transforms=image_transforms,
-                revision=cfg.dataset.revision,
-                max_num_shards=cfg.num_workers,
+                revision=dataset_cfg.revision,
+                max_num_shards=num_workers,
             )
     else:
         raise NotImplementedError("The MultiLeRobotDataset isn't supported for now.")
@@ -197,12 +198,12 @@ def make_train_val_split(
 
     Returns:
         Training and validation dataset containing separate episodes.
-    """    
+    """
     # Build a mapping from episode ID to a list of frame indices
     frame_idxs_per_ep: Dict[int, List[int]] = {}
-    ep_starts = full_dataset.episode_data_index["from"].tolist()
-    ep_ends = full_dataset.episode_data_index["to"].tolist()
-    for ep_id, (ep_start_idx, ep_end_idx) in enumerate(zip(ep_starts, ep_ends)):
+    ep_starts = full_dataset.meta.episodes["dataset_from_index"]
+    ep_ends = full_dataset.meta.episodes["dataset_to_index"]
+    for ep_id, (ep_start_idx, ep_end_idx) in enumerate(zip(ep_starts, ep_ends, strict=True)):
         frame_idxs_per_ep[ep_id] = list(range(ep_start_idx, ep_end_idx))
 
     # Split into two flat index lists, using cfg.val_ratio
@@ -216,5 +217,5 @@ def make_train_val_split(
         train_dataset=Subset(full_dataset, train_idxs),
         val_dataset=Subset(full_dataset, val_idxs),
         train_ep_ids=train_ep_ids,
-        val_ep_ids=val_ep_ids 
+        val_ep_ids=val_ep_ids
     )

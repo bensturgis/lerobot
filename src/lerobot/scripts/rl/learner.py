@@ -993,7 +993,11 @@ def initialize_offline_replay_buffer(
     """
     if not cfg.resume:
         logging.info("make_dataset offline buffer")
-        offline_dataset = make_dataset(cfg)
+        offline_dataset = make_dataset(
+            dataset_cfg=cfg.dataset,
+            policy_cfg=cfg.policy,
+            num_workers=cfg.num_workers,
+        )
     else:
         logging.info("load offline dataset")
         dataset_offline_path = os.path.join(cfg.output_dir, "dataset_offline")

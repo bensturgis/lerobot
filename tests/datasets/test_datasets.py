@@ -385,7 +385,11 @@ def test_factory(env_name, repo_id, policy_name):
         policy=make_policy_config(policy_name),
     )
 
-    dataset = make_dataset(cfg)
+    dataset = make_dataset(
+        dataset_cfg=cfg.dataset,
+        policy_cfg=cfg.policy,
+        num_workers=cfg.num_workers,
+    )
     delta_timestamps = dataset.delta_timestamps
     camera_keys = dataset.meta.camera_keys
 

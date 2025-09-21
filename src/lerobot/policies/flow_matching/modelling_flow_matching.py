@@ -15,7 +15,7 @@ import torchvision
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from lerobot.constants import ACTION, FINAL_FEATURE_MAP_MODULE, OBS_ENV_STATE, OBS_STATE
+from lerobot.constants import ACTION, FINAL_FEATURE_MAP_MODULE, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 from lerobot.policies.flow_matching.conditional_probability_path import (
     OTCondProbPath,
     VPDiffusionCondProbPath,
@@ -259,15 +259,11 @@ class FlowMatchingPolicy(PreTrainedPolicy):
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         """Run the batch through the model and compute the loss for training or validation."""
-        batch = self.normalize_inputs(batch)
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
-            batch["observation.images"] = torch.stack(
+            batch[OBS_IMAGES] = torch.stack(
                 [batch[key] for key in self.config.image_features], dim=-4
             )
-            if self.config.n_obs_steps == 1:
-                batch["observation.images"] = batch["observation.images"].unsqueeze(1)
-        batch = self.normalize_targets(batch)
         loss = self.flow_matching.compute_loss(batch)
         # no output_dict so returning None
         return loss, None

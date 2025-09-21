@@ -63,7 +63,10 @@ def make_flow_matching_pre_post_processors(
     """
 
     input_steps = [
-        RenameObservationsProcessorStep(rename_map={}),
+        RenameObservationsProcessorStep(rename_map={
+            "observation.images.wrist_image": "observation.images.wrist.image",
+            "observation.images.wrist_image_is_pad": "observation.images.wrist.image_is_pad",
+        }),
         AddBatchDimensionProcessorStep(),
         DeviceProcessorStep(device=config.device),
         NormalizerProcessorStep(

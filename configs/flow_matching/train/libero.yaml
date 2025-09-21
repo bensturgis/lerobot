@@ -19,6 +19,7 @@ policy:
   crop_shape: null
   crop_is_random: false
   use_separate_rgb_encoder_per_camera: true
+  push_to_hub: false
 
 
 output_dir: outputs/train/flow_matching_libero_diffusion
@@ -30,4 +31,4 @@ seed: 261099
 wandb:
   enable: true
 
-# python lerobot/scripts/train.py --config=configs/flow_matching/train/libero.yaml
+# python src/lerobot/scripts/train.py --config=configs/flow_matching/train/libero.yaml

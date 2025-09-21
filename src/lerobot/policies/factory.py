@@ -376,8 +376,14 @@ def make_policy(
             raise ValueError("env_cfg cannot be None when ds_meta is not provided")
         features = env_to_policy_features(env_cfg)
 
-    cfg.output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
-    cfg.input_features = {key: ft for key, ft in features.items() if key not in cfg.output_features}
+    cfg.output_features = {}
+    cfg.input_features = {}
+    for key, ft in features.items():
+        converted_key = key.replace("_", ".")
+        if ft.type is FeatureType.ACTION:
+            cfg.output_features[converted_key] = ft
+        else:
+            cfg.input_features[converted_key] = ft
     kwargs["config"] = cfg
 
     if cfg.pretrained_path:

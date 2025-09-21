@@ -36,7 +36,11 @@ def get_policy_stats(ds_repo_id: str, policy_name: str, policy_kwargs: dict):
     )
     train_cfg.validate()  # Needed for auto-setting some parameters
 
-    dataset = make_dataset(train_cfg)
+    dataset = make_dataset(
+        dataset_cfg=train_cfg.dataset,
+        policy_cfg=train_cfg.policy,
+        num_workers=train_cfg.num_workers,
+    )
     dataset_stats = dataset.meta.stats
     policy = make_policy(train_cfg.policy, ds_meta=dataset.meta)
     preprocessor, postprocessor = make_pre_post_processors(train_cfg.policy, dataset_stats=dataset_stats)
