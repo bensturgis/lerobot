@@ -24,6 +24,7 @@ from libero.libero import benchmark as lb_bench
 
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.constants import ACTION, OBS_ENV_STATE, OBS_IMAGE, OBS_IMAGES, OBS_STATE
+from lerobot.envs.wrappers import PerturbationWrapper
 from lerobot.robots import RobotConfig
 from lerobot.teleoperators.config import TeleoperatorConfig
 
@@ -39,7 +40,7 @@ class OODConfig(abc.ABC):
     def _tweak_gym_kwargs_impl(self, kwargs: dict) -> dict:
         """Will be overwritten by subclasses."""
         return kwargs
-    
+
     def wrap(self, env: gym.Env) -> gym.Env:
         """Return wrapped env."""
         return self._wrap_impl(env) if self.enabled else env
@@ -60,7 +61,7 @@ class ImagePatchOODConfig(OODConfig):
     def _tweak_gym_kwargs_impl(self, kwargs: dict) -> dict:
         return kwargs
 
-    def _wrap_impl(self, env: gym.Env) -> gym.Env:        
+    def _wrap_impl(self, env: gym.Env) -> gym.Env:
         return PerturbationWrapper(
             env,
             static=self.static,
@@ -69,12 +70,12 @@ class ImagePatchOODConfig(OODConfig):
             allowed_area=self.allowed_area,
             patch_color=self.patch_color,
         )
-    
+
 
 @dataclass
 class BddlSwapOODConfig(OODConfig):
     bddl_root: Path = Path(__file__).resolve().parent  / "libero_bddl_files"
-    
+
     def _tweak_gym_kwargs_impl(self, kwargs: dict) -> dict:
         # Exchange in-distribution BDDL file by its corresponding out-of-distribution BDDL file
         id_bddl_path = kwargs["bddl_file_name"]
@@ -178,9 +179,9 @@ class LiberoEnv(EnvConfig):
     features_map: dict[str, str] = field(
         default_factory=lambda: {
             "action": ACTION,
-            "agent_pos": OBS_ROBOT,
+            "agent_pos": OBS_STATE,
             "pixels/image": f"{OBS_IMAGES}.image",
-            "pixels/wrist_image": f"{OBS_IMAGES}.wrist_image",
+            "pixels/wrist_image": f"{OBS_IMAGES}.wrist.image",
         }
     )
     # Out-of-distribution configuration
@@ -197,7 +198,7 @@ class LiberoEnv(EnvConfig):
     @property
     def gym_kwargs(self) -> dict:
         benchmark_dict = lb_bench.get_benchmark_dict()[self.benchmark]()
-        
+
         # Choose an a task ID
         all_task_ids = list(range(benchmark_dict.get_num_tasks()))
         if not self.task_ids:
@@ -209,7 +210,7 @@ class LiberoEnv(EnvConfig):
                 f"Task ID {chosen_task_id} is invalid for benchmark '{self.benchmark}' "
                 f"(valid range 0 … {benchmark_dict.get_num_tasks()-1})."
             )
-        
+
         # Get the path to the corresponding bddl file
         task = benchmark_dict.get_task(chosen_task_id)
         bddl_path = self.bddl_root / self.benchmark / "id" / f"{task.name}.bddl"

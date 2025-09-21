@@ -23,8 +23,8 @@ FINAL_FEATURE_MAP_MODULE = {
     # add more backbones here
 }
 
-OBS_ENV = "observation.environment_state"
-OBS_ROBOT = "observation.state"
+OBS_ENV_STATE = "observation.environment_state"
+OBS_STATE = "observation.state"
 OBS_IMAGE = "observation.image"
 OBS_IMAGES = "observation.images"
 OBS_LANGUAGE = "observation.language"

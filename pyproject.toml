@@ -64,9 +64,11 @@ dependencies = [
     "huggingface-hub[hf-transfer,cli]>=0.34.2",
 
     # Core dependencies
+    "numpy>=1.24,<2.0",
+    "scipy>=1.11,<1.16",
     "cmake>=3.29.0.1",
     "einops>=0.8.0",
-    "opencv-python-headless>=4.9.0",
+    "opencv-python-headless>=4.9.0,<4.12",
     "av>=14.2.0",
     "jsonlines>=4.0.0",
     "packaging>=24.2",
@@ -77,6 +79,7 @@ dependencies = [
     "torch>=2.2.1,<2.8.0", # TODO: Bumb dependency
     "torchcodec>=0.2.1,<0.6.0; sys_platform != 'win32' and (sys_platform != 'linux' or (platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'armv7l')) and (sys_platform != 'darwin' or platform_machine != 'x86_64')", # TODO: Bumb dependency
     "torchvision>=0.21.0,<0.23.0", # TODO: Bumb dependency
+    "torchdiffeq>=0.2.3",
 
     "draccus==0.10.0", # TODO: Remove ==
     "gymnasium>=0.29.1,<1.0.0", # TODO: Bumb dependency
@@ -124,7 +127,7 @@ smolvla = ["lerobot[transformers-dep]", "num2words>=0.5.14", "accelerate>=1.7.0"
 hilserl = ["lerobot[transformers-dep]", "gym-hil>=0.1.11", "lerobot[grpcio-dep]", "lerobot[placo-dep]"]
 
 # Features
-async = ["lerobot[grpcio-dep]", "matplotlib>=3.10.3"]
+async = ["lerobot[grpcio-dep]", "matplotlib<3.10"]
 
 # Development
 dev = ["pre-commit>=3.7.0", "debugpy>=1.8.1", "lerobot[grpcio-dep]", "grpcio-tools==1.73.1"]

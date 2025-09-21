@@ -68,12 +68,15 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.eval import EvalPipelineConfig
+from lerobot.envs.configs import EnvConfig
 from lerobot.envs.factory import make_env
 from lerobot.envs.utils import add_envs_task, check_env_attributes_and_types, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot.policies.utils import get_device_from_parameters
 from lerobot.processor import PolicyAction, PolicyProcessorPipeline
 from lerobot.utils.io_utils import write_video
+from lerobot.utils.live_window import LiveWindow
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import (
     get_safe_torch_device,
@@ -123,6 +126,7 @@ def rollout(
         The dictionary described above.
     """
     assert isinstance(policy, nn.Module), "Policy must be a PyTorch nn module."
+    device = get_device_from_parameters(policy)
 
     # Initialize random number generators to deterministically select actions
     if seeds is not None:
@@ -167,7 +171,7 @@ def rollout(
         observation = add_envs_task(env, observation)
         observation = preprocessor(observation)
         with torch.inference_mode():
-            action = policy.select_action(observation)
+            action = policy.select_action(observation, generators)
         action = postprocessor(action)
 
         # Convert to CPU / numpy.
@@ -330,7 +334,7 @@ def eval_policy(
 
         logging.info("Making environment.")
         env = make_env(
-            env_cfg,
+            cfg=env_cfg,
             n_envs=batch_size,
             use_async_envs=use_async_envs,
             seeds=seeds,
@@ -418,7 +422,7 @@ def eval_policy(
 
         if max_episodes_rendered > 0:
             num_episodes_in_batch = done_indices.numel()
-            
+
             if isinstance(ep_frames, list) and len(ep_frames) > 0:
                 batch_stacked_frames = np.stack(ep_frames, axis=1)
                 for ep in range(num_episodes_in_batch):
@@ -577,11 +581,13 @@ def eval_main(cfg: EvalPipelineConfig):
 
     with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():
         info = eval_policy(
-            env=env,
+            env_cfg=cfg.env,
             policy=policy,
             preprocessor=preprocessor,
             postprocessor=postprocessor,
             n_episodes=cfg.eval.n_episodes,
+            batch_size=cfg.eval.batch_size,
+            use_async_envs=cfg.eval.use_async_envs,
             max_episodes_rendered=10,
             videos_dir=Path(cfg.output_dir) / "videos",
             live_vis=cfg.show,

@@ -10,27 +10,26 @@ from typing import Dict, Sequence, Union
 import einops
 import numpy as np
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 import torchvision
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from lerobot.common.constants import FINAL_FEATURE_MAP_MODULE, OBS_ENV, OBS_ROBOT
-from lerobot.common.policies.flow_matching.conditional_probability_path import (
+from lerobot.constants import ACTION, FINAL_FEATURE_MAP_MODULE, OBS_ENV_STATE, OBS_STATE
+from lerobot.policies.flow_matching.conditional_probability_path import (
     OTCondProbPath,
     VPDiffusionCondProbPath,
 )
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.common.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
+from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
     FiperDataRecorderConfig,
 )
-from lerobot.common.policies.flow_matching.ode_solver import ODESolver
-from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+from lerobot.policies.flow_matching.ode_solver import ODESolver
+from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     UncertaintySamplerConfig,
 )
-from lerobot.common.policies.normalize import Normalize, Unnormalize
-from lerobot.common.policies.pretrained import PreTrainedPolicy
-from lerobot.common.policies.utils import (
+from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot.policies.utils import (
     get_device_from_parameters,
     get_dtype_from_parameters,
     get_output_shape,
@@ -51,33 +50,24 @@ class FlowMatchingPolicy(PreTrainedPolicy):
     def __init__(
         self,
         config: FlowMatchingConfig,
-        dataset_stats: dict[str, dict[str, Tensor]] | None = None,
     ):
         """
         Args:
             config: Policy configuration class instance.
             dataset_stats: Dataset statistics to be used for normalization. If not passed here, it is expected
                 that they will be passed with a call to `load_state_dict` before the policy is used.
-        """        
+        """
         super().__init__(config)
         config.validate_features()
         self.config = config
 
-        self.normalize_inputs = Normalize(config.input_features, config.normalization_mapping, dataset_stats)
-        self.normalize_targets = Normalize(
-            config.output_features, config.normalization_mapping, dataset_stats
-        )
-        self.unnormalize_outputs = Unnormalize(
-            config.output_features, config.normalization_mapping, dataset_stats
-        )
-
-        self.flow_matching = FlowMatchingModel(config)
-            
-        self.uncertainty_sampler = None
-        self.fiper_data_recorder = None
-
         # queues are populated during rollout of the policy, they contain the n latest observations and actions
         self._queues = None
+
+        self.flow_matching = FlowMatchingModel(config)
+
+        self.uncertainty_sampler = None
+        self.fiper_data_recorder = None
 
         self.reset()
 
@@ -89,7 +79,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         """
         Constructs the uncertainty sampler based on the config.
         """
-        from lerobot.common.policies.factory import make_flow_matching_uncertainty_sampler
+        from lerobot.policies.factory import make_flow_matching_uncertainty_sampler
 
         self.uncertainty_sampler = make_flow_matching_uncertainty_sampler(
             flow_matching_cfg=self.config,
@@ -106,7 +96,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         """
         Constructs the FIPER data recorder based on the config.
         """
-        from lerobot.common.policies.flow_matching.fiper_data_recording.fiper_data_recorder import (
+        from lerobot.policies.flow_matching.fiper_data_recording.fiper_data_recorder import (
             FiperDataRecorder,
         )
 
@@ -119,7 +109,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
 
     def get_optim_params(self) -> dict:
         return self.flow_matching.parameters()
-    
+
     def reset(self):
         """Clear observation and action queues. Should be called on `env.reset()`"""
         self._queues = {
@@ -141,6 +131,15 @@ class FlowMatchingPolicy(PreTrainedPolicy):
 
         if self.fiper_data_recorder is not None:
             self.fiper_data_recorder.reset()
+
+    @torch.no_grad()
+    def predict_action_chunk(self, batch: dict[str, Tensor]) -> Tensor:
+        """Predict a chunk of actions given environment observations."""
+        # stack n latest observations from the queue
+        batch = {k: torch.stack(list(self._queues[k]), dim=1) for k in batch if k in self._queues}
+        actions = self.generate_actions(batch)
+
+        return actions
 
     def generate_actions(
         self,
@@ -166,7 +165,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                 raise ValueError(
                     f"Sampling with uncertainty requires batch size of 1, but got {batch_size}."
                 )
-            
+
             # Sample action sequence candidates and compute their uncertainty.
             action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
                 observation=batch, generator=generator
@@ -193,7 +192,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                 raise ValueError(
                     f"Recording FIPER data requires batch size of 1, but got {batch_size}."
                 )
-            
+
             # Sample actions and record sampling data.
             actions = self.fiper_data_recorder.conditional_sample_with_recording(
                 observation=batch, generator=generator
@@ -201,7 +200,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         else:
             # Encode image features and concatenate them all together along with the state vector.
             global_cond = self.flow_matching.prepare_global_conditioning(batch)  # (B, global_cond_dim)
-            
+
             actions = self.flow_matching.conditional_sample(batch_size, global_cond=global_cond, generator=generator)
 
         # Extract `n_action_steps` steps worth of actions (from the current observation).
@@ -237,28 +236,27 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         "horizon" may not the best name to describe what the variable actually means, because this period is
         actually measured from the first observation which (if `n_obs_steps` > 1) happened in the past.
         """
-        batch = self.normalize_inputs(batch)
+        # NOTE: for offline evaluation, we have action in the batch, so we need to pop it out
+        if ACTION in batch:
+            batch.pop(ACTION)
+
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch["observation.images"] = torch.stack(
                 [batch[key] for key in self.config.image_features], dim=-4
             )
-        # Note: It's important that this happens after stacking the images into a single key.
+        # NOTE: It's important that this happens after stacking the images into a single key.
         self._queues = populate_queues(self._queues, batch)
 
-        if len(self._queues["action"]) == 0:
+        if len(self._queues[ACTION]) == 0:
             # stack n latest observations from the queue
             batch = {k: torch.stack(list(self._queues[k]), dim=1) for k in batch if k in self._queues}
             actions = self.generate_actions(batch, generator)
+            self._queues[ACTION].extend(actions.transpose(0, 1))
 
-            # TODO(rcadene): make above methods return output dictionary?
-            actions = self.unnormalize_outputs({"action": actions})["action"]
-
-            self._queues["action"].extend(actions.transpose(0, 1))
-
-        action = self._queues["action"].popleft()
+        action = self._queues[ACTION].popleft()
         return action
-    
+
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         """Run the batch through the model and compute the loss for training or validation."""
         batch = self.normalize_inputs(batch)
@@ -331,7 +329,7 @@ class FlowMatchingModel(nn.Module):
         predicted_velocity = self.unet(interpolated_trajectory, timestep, global_cond)
 
         return predicted_velocity
-    
+
     # ========= inference  ============
     def conditional_sample(
         self,
@@ -382,8 +380,8 @@ class FlowMatchingModel(nn.Module):
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> Tensor:
         """Encode image features and concatenate them all together along with the state vector."""
-        batch_size, n_obs_steps = batch[OBS_ROBOT].shape[:2]
-        global_cond_feats = [batch[OBS_ROBOT]]
+        batch_size, n_obs_steps = batch[OBS_STATE].shape[:2]
+        global_cond_feats = [batch[OBS_STATE]]
         # Extract image features.
         if self.config.image_features:
             if self.config.use_separate_rgb_encoder_per_camera:
@@ -413,11 +411,11 @@ class FlowMatchingModel(nn.Module):
             global_cond_feats.append(img_features)
 
         if self.config.env_state_feature:
-            global_cond_feats.append(batch[OBS_ENV])
+            global_cond_feats.append(batch[OBS_ENV_STATE])
 
         # Concatenate features then flatten to (B, global_cond_dim).
         return torch.cat(global_cond_feats, dim=-1).flatten(start_dim=1)
-    
+
     def compute_loss(self, batch: dict[str, Tensor]) -> Tensor:
         """
         This function expects `batch` to have (at least):
@@ -444,10 +442,10 @@ class FlowMatchingModel(nn.Module):
 
         # Encode image features and concatenate them all together along with the state vector.
         global_cond = self.prepare_global_conditioning(batch)  # (B, global_cond_dim)
-        
+
         # Get ground-truth trajectory (x_1)
         trajectory = batch["action"]
-        
+
         # Sample a random time for each item in the batch.
         times = torch.rand(
             size=(trajectory.shape[0],),
@@ -591,7 +589,7 @@ class FlowMatchingRgbEncoder(nn.Module):
                 break
         if not final_feature_map_module_found:
             raise RuntimeError(f"Final feature-map module “{final_feature_map_module}” not found in {config.vision_backbone}")
-        
+
         if config.use_group_norm:
             if config.pretrained_backbone_weights:
                 raise ValueError(
@@ -752,7 +750,7 @@ class FlowMatchingConditionalUnet1d(nn.Module):
             FlowMatchingConv1dBlock(config.down_dims[0], config.down_dims[0], kernel_size=config.kernel_size),
             nn.Conv1d(config.down_dims[0], config.action_feature.shape[0], 1),
         )
-    
+
     def forward(self, x: Tensor, timestep: Tensor | int, global_cond=None) -> Tensor:
         """
         Args:
@@ -796,7 +794,7 @@ class FlowMatchingConditionalUnet1d(nn.Module):
 
         x = einops.rearrange(x, "b d t -> b t d")
         return x
- 
+
 
 class FlowMatchingConditionalResidualBlock1d(nn.Module):
     """ResNet style 1D convolutional block with FiLM modulation for conditioning."""

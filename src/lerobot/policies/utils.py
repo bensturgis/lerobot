@@ -64,7 +64,7 @@ def replace_submodules(
         src_module = getattr(parent_module, k)
         tgt_module = func(src_module)
         setattr(parent_module, k, tgt_module)
-    
+
     assert not any(predicate(m) for _, m in root_module.named_modules(remove_duplicate=True))
     return root_module
 

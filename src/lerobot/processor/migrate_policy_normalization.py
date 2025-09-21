@@ -330,7 +330,10 @@ def convert_features_to_policy_features(features_dict: dict[str, dict]) -> dict[
         shape = feature_dict.get("shape", feature_dict.get("dim"))
         shape = (shape,) if isinstance(shape, int) else tuple(shape) if shape is not None else ()
 
-        converted_features[key] = PolicyFeature(feature_type, shape)
+        # Replace "_" with "." in feature keys
+        converted_key = key.replace("_", ".")
+
+        converted_features[converted_key] = PolicyFeature(feature_type, shape)
 
     return converted_features
 

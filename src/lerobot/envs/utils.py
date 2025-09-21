@@ -45,10 +45,11 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, Ten
 
     if "pixels" in observations:
         if isinstance(observations["pixels"], dict):
-            imgs = {
-                f"observation.images.{key}": ensure_batch(img)
-                for key, img in observations["pixels"].items()
-            }
+            imgs = {}
+            for key, img in observations["pixels"].items():
+                # Replace "_" with "." in feature keys
+                converted_key = key.replace("_", ".")
+                imgs[f"observation.images.{converted_key}"] = ensure_batch(img)
         else:
             imgs = {"observation.image": ensure_batch(observations["pixels"])}
 

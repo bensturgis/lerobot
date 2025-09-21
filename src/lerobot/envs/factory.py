@@ -17,7 +17,7 @@ import importlib
 
 import gymnasium as gym
 
-from lerobot.envs.configs import AlohaEnv, EnvConfig, PushtEnv, XarmEnv
+from lerobot.envs.configs import AlohaEnv, EnvConfig, LiberoEnv, PushtEnv, XarmEnv
 
 
 def make_env_config(env_type: str, **kwargs) -> EnvConfig:
@@ -36,15 +36,15 @@ def make_single_env(
     cfg: EnvConfig, seed: int | None = None
 ) -> gym.Env:
     package_name = f"gym_{cfg.type}"
-    
+
     try:
         importlib.import_module(package_name)
     except ModuleNotFoundError as e:
         print(f"{package_name} is not installed. Please install it with `pip install 'lerobot[{cfg.type}]'`")
         raise e
-    
+
     gym_handle = f"{package_name}/{cfg.task}"
-    
+
     # Set the random number generator of the Libero env to deterministically choose a task ID
     if cfg.task == "LiberoEnv-v0":
         cfg.set_task_sampling_seed(seed)
@@ -84,7 +84,7 @@ def make_env(
     """
     if n_envs < 1:
         raise ValueError("`n_envs must be at least 1")
-    
+
     if seeds is not None and len(seeds) != n_envs:
         raise ValueError(
             f"Length of seed list must equal n_envs ({n_envs}), but got length {len(seeds)}."
@@ -97,10 +97,10 @@ def make_env(
     except ModuleNotFoundError as e:
         print(f"{package_name} is not installed. Please install it with `pip install 'lerobot[{cfg.type}]'`")
         raise e
-    
+
     # batched version of the env that returns an observation of shape (b, c)
     env_cls = gym.vector.AsyncVectorEnv if use_async_envs else gym.vector.SyncVectorEnv
-    if seeds is None:    
+    if seeds is None:
         env_fns = [
             lambda cfg=cfg: make_single_env(cfg) for _ in range(n_envs)
         ]

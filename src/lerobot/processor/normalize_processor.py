@@ -131,6 +131,7 @@ class _NormalizationMixin:
         if self.dtype is None:
             self.dtype = torch.float32
         self._tensor_stats = to_tensor(self.stats, device=self.device, dtype=self.dtype)
+        print(f"_tensor_stats: {self._tensor_stats}")
 
     def to(
         self, device: torch.device | str | None = None, dtype: torch.dtype | None = None

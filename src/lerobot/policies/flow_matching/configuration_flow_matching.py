@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 from dataclasses import dataclass, field
 
-from lerobot.common.optim.optimizers import AdamConfig
-from lerobot.common.optim.schedulers import DiffuserSchedulerConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import NormalizationMode
+from lerobot.optim.optimizers import AdamConfig
+from lerobot.optim.schedulers import DiffuserSchedulerConfig
 
 
 @PreTrainedConfig.register_subclass("flow_matching")

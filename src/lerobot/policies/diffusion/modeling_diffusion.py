@@ -33,7 +33,7 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from torch import Tensor, nn
 
-from lerobot.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
+from lerobot.constants import ACTION, FINAL_FEATURE_MAP_MODULE, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import (

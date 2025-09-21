@@ -3,10 +3,10 @@ env:
   task: LiberoEnv-v0
   benchmark: libero_spatial
   ood:
-    enabled: true
+    enabled: false
 
 eval:
-  batch_size: 10
+  batch_size: 1
   n_episodes: 200
 
 seed: 42
