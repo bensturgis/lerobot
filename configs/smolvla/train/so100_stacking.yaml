@@ -1,0 +1,16 @@
+dataset:
+  repo_id: lerobot/svla_so100_stacking
+
+policy:
+  type: smolvla
+  device: cuda
+
+output_dir: outputs/train/smolvla_so100_stacking
+eval_freq: 5000
+save_freq: 5000
+batch_size: 2
+steps: 200000
+wandb:
+  enable: true
+
+# python src/lerobot/scripts/train.py --config=configs/smolvla/train/so100_stacking.yaml --policy.path=outputs/train/smolvla_base --policy.pusht_to_hub=false
