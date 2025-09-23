@@ -16,11 +16,10 @@ import abc
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, Tuple
 
 import draccus
 import gymnasium as gym
-from libero.libero import benchmark as lb_bench
 
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.constants import ACTION, OBS_ENV_STATE, OBS_IMAGE, OBS_IMAGES, OBS_STATE

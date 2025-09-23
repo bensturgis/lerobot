@@ -11,14 +11,15 @@ env:
 
 eval:
   batch_size: 1
+  n_episodes: 5
 
-output_dir: outputs/train/smolvla_libero
+output_dir: outputs/train/smolvla_libero_scratch
 steps: 200000
-batch_size: 32
-eval_freq: 1000
+batch_size: 64
+eval_freq: 5000
 save_freq: 5000
 seed: 221100
 wandb:
   enable: true
 
-# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero.yaml --policy.path=outputs/train/smolvla_base --policy.repo_id=bensturgis/smolvla-libero
+# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero.yaml --policy.path=outputs/train/smolvla_base --policy.n_action_steps=8 --policy.repo_id=bensturgis/smolvla-libero

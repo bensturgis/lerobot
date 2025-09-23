@@ -8,11 +8,10 @@ saves rollout videos, and generates comparison plots for each method.
 
 Usage example:
 
-You want to plot uncertainty estimation scores for the Action Sequence Likelihood and the Composed 
-Action Sequence Likelihood methods for 10 episodes:
+You want to plot uncertainty estimation scores for the Composed Action Sequence Likelihood method for 10 episodes:
 
 ```
-python lerobot/scripts/eval_uncertainty_estimation.py \
+python src/lerobot/scripts/eval_uncertainty_estimation.py \
     --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model \
     --policy.device=cuda \
     --env.type=pusht \
@@ -34,17 +33,17 @@ import numpy as np
 import torch
 from tqdm import trange
 
-from lerobot.common.envs.factory import make_single_env
-from lerobot.common.envs.utils import preprocess_observation
-from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
-from lerobot.common.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
+from lerobot.envs.factory import make_single_env
+from lerobot.envs.utils import preprocess_observation
+from lerobot.policies.factory import make_policy
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
+from lerobot.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
     build_scorer_artifacts_for_uncertainty_sampler,
 )
-from lerobot.common.policies.utils import get_device_from_parameters
-from lerobot.common.utils.io_utils import save_episode_video
-from lerobot.common.utils.random_utils import set_seed
-from lerobot.common.utils.utils import get_safe_torch_device, init_logging
+from lerobot.policies.utils import get_device_from_parameters
+from lerobot.utils.io_utils import save_episode_video
+from lerobot.utils.random_utils import set_seed
+from lerobot.utils.utils import get_safe_torch_device, init_logging
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
 
@@ -310,9 +309,8 @@ def load_failure_seeds(path: Path) -> list[int]:
 
 def choose_seed(failure_pool: list[int], rng: Optional[random.Random] = None) -> int:
     """
-    50% chance to use a failure seed, otherwise return a fresh
-    32-bit random seed. The chosen failure seed is removed from the
-    pool so it isn't reused again in this run.
+    50% chance to use a failure seed, otherwise return a fresh 32-bit random seed. The chosen
+    failure seed is removed from the pool so it isn't reused again in this run.
     """
     use_failure = bool(failure_pool) and rng.random() < 0.5
     if use_failure:

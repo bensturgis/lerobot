@@ -133,16 +133,6 @@ def rollout(
         The dictionary described above.
     """
     assert isinstance(policy, nn.Module), "Policy must be a PyTorch nn module."
-    device = get_device_from_parameters(policy)
-
-    # Initialize random number generators to deterministically select actions
-    if seeds is not None:
-        generators = [
-            torch.Generator(device=device).manual_seed(seed)
-            for seed in seeds
-        ]
-    else:
-        generators = None
 
     # Reset the policy and environments.
     policy.reset()
@@ -159,7 +149,7 @@ def rollout(
     step = 0
     # Keep track of which environments are done.
     done = np.array([False] * env.num_envs)
-    max_steps = env.call("spec")[0].max_episode_steps
+    max_steps = env.call("_max_episode_steps")[0]
     progbar = trange(
         max_steps,
         desc=f"Running rollout with at most {max_steps} steps",
@@ -178,7 +168,7 @@ def rollout(
         observation = add_envs_task(env, observation)
         observation = preprocessor(observation)
         with torch.inference_mode():
-            action = policy.select_action(observation, generators)
+            action = policy.select_action(observation)
         action = postprocessor(action)
 
         # Convert to CPU / numpy.
@@ -457,8 +447,6 @@ def eval_policy(
         progbar.set_postfix(
             {"running_success_rate": f"{np.mean(all_successes[:n_episodes]).item() * 100:.1f}%"}
         )
-
-        env.close()
 
     # Close the live visualization
     if live_vis:

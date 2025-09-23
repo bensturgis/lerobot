@@ -389,8 +389,6 @@ def train(cfg: TrainPipelineConfig):
                     preprocessor=preprocessor,
                     postprocessor=postprocessor,
                     n_episodes=cfg.eval.n_episodes,
-                    batch_size=cfg.eval.batch_size,
-                    use_async_envs=cfg.eval.use_async_envs,
                     videos_dir=cfg.output_dir / "eval" / f"videos_step_{step_id}",
                     max_episodes_rendered=10,
                     start_seed=cfg.seed,
