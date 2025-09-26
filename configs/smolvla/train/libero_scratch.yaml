@@ -18,8 +18,9 @@ output_dir: outputs/train/smolvla_libero_scratch
 steps: 200000
 batch_size: 64
 eval_freq: 5000
+val_ratio: 0.05
 save_freq: 10000
-seed: 221100
+seed: 22110026
 wandb:
   enable: true
 

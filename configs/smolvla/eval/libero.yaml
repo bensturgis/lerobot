@@ -1,0 +1,9 @@
+env:
+  type: libero
+  task: libero_10
+
+eval:
+  batch_size: 1
+  n_episodes: 5
+
+# python src/lerobot/scripts/eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla_libero_scratch/checkpoints/090000/pretrained_model
