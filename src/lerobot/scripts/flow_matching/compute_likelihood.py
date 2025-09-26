@@ -12,17 +12,18 @@ Examples:
     ```
 """
 import argparse
-import torch
 
+import torch
 from torch.distributions import Independent, Normal
 
-from lerobot.common.datasets.factory import make_dataset
-from lerobot.common.datasets.utils import cycle
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
-from lerobot.common.policies.flow_matching.ode_solver import ODESolver
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
+from lerobot.datasets.factory import make_dataset
+from lerobot.datasets.utils import cycle
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
+from lerobot.policies.flow_matching.ode_solver import ODESolver
+from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
+
 
 def compute_log_likelihood(
     ds_repo_id: str,
@@ -65,7 +66,7 @@ def compute_log_likelihood(
         )
         if flow_matching_policy.config.n_obs_steps == 1:
             batch["observation.images"] = batch["observation.images"].unsqueeze(1)
-    
+
     # Encode image features and concatenate them all together along with the state vector.
     global_cond = flow_matching_model._prepare_global_conditioning(batch)
 
@@ -95,7 +96,7 @@ def compute_log_likelihood(
     ).log_prob
 
     ode_solver = ODESolver(velocity_model=flow_matching_model.unet)
-    
+
     exact_divergence = False
     x_1, log_p_1_x_1_forward = ode_solver.sample_with_log_likelihood(
         x_init=noise_sample,
@@ -129,7 +130,7 @@ def compute_log_likelihood(
         exact_divergence=exact_divergence,
         generator=generator,
     )
-        
+
     print(f"Reconstructed x_0: {x_0}")
     print(f"Log-likelihood of x_1: {log_p_1_x_1_reverse}")
 

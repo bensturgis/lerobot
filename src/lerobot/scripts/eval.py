@@ -52,7 +52,6 @@ import logging
 import threading
 import time
 from collections import defaultdict
-from collections.abc import Callable
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import asdict
@@ -80,7 +79,6 @@ from lerobot.envs.utils import (
 )
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
-from lerobot.policies.utils import get_device_from_parameters
 from lerobot.processor import PolicyAction, PolicyProcessorPipeline
 from lerobot.utils.io_utils import write_video
 from lerobot.utils.live_window import LiveWindow
@@ -576,8 +574,6 @@ def eval_main(cfg: EvalPipelineConfig):
             preprocessor=preprocessor,
             postprocessor=postprocessor,
             n_episodes=cfg.eval.n_episodes,
-            batch_size=cfg.eval.batch_size,
-            use_async_envs=cfg.eval.use_async_envs,
             max_episodes_rendered=10,
             videos_dir=Path(cfg.output_dir) / "videos",
             live_vis=cfg.show,
@@ -621,6 +617,7 @@ def eval_one(
     n_episodes: int,
     max_episodes_rendered: int,
     videos_dir: Path | None,
+    live_vis: bool,
     return_episode_data: bool,
     start_seed: int | None,
 ) -> TaskMetrics:
@@ -636,6 +633,7 @@ def eval_one(
         n_episodes=n_episodes,
         max_episodes_rendered=max_episodes_rendered,
         videos_dir=task_videos_dir,
+        live_vis=live_vis,
         return_episode_data=return_episode_data,
         start_seed=start_seed,
     )
@@ -660,6 +658,7 @@ def run_one(
     n_episodes: int,
     max_episodes_rendered: int,
     videos_dir: Path | None,
+    live_vis: bool,
     return_episode_data: bool,
     start_seed: int | None,
 ):
@@ -682,6 +681,7 @@ def run_one(
         n_episodes=n_episodes,
         max_episodes_rendered=max_episodes_rendered,
         videos_dir=task_videos_dir,
+        live_vis=live_vis,
         return_episode_data=return_episode_data,
         start_seed=start_seed,
     )
@@ -700,6 +700,7 @@ def eval_policy_all(
     *,
     max_episodes_rendered: int = 0,
     videos_dir: Path | None = None,
+    live_vis: bool = False,
     return_episode_data: bool = False,
     start_seed: int | None = None,
     max_parallel_tasks: int = 1,
@@ -754,6 +755,7 @@ def eval_policy_all(
         n_episodes=n_episodes,
         max_episodes_rendered=max_episodes_rendered,
         videos_dir=videos_dir,
+        live_vis=live_vis,
         return_episode_data=return_episode_data,
         start_seed=start_seed,
     )
