@@ -148,14 +148,13 @@ def _split_indices_by_episode(
     frame_idxs_per_ep: dict[int, list[int]],
     val_ratio: float,
     seed: Optional[int] = None,
-) -> Tuple[list[int], list[int]]:
+) -> Tuple[list[int], list[int], set[int], set[int]]:
     """
     Split frame indices so that no episode is shared between train and val.
 
     Args:
-        frame_idxs_per_ep: Mapping from each episode ID to the list of frame
-            indices belonging to it.
-        val_ratio: Fraction of episodes to reserved for validation.
+        frame_idxs_per_ep: Mapping from each episode ID to the list of frame indices belonging to it.
+        val_ratio: Fraction of episodes reserved for validation.
         seed: Random seed for shuffling episodes.
 
     Returns:
@@ -188,7 +187,7 @@ def _split_indices_by_episode(
 
 def make_train_val_split(
     full_dataset: LeRobotDataset, cfg: TrainPipelineConfig
-) -> Tuple[Subset, Subset]:
+) -> TrainValSplit:
     """
     Load a full dataset and return disjoint train/validation subsets by episode.
 
@@ -213,9 +212,14 @@ def make_train_val_split(
         seed=cfg.seed or None,
     )
 
-    return TrainValSplit(
+    train_val_split = TrainValSplit(
         train_dataset=Subset(full_dataset, train_idxs),
         val_dataset=Subset(full_dataset, val_idxs),
         train_ep_ids=train_ep_ids,
         val_ep_ids=val_ep_ids
     )
+
+    logging.info(f"Number of train episodes: {len(train_ep_ids)}")
+    logging.info(f"Number of validation episodes: {len(val_ep_ids)}")
+
+    return train_val_split

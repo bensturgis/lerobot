@@ -1409,3 +1409,86 @@ def safe_shard(dataset: datasets.IterableDataset, index: int, num_shards: int) -
     shard_idx = min(dataset.num_shards, index + 1) - 1
 
     return dataset.shard(num_shards, index=shard_idx)
+
+
+def recompute_episode_boundaries_from_hf_table(dataset: torch.utils.data.Dataset) -> tuple[list[int], list[int]]:
+    """
+    Recompute episode boundaries from the HF table's per-frame `episode_index` column.
+
+    Returns:
+        episode_ids: Sorted list of unique episode IDs as they first appear in the dataset.
+        start_indices: Start (inclusive) dataset indices for each episode_id (aligned with episode_ids).
+        end_indices: End (exclusive) dataset indices for each episode_id (aligned with episode_ids).
+    """
+    # Load the underlying Hugging Face table
+    hf_dataset = getattr(dataset, "hf_dataset", None) or dataset.load_hf_dataset()
+    if hf_dataset is None:
+        raise ValueError("Could not access the underlying HF dataset.")
+
+    if "episode_index" not in hf_dataset.column_names:
+        raise ValueError(
+            "The HF dataset does not contain an `episode_index` column; "
+            "cannot rebuild episode boundaries."
+        )
+
+    # Single pass to capture first and last frame for each episode
+    first_idx: dict[int, int] = {}
+    last_idx_plus_one: dict[int, int] = {}
+
+    # HF datasets let you pull a whole column cheaply
+    ep_col: list[int] = list(map(int, hf_dataset["episode_index"]))
+
+    # We should not see an episode ID "come back" after we've moved on
+    seen_any = set()
+    last_seen = None
+    for frame_idx, ep_id in enumerate(ep_col):
+        if ep_id not in seen_any:
+            seen_any.add(ep_id)
+        else:
+            assert ep_id >= last_seen, "Episode IDs are not non-decreasing; dataset not grouped by episode."
+            
+        if ep_id not in first_idx:
+            first_idx[ep_id] = frame_idx
+        # End is exclusive, keep bumping it as we advance
+        last_idx_plus_one[ep_id] = frame_idx + 1
+        last_seen = ep_id
+
+    # Build aligned arrays in the order episodes first appear in the dataset
+    episode_ids_sorted = sorted(first_idx.keys(), key=lambda e: first_idx[e])
+    start_indices = [first_idx[e] for e in episode_ids_sorted]
+    end_indices = [last_idx_plus_one[e] for e in episode_ids_sorted]
+
+    # Each episode must be non-empty and ranges must be strictly increasing / non-overlapping
+    assert all(s < t for s, t in zip(start_indices, end_indices)), \
+        "Found an episode with non-positive length."
+
+    assert all(end_indices[i] <= start_indices[i+1] for i in range(len(start_indices) - 1)), \
+        "Episode index ranges overlap or are not ordered."
+
+    return start_indices, end_indices
+
+
+def patch_dataset_episode_boundaries(dataset: torch.utils.data.Dataset) -> torch.utils.data.Dataset:
+    """
+    Compute correct episode boundaries from the HF table and patch `ds.meta.episodes` in place.
+
+    Returns:
+        A dict containing the patched fields and the episode_ids used:
+            {
+                "episode_ids": [...],
+                "dataset_from_index": [...],
+                "dataset_to_index":   [...],
+            }
+    """
+    start_indices, end_indices = recompute_episode_boundaries_from_hf_table(dataset=dataset)
+
+    # Patch the LeRobot metadata
+    cols = set(dataset.meta.episodes.column_names)
+    to_drop = [c for c in ("dataset_from_index", "dataset_to_index") if c in cols]
+    if to_drop:
+        dataset.meta.episodes = dataset.meta.episodes.remove_columns(to_drop)
+
+    dataset.meta.episodes = dataset.meta.episodes.add_column("dataset_from_index", start_indices)
+    dataset.meta.episodes = dataset.meta.episodes.add_column("dataset_to_index", end_indices)
+
+    return dataset

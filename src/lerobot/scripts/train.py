@@ -29,7 +29,7 @@ from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset, make_train_val_split
 from lerobot.datasets.sampler import EpisodeAwareSampler
-from lerobot.datasets.utils import cycle
+from lerobot.datasets.utils import cycle, patch_dataset_episode_boundaries
 from lerobot.envs.factory import make_env
 from lerobot.envs.utils import close_envs
 from lerobot.optim.factory import make_optimizer_and_scheduler
@@ -204,6 +204,7 @@ def train(cfg: TrainPipelineConfig):
         policy_cfg=cfg.policy,
         num_workers=cfg.num_workers,
     )
+    full_dataset = patch_dataset_episode_boundaries(dataset=full_dataset)
     if cfg.enable_val_loss:
         train_val_split = make_train_val_split(full_dataset, cfg)
         train_dataset, val_dataset = train_val_split.train_dataset, train_val_split.val_dataset
@@ -408,9 +409,9 @@ def train(cfg: TrainPipelineConfig):
                 "eval_s": AverageMeter("eval_s", ":.3f"),
             }
             eval_tracker = MetricsTracker(
-                cfg.eval.batch_size,
-                cfg.eval.n_episodes,
-                cfg.eval.n_episodes,
+                cfg.batch_size,
+                full_dataset.num_frames,
+                full_dataset.num_episodes,
                 eval_metrics,
                 initial_step=step
             )
