@@ -5,17 +5,17 @@ import torch
 from torch import Tensor
 from torch.distributions import Independent, Normal
 
-from lerobot.common.policies.flow_matching.conditional_probability_path import (
+from lerobot.policies.flow_matching.conditional_probability_path import (
     OTCondProbPath,
     VPDiffusionCondProbPath,
 )
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
-from lerobot.common.policies.flow_matching.ode_solver import (
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
+from lerobot.policies.flow_matching.ode_solver import (
     ODESolver,
     make_lik_estimation_time_grid,
     select_ode_states,
 )
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
+from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
 from .configuration_uncertainty_sampler import ScoringMetricConfig

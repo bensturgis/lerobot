@@ -4,8 +4,8 @@ from typing import Optional, Sequence, Tuple
 import torch
 from torch import Tensor
 
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
+from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 from ..configuration_flow_matching import FlowMatchingConfig
 from ..ode_solver import ADAPTIVE_SOLVERS, FIXED_STEP_SOLVERS, ODESolver, make_sampling_time_grid
@@ -61,7 +61,7 @@ class FlowMatchingUncertaintySampler(ABC):
             )
         else:
             raise ValueError(f"Unknown ODE solver method: {flow_matching_cfg.ode_solver_method}.")
-    
+
     def _reshape_conditioning(self, global_cond: Tensor) -> Tensor:
         """
         Reshape single global conditioning vector to (num_action_seq_samples, cond_dim).

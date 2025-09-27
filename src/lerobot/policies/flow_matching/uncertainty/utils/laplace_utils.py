@@ -12,15 +12,15 @@ from torch.nn.utils import vector_to_parameters
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 
-from lerobot.common.datasets.factory import make_dataset
-from lerobot.common.policies.flow_matching.conditional_probability_path import OTCondProbPath
-from lerobot.common.policies.flow_matching.modelling_flow_matching import (
+from lerobot.configs.default import DatasetConfig
+from lerobot.configs.policies import PreTrainedConfig
+from lerobot.datasets.factory import make_dataset
+from lerobot.policies.flow_matching.conditional_probability_path import OTCondProbPath
+from lerobot.policies.flow_matching.modelling_flow_matching import (
     FlowMatchingModel,
     FlowMatchingPolicy,
 )
-from lerobot.common.utils.utils import get_safe_torch_device
-from lerobot.configs.default import DatasetConfig
-from lerobot.configs.policies import PreTrainedConfig
+from lerobot.utils.utils import get_safe_torch_device
 
 
 @dataclass(frozen=True)

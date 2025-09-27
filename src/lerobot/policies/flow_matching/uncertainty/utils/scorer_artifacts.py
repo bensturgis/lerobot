@@ -5,7 +5,7 @@ from typing import Optional
 
 from laplace import Laplace
 
-from lerobot.common import envs
+from lerobot import envs
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
 

@@ -3,9 +3,11 @@ dataset:
 
 env:
   type: pusht
+  ood:
+    static: False
 
 eval_uncert_est:
-  n_episodes: 20
+  n_episodes: 10
   uncert_est_methods: [composed_sequence]
   collapse_success_failure: True
 
@@ -18,8 +20,8 @@ uncertainty_sampler:
     num_action_seq_samples: 5
   composed_sequence_sampler:
     scoring_metric:
-      metric_type: inter_vel_diff
-    num_action_seq_samples: 1
+      metric_type: mode_distance
+    num_action_seq_samples: 5
   cross_bayesian_sampler:
     scorer_type: ensemble
     ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model

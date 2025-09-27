@@ -2,12 +2,12 @@ import copy
 from pathlib import Path
 from typing import Union
 
-from lerobot.common import envs
-from lerobot.common.policies.flow_matching.modelling_flow_matching import (
+from lerobot import envs
+from lerobot.configs.policies import PreTrainedConfig
+from lerobot.policies.flow_matching.modelling_flow_matching import (
     FlowMatchingModel,
 )
-from lerobot.common.utils.utils import get_safe_torch_device
-from lerobot.configs.policies import PreTrainedConfig
+from lerobot.utils.utils import get_safe_torch_device
 
 
 def build_ensemble_model(
@@ -18,7 +18,7 @@ def build_ensemble_model(
     """
     Load a pretrained ensemble flow-matching model from the given path.
     """
-    from lerobot.common.policies.factory import make_policy
+    from lerobot.policies.factory import make_policy
 
     device = get_safe_torch_device(policy_cfg.device)
     ensemble_model_config = copy.deepcopy(policy_cfg)

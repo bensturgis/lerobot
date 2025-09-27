@@ -1,0 +1,7 @@
+env:
+  type: libero
+  task: libero_10
+
+eval:
+  batch_size: 1
+  n_episodes: 100

@@ -15,8 +15,8 @@ eval:
 
 output_dir: outputs/train/smolvla_libero_finetuning
 steps: 200000
-batch_size: 64
-eval_freq: 5000
+batch_size: 24
+eval_freq: 2500
 save_freq: 5000
 seed: 221100
 wandb:

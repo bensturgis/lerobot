@@ -144,35 +144,48 @@ def check_env_attributes_and_types(env: gym.vector.VectorEnv) -> None:
             )
 
 
-def add_envs_task(env: gym.vector.VectorEnv, observation: dict[str, Any]) -> dict[str, Any]:
-    """Adds task feature to the observation dict with respect to the first environment attribute."""
-    if hasattr(env.envs[0], "task_description"):
-        task_result = env.call("task_description")
+def add_envs_task(env: gym.Env | gym.vector.VectorEnv, observation: dict[str, Any]) -> dict[str, Any]:
+    """Adds task feature to the observation dict."""
+    def _get_task_from_single_env(env: gym.Env) -> str | list[str] | None:
+        for name in ("task_description", "task"):
+            if hasattr(env, name):
+                task_result = getattr(env, name)
+                return task_result() if callable(task_result) else task_result
+        return None
+
+    def _get_task_from_vector_env(env: gym.vector.VectorEnv) -> list[str] | None:
+        # Check attribute on first sub-env to avoid calling missing method
+        for name in ("task_description", "task"):
+            if hasattr(env.envs[0], name):
+                result = env.call(name)
+                return result
+        return None
+
+    if isinstance(env, gym.vector.VectorEnv):
+        batch_size = env.num_envs
+        task_result = _get_task_from_vector_env(env)
+    else:
+        batch_size = 1
+        task_result = _get_task_from_single_env(env)
+
+    if task_result is not None:
+        if isinstance(task_result, str):
+            task_result = [task_result] * batch_size
 
         if isinstance(task_result, tuple):
             task_result = list(task_result)
 
-        if not isinstance(task_result, list):
-            raise TypeError(f"Expected task_description to return a list, got {type(task_result)}")
+        if not isinstance(task_result, list) or len(task_result) != batch_size:
+            raise ValueError(
+                f"Expected task_description to return a list of length {batch_size}, got {task_result} of type {type(task_result)}"
+            )
         if not all(isinstance(item, str) for item in task_result):
             raise TypeError("All items in task_description result must be strings")
 
         observation["task"] = task_result
-    elif hasattr(env.envs[0], "task"):
-        task_result = env.call("task")
+    else:
+        observation["task"] = [""] * batch_size
 
-        if isinstance(task_result, tuple):
-            task_result = list(task_result)
-
-        if not isinstance(task_result, list):
-            raise TypeError(f"Expected task to return a list, got {type(task_result)}")
-        if not all(isinstance(item, str) for item in task_result):
-            raise TypeError("All items in task result must be strings")
-
-        observation["task"] = task_result
-    else:  #  For envs without language instructions, e.g. aloha transfer cube and etc.
-        num_envs = observation[list(observation.keys())[0]].shape[0]
-        observation["task"] = ["" for _ in range(num_envs)]
     return observation
 
 

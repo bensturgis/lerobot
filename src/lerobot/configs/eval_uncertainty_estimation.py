@@ -3,18 +3,18 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs
-from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
-    UncertaintySamplerConfig,
-)
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig, EvalUncertEstConfig
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.envs import EnvConfig
+from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
+)
 
 
 @dataclass
 class EvalUncertaintyEstimationPipelineConfig:
-    env: envs.EnvConfig
+    env: EnvConfig
     eval_uncert_est: EvalUncertEstConfig = field(default_factory=EvalUncertEstConfig)
     policy: PreTrainedConfig | None = None
     uncertainty_sampler: UncertaintySamplerConfig = field(default_factory=UncertaintySamplerConfig)
@@ -59,7 +59,7 @@ class EvalUncertaintyEstimationPipelineConfig:
                 "Cross-Bayesian uncertainty sampler with scorer_type=ensemble requested but no" \
                 "ensemble checkpoint provided."
             )
-        
+
         if (
             "composed_cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
             self.uncertainty_sampler.composed_cross_bayesian_sampler.scorer_type == "ensemble" and
@@ -69,7 +69,7 @@ class EvalUncertaintyEstimationPipelineConfig:
                 "Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requested but no " \
                 "ensemble checkpoint provided."
             )
-        
+
         if (
             "cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
             self.uncertainty_sampler.cross_bayesian_sampler.scorer_type == "laplace" and
@@ -79,7 +79,7 @@ class EvalUncertaintyEstimationPipelineConfig:
                 "Cross-Bayesian uncertainty sampler with scorer_type=laplace requested but no dataset "
                 "config for Laplace approximation provided."
             )
-            
+
         if (
             "composed_cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
             self.uncertainty_sampler.composed_cross_bayesian_sampler.scorer_type == "laplace" and

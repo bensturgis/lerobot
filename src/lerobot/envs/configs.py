@@ -13,9 +13,7 @@
 # limitations under the License.
 
 import abc
-import random
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Tuple
 
 import draccus
@@ -69,23 +67,6 @@ class ImagePatchOODConfig(OODConfig):
             allowed_area=self.allowed_area,
             patch_color=self.patch_color,
         )
-
-
-@dataclass
-class BddlSwapOODConfig(OODConfig):
-    bddl_root: Path = Path(__file__).resolve().parent  / "libero_bddl_files"
-
-    def _tweak_gym_kwargs_impl(self, kwargs: dict) -> dict:
-        # Exchange in-distribution BDDL file by its corresponding out-of-distribution BDDL file
-        id_bddl_path = kwargs["bddl_file_name"]
-        bddl_filename = id_bddl_path.name
-        ood_bddl_path = id_bddl_path.parent.parent / "ood" / bddl_filename
-        kwargs["bddl_file_name"] = ood_bddl_path
-
-        return kwargs
-
-    def _wrap_impl(self, env: gym.Env) -> gym.Env:
-        return env
 
 
 @dataclass
@@ -217,6 +198,9 @@ class XarmEnv(EnvConfig):
         }
     )
 
+    # Out-of-distribution configuration
+    ood: ImagePatchOODConfig = ImagePatchOODConfig()
+
     def __post_init__(self):
         if self.obs_type == "pixels_agent_pos":
             self.features["agent_pos"] = PolicyFeature(type=FeatureType.STATE, shape=(4,))
@@ -340,6 +324,9 @@ class LiberoEnv(EnvConfig):
             "pixels/robot0_eye_in_hand_image": f"{OBS_IMAGES}.image2",
         }
     )
+
+    # Out-of-distribution configuration
+    ood: ImagePatchOODConfig = ImagePatchOODConfig()
 
     def __post_init__(self):
         if self.obs_type == "pixels":
