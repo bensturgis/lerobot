@@ -5,4 +5,4 @@ eval:
   batch_size: 10
   n_episodes: 10
 
-# python lerobot/scripts/eval.py --config=configs/flow_matching/eval/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
+# python src/lerobot/scripts/eval.py --config=configs/flow_matching/eval/pusht.yaml --policy.path=outputs/train/flow_matching_pusht_02/checkpoints/last/pretrained_model_migrated

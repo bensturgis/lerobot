@@ -22,6 +22,7 @@ python src/lerobot/scripts/eval_uncertainty_estimation.py \
 import logging
 import time
 from collections import defaultdict
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -38,7 +39,11 @@ from lerobot.envs.configs import EnvConfig
 from lerobot.envs.factory import make_single_env
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
+from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
+)
 from lerobot.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
+    ScorerArtifacts,
     build_scorer_artifacts_for_uncertainty_sampler,
 )
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -328,6 +333,20 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
 
+    scorer_artifacts_by_method: Dict[str, ScorerArtifacts] = {}
+    uncertainty_config_by_method: Dict[str, UncertaintySamplerConfig] = {}
+    for uncert_est_method in cfg.eval_uncert_est.uncert_est_methods:
+        uncertainty_config = deepcopy(cfg.uncertainty_sampler)
+        uncertainty_config.type = uncert_est_method
+        uncertainty_config_by_method[uncert_est_method] = uncertainty_config
+        scorer_artifacts_by_method[uncert_est_method] = build_scorer_artifacts_for_uncertainty_sampler(
+            uncertainty_sampler_cfg=uncertainty_config,
+            policy_cfg=cfg.policy,
+            env_cfg=cfg.env,
+            dataset_cfg=cfg.dataset,
+            policy=policy,
+        )
+
     uncertainty_scores: Dict[Tuple[str, int], Dict[str, Dict[Tuple[str, str], List[np.ndarray]]]] = defaultdict(
         lambda: defaultdict(lambda: {(d, o): [] for d in cfg.eval_uncert_est.domains for o in ("success", "failure")})
     )
@@ -344,17 +363,9 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             for task_group, task_id, env in tasks:
                 task_title = get_task_title(task_group=task_group, task_id=task_id)
                 for uncert_est_method in cfg.eval_uncert_est.uncert_est_methods:
-                    cfg.uncertainty_sampler.type = uncert_est_method
-                    scorer_artifacts = build_scorer_artifacts_for_uncertainty_sampler(
-                        uncertainty_sampler_cfg=cfg.uncertainty_sampler,
-                        policy_cfg=cfg.policy,
-                        env_cfg=cfg.env,
-                        dataset_cfg=cfg.dataset,
-                        policy=policy,
-                    )
                     policy.init_uncertainty_sampler(
-                        config=cfg.uncertainty_sampler,
-                        scorer_artifacts=scorer_artifacts,
+                        config=uncertainty_config_by_method[uncert_est_method],
+                        scorer_artifacts=scorer_artifacts_by_method[uncert_est_method],
                     )
 
                     ep_info = rollout(

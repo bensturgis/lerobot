@@ -3,15 +3,15 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
-from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+from lerobot.policies.factory import make_flow_matching_uncertainty_scoring_metric
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
+from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
 )
-from lerobot.common.policies.flow_matching.uncertainty.utils.laplace_utils import (
+from lerobot.policies.flow_matching.uncertainty.utils.laplace_utils import (
     draw_laplace_flow_matching_model,
 )
-from lerobot.common.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
+from lerobot.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
     ScorerArtifacts,
 )
 
@@ -57,7 +57,7 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
             config=cfg.scoring_metric,
             uncertainty_sampler=self,
         )
-        
+
         self.ensemble_model = scorer_artifacts.ensemble_model
         self.laplace_posterior = scorer_artifacts.laplace_posterior
         if cfg.scorer_type == "ensemble" and self.ensemble_model is None:
@@ -100,7 +100,7 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
-        
+
         # Adjust shape of conditioning vector
         global_cond = self._reshape_conditioning(global_cond)
 
@@ -160,5 +160,5 @@ class CrossBayesianSampler(FlowMatchingUncertaintySampler):
 
         # Average uncertainty scores and store for logging
         self.latest_uncertainty = uncertainty_scores.mean().item()
-        
+
         return self.latest_action_candidates, self.latest_uncertainty

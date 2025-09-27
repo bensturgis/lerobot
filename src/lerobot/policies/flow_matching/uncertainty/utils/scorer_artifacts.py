@@ -56,7 +56,7 @@ def build_scorer_artifacts_for_uncertainty_sampler(
         )
         return ScorerArtifacts(ensemble_model=ensemble_model)
     if scorer_type == "laplace":
-        post = build_laplace_posterior_artifact(
+        laplace_posterior = build_laplace_posterior_artifact(
             laplace_scope=active_config.laplace_scope,
             calib_fraction=active_config.calib_fraction,
             batch_size=active_config.batch_size,
@@ -64,7 +64,7 @@ def build_scorer_artifacts_for_uncertainty_sampler(
             policy_cfg=policy_cfg,
             policy=policy
         )
-        return ScorerArtifacts(laplace_posterior=post)
+        return ScorerArtifacts(laplace_posterior=laplace_posterior)
     raise ValueError(f"Unknown scorer_type: {scorer_type!r}")
 
 def build_scorer_artifacts_for_fiper_recorder(

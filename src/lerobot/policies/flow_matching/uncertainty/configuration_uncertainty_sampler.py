@@ -116,7 +116,7 @@ class ComposedCrossBayesianSamplerConfig:
     scorer_type: str = "ensemble"
     num_action_seq_samples: int = 5
     scoring_metric: ScoringMetricConfig = field(default_factory=ScoringMetricConfig)
-    
+
     # Parameters for the ensemble model
     ensemble_model_path: str | Path | None = None
 
@@ -133,7 +133,7 @@ class ComposedCrossBayesianSamplerConfig:
                 f"CrossBayesianSamplerConfig.scorer_type must be one of "
                 f"{sorted(allowed_scorer_types)}, got {self.scorer_type}."
             )
-        
+
         # Validate Laplace scope
         allowed_scopes = {"velocity_last", "rgb_last", "both"}
         if self.laplace_scope not in allowed_scopes:
@@ -141,7 +141,7 @@ class ComposedCrossBayesianSamplerConfig:
                 f"CrossLaplaceSamplerConfig.laplace_scope must be one of "
                 f"{sorted(allowed_scopes)}, got {self.laplace_scope!r}."
             )
-        
+
         # Validate scoring metric
         validate_metric(
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
@@ -181,7 +181,7 @@ class CrossBayesianSamplerConfig:
                 f"CrossLaplaceSamplerConfig.laplace_scope must be one of "
                 f"{sorted(allowed_scopes)}, got {self.laplace_scope}."
             )
-        
+
         # Validate scoring metric
         validate_metric(
             field_name="CrossEnsembleSamplerConfig.scoring_metric",
@@ -195,7 +195,7 @@ class CrossBayesianSamplerConfig:
 class ComposedSequenceSamplerConfig:
     num_action_seq_samples: int = 5
     scoring_metric: ScoringMetricConfig = field(default_factory=ScoringMetricConfig)
-    
+
     def __post_init__(self):
         validate_metric(
             field_name="CrossEnsembleSamplerConfig.scoring_metric",

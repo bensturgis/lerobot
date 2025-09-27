@@ -8,13 +8,13 @@ env:
 
 eval_uncert_est:
   n_episodes: 10
-  uncert_est_methods: [composed_sequence]
+  uncert_est_methods: [cross_bayesian]
   collapse_success_failure: True
 
 uncertainty_sampler:
   composed_cross_bayesian_sampler:
     scorer_type: ensemble
-    ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
+    ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model_migrated
     scoring_metric:
       metric_type: inter_vel_diff
     num_action_seq_samples: 5
@@ -24,11 +24,11 @@ uncertainty_sampler:
     num_action_seq_samples: 5
   cross_bayesian_sampler:
     scorer_type: ensemble
-    ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model
+    ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model_migrated
     scoring_metric:
-      metric_type: inter_vel_diff
+      metric_type: mode_distance
     num_action_seq_samples: 5
 
 seed: 42
 
-# python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/200000/pretrained_model
+# python src/lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/200000/pretrained_model_migrated
