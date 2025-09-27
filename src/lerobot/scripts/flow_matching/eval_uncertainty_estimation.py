@@ -56,7 +56,7 @@ from lerobot.utils.utils import get_safe_torch_device, init_logging
 
 def plot_uncertainties(
     uncert_est_method: str,
-    scoring_metric: str,
+    scoring_metric: Optional[str],
     task_title: str,
     uncertainty_buckets: Dict[str, list[np.ndarray]],
     color_map: Dict[str, str],
@@ -109,6 +109,8 @@ def plot_uncertainties(
 
         if scoring_metric == "mode_distance":
             y_label = "Mode Distance Score"
+        elif scoring_metric == "terminal_vel_norm":
+            y_label = "Terminal Velocity Norm Score"
         elif scoring_metric == "inter_vel_diff":
             y_label = "Velocity Diff. Score"
         elif scoring_metric == "likelihood":
@@ -205,7 +207,7 @@ def rollout(
         # Decide whether a new sequence will be generated
         new_action_gen = len(policy._queues["action"]) == 0
 
-        with torch.inference_mode():
+        with torch.no_grad():
             action = policy.select_action(observation, generator)
         action = postprocessor(action)
 
@@ -396,7 +398,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                             uncertainty_buckets[label] = merged_uncertainties
                         plot_uncertainties(
                             uncert_est_method=uncert_est_method,
-                            scoring_metric=getattr(policy.uncertainty_sampler, 'scoring_metric', None),
+                            scoring_metric=getattr(getattr(policy.uncertainty_sampler, "scoring_metric", None), "name", None),
                             task_title=task_title,
                             uncertainty_buckets=uncertainty_buckets,
                             color_map={
@@ -413,7 +415,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
                             uncertainty_buckets[label] = uncertainties_per_episode
                         plot_uncertainties(
                             uncert_est_method=uncert_est_method,
-                            scoring_metric=getattr(policy.uncertainty_sampler, 'scoring_metric', None),
+                            scoring_metric=getattr(getattr(policy.uncertainty_sampler, "scoring_metric", None), "name", None),
                             task_title=task_title,
                             uncertainty_buckets=uncertainty_buckets,
                             color_map={

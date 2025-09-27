@@ -3,15 +3,15 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
-from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+from lerobot.policies.factory import make_flow_matching_uncertainty_scoring_metric
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
+from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
 )
-from lerobot.common.policies.flow_matching.uncertainty.utils.laplace_utils import (
+from lerobot.policies.flow_matching.uncertainty.utils.laplace_utils import (
     draw_laplace_flow_matching_model,
 )
-from lerobot.common.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
+from lerobot.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
     ScorerArtifacts,
 )
 
@@ -23,12 +23,12 @@ from .utils.sampler_utils import compose_ode_states, select_and_expand_ode_state
 class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
     """
     Splices newly sampled action sequence tails onto the previously executed prefix and evaluates
-    the full trajectories with a flow matching "scorer". The "scorer" model can be either an 
+    the full trajectories with a flow matching "scorer". The "scorer" model can be either an
     independently trained ensemble model or a Laplace posterior draw. Uncertainty can be measured
     using several different metrics.
 
     The class therefore mixes
-    - sequence composition from ComposedSequenceSampler and  
+    - sequence composition from ComposedSequenceSampler and
     - cross bayesian epistemic scoring from CrossBayesianSampler.
     """
     def __init__(
@@ -40,7 +40,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
     ):
         """
         Initializes the composed sequence cross bayesian sampler.
-        
+
         Args:
             cfg: Sampler-specific settings.
             sampler_model: The full flow matching model including velocity and RGB encoder.
@@ -64,7 +64,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             config=cfg.scoring_metric,
             uncertainty_sampler=self,
         )
-        
+
         self.ensemble_model = scorer_artifacts.ensemble_model
         self.laplace_posterior = scorer_artifacts.laplace_posterior
         if cfg.scorer_type == "ensemble" and self.ensemble_model is None:
@@ -73,7 +73,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             raise ValueError("laplace_posterior is required for scorer_type='laplace'.")
         elif cfg.scorer_type not in {"ensemble", "laplace"}:
             raise ValueError(f"Unknown scorer_type: {cfg.scorer_type!r}")
-        
+
         # Sampler-specific settings
         self.cfg = cfg
 
@@ -114,12 +114,12 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         Returns:
             - Action sequences drawn from the sampler model.
               Shape: [num_action_seq_samples, horizon, action_dim].
-            - Uncertainty score where a higher value means more uncertain.      
+            - Uncertainty score where a higher value means more uncertain.
         """
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
-        
+
         # Adjust shape of conditioning vector
         global_cond = self._reshape_conditioning(global_cond)
 
@@ -177,7 +177,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
                     :, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :
                 ],
                 new_ode_states=new_ode_states,
-                flow_matching_cfg=self.flow_matching_cfg, 
+                flow_matching_cfg=self.flow_matching_cfg,
             )
 
             # Compute uncertainty based on selected metric
@@ -193,7 +193,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
                     ode_states=self.prev_ode_states,
                     traj_idx=self.prev_selected_action_idx,
                 )
-                
+
                 uncertainty_scores = self.scoring_metric(
                     ref_ode_states=prev_selected_ode_states,
                     ref_velocity_model=self.velocity_model,
@@ -213,5 +213,5 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         self.prev_scorer_global_cond = scorer_global_cond
         self.prev_global_cond = global_cond
         self.prev_ode_states = new_ode_states
-        
+
         return self.latest_action_candidates, self.latest_uncertainty
