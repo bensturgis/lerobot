@@ -57,11 +57,28 @@ from lerobot.utils.utils import get_safe_torch_device, init_logging
 def plot_uncertainties(
     uncert_est_method: str,
     scoring_metric: Optional[str],
-    task_title: str,
+    task_group: str,
+    task_id: Optional[int],
     uncertainty_buckets: Dict[str, list[np.ndarray]],
     color_map: Dict[str, str],
     output_dir: Path,
 ):
+    """
+    Plot per-episode uncertainty trajectories and mean ± std bands.
+
+    Generates two plots per task:
+      - With individual episode curves.
+      - With only aggregate mean ± std per bucket.
+
+    Args:
+        uncert_est_method: Name of the uncertainty estimation method.
+        scoring_metric: Metric used for uncertainty scoring.
+        task_group: Task group identifier.
+        task_id: Task ID within the task group.
+        uncertainty_buckets: Mapping from label (e.g., "ID Success") to episode uncertainty arrays.
+        color_map: Mapping from bucket label to plot color.
+        output_dir: Directory to save the plots.
+    """
     # Compute mean ± std across episodes in each bucket
     all_uncertainties = [u for _, eps in uncertainty_buckets.items() for u in eps]
     max_len = max(len(u) for u in all_uncertainties) if all_uncertainties else 0
@@ -119,6 +136,7 @@ def plot_uncertainties(
             y_label = "Uncertainty Score"
         # Presentation: fontsize=18, labelpad=4
         plt.ylabel(ylabel=y_label)
+        task_title = get_task_title(task_group=task_group, task_id=task_id)
         plt.title(f"{uncert_est_method.replace('_', ' ').title()} | {task_title}")
         plt.legend()
         # Presentation
@@ -126,11 +144,15 @@ def plot_uncertainties(
         # plt.yticks(fontsize=16)
         # plt.legend(fontsize=15)
         output_dir.mkdir(parents=True, exist_ok=True)
-        suffix = "_individual" if show_individual else ""
         # Presentation dpi=600
         prefix = "uncertainty_scores"
+        filename = f"{prefix}_{uncert_est_method}_{task_group.lower()}"
+        if "libero" in task_group and task_id is not None:
+            filename += f"_task{task_id:02d}"
+        if show_individual:
+            filename += "_individual"
         plt.savefig(
-            output_dir / f"{prefix}_{uncert_est_method}_{task_title.lower().replace(' ', '_')}{suffix}.png",
+            output_dir / (filename + ".png"),
             dpi=300, bbox_inches="tight"
         )
         plt.close()
@@ -191,7 +213,7 @@ def rollout(
     else:
         ep_frames.append(env.render())
 
-    max_episode_steps = env.spec.max_episode_steps
+    max_episode_steps = env._max_episode_steps
     progbar = trange(
         max_episode_steps,
         desc=f"Running rollout with at most {max_episode_steps} steps."
@@ -262,6 +284,18 @@ def build_env_for_domain(cfg: EnvConfig, domain: Literal["id", "ood"]) -> Dict[s
     return make_single_env(cfg)
 
 
+def get_task_group_dir(
+    out_root: Path,
+    task_group: str,
+):
+    """
+    Return the output directory for a given task group.
+    """
+    if "libero" in task_group:
+        return out_root / task_group
+    return out_root
+
+
 def get_task_dir(
     out_root: Path,
     task_group: str,
@@ -270,23 +304,150 @@ def get_task_dir(
     """
     Return the output directory for a given task.
     """
+    task_group_dir = get_task_group_dir(out_root, task_group)
     if "libero" in task_group:
-        return out_root / task_group / f"task_{task_id:02d}"
-    return out_root
+        return task_group_dir / f"task{task_id:02d}"
+    return task_group_dir
 
 
 def get_task_title(
     task_group: str,
-    task_id: int,
+    task_id: Optional[int],
 ) -> str:
     """
     Return a human-readable title for a given task.
     """
-    if "libero" in task_group:
+    if "libero" in task_group and task_id is not None:
         return f"{task_group.title()} | Task {task_id:02d}"
     elif "pusht" in task_group:
         return "PushT"
     return task_group.title()
+
+
+def compose_uncertainty_buckets(
+    uncertainty_buckets_for_method: Dict[Tuple[str, str], List[np.ndarray]],
+    domains: List[str],
+    collapse_success_failure: bool,
+) -> tuple[Dict[str, List[np.ndarray]], Dict[str, str]]:
+    if collapse_success_failure:
+        # Merge success and failure scores per domain
+        uncertainty_buckets: Dict[str, List[np.ndarray]] = {}
+        for dom in domains:
+            label = "In-Distribution" if dom.lower() == "id" else "Out-of-Distribution"
+            merged_uncertainties: List[np.ndarray] = []
+            for outcome in ("success", "failure"):
+                merged_uncertainties.extend(uncertainty_buckets_for_method[(dom, outcome)])
+            uncertainty_buckets[label] = merged_uncertainties
+        color_map = {
+            "In-Distribution": "C0",
+            "Out-of-Distribution": "C1",
+        }
+    else:
+        # Keep all uncertainty buckets: Requested domains ID/OoD × success/failure
+        uncertainty_buckets = {}
+        for dom in domains:
+            for outcome in ("success", "failure"):
+                label = f"{'ID' if dom == 'id' else 'OOD'} {outcome.title()}"
+                uncertainty_buckets[label] = uncertainty_buckets_for_method[(dom, outcome)]
+        color_map = {
+            "ID Success": "C0",
+            "ID Failure": "C3",
+            "OOD Success": "C2",
+            "OOD Failure": "C1",
+        }
+    return uncertainty_buckets, color_map
+
+
+def evaluate_methods_on_task_env(
+    cfg: EvalUncertaintyEstimationPipelineConfig,
+    policy: PreTrainedPolicy,
+    preprocessor,
+    postprocessor,
+    env: gym.Env,
+    domain: str,
+    task_group: str,
+    task_id: int,
+    episode_idx: int,
+    uncertainty_config_by_method: Dict[str, UncertaintySamplerConfig],
+    scorer_artifacts_by_method: Dict[str, ScorerArtifacts],
+    scoring_metric_by_method: Dict[str, Optional[str]],
+    uncertainty_scores: Dict[Tuple[str, int], Dict[str, Dict[Tuple[str, str], List[np.ndarray]]]],
+    group_uncertainty_scores: Dict[str, Dict[str, Dict[Tuple[str, str], List[np.ndarray]]]],
+    plot_group: bool,
+    output_root: Path,
+) -> None:
+    """
+    Run all uncertainty methods on a single (task_group, task_id, env) combination and plot the resulting
+    uncertainty scores.
+    """
+    # Flatten dirs once
+    task_dir = get_task_dir(out_root=output_root, task_group=task_group, task_id=task_id)
+    task_group_dir = get_task_group_dir(out_root=output_root, task_group=task_group)
+    fps = env.metadata.get("render_fps", 30)
+
+    for method in cfg.eval_uncert_est.uncert_est_methods:
+        # Initialize sampler for this method
+        policy.init_uncertainty_sampler(
+            config=uncertainty_config_by_method[method],
+            scorer_artifacts=scorer_artifacts_by_method[method],
+        )
+
+        # Rollout
+        ep_info = rollout(
+            env=env,
+            policy=policy,
+            preprocessor=preprocessor,
+            postprocessor=postprocessor,
+        )
+
+        # Update per-task and group uncertainty scores
+        uncertainty_scores[(task_group, task_id)][method][(domain, ep_info["outcome"])].append(
+            ep_info["ep_uncertainties"]
+        )
+        group_uncertainty_scores[task_group][method][(domain, ep_info["outcome"])].append(
+            ep_info["ep_uncertainties"]
+        )
+
+        # Save episode video
+        save_episode_video(
+            ep_frames=ep_info["ep_frames"],
+            out_root=task_dir / method / f"{domain}_{ep_info['outcome']}",
+            episode_idx=episode_idx,
+            fps=fps,
+        )
+
+        # Plot per-task uncertainty scores
+        task_buckets, task_colors = compose_uncertainty_buckets(
+            uncertainty_buckets_for_method=uncertainty_scores[(task_group, task_id)][method],
+            domains=cfg.eval_uncert_est.domains,
+            collapse_success_failure=cfg.eval_uncert_est.collapse_success_failure,
+        )
+        plot_uncertainties(
+            uncert_est_method=method,
+            scoring_metric=getattr(scoring_metric_by_method[method], "name", None),
+            task_group=task_group,
+            task_id=task_id,
+            uncertainty_buckets=task_buckets,
+            color_map=task_colors,
+            output_dir=task_dir / method,
+        )
+
+        # Plot group-aggregated uncertainty scores
+        if plot_group:
+            group_buckets, group_colors = compose_uncertainty_buckets(
+                uncertainty_buckets_for_method=group_uncertainty_scores[task_group][method],
+                domains=cfg.eval_uncert_est.domains,
+                collapse_success_failure=cfg.eval_uncert_est.collapse_success_failure,
+            )
+            plot_uncertainties(
+                uncert_est_method=method,
+                scoring_metric=getattr(scoring_metric_by_method[method], "name", None),
+                task_group=task_group,
+                task_id=None,
+                uncertainty_buckets=group_buckets,
+                color_map=group_colors,
+                output_dir=task_group_dir / method,
+            )
 
 
 @parser.wrap()
@@ -316,10 +477,19 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
         )
 
     logging.info("Making environment.")
+    # Build evaluation environments for each domain (ID/OOD)
     envs_by_domain: Dict[str, Dict[str, Dict[int, gym.Env]]] = {
         domain: build_env_for_domain(cfg.env, domain)
         for domain in cfg.eval_uncert_est.domains
     }
+
+    # Collect task IDs per group across domains
+    task_ids_by_group: Dict[str, set[int]] = defaultdict(set)
+    for envs in envs_by_domain.values():
+        for tg, group in envs.items():
+            task_ids_by_group[tg].update(group.keys())
+    # Only plot group-level if a group actually has more than one task
+    plot_group: Dict[str, bool] = {tg: (len(ids) > 1) for tg, ids in task_ids_by_group.items()}
 
     logging.info("Loading policy")
     policy: PreTrainedPolicy = make_policy(
@@ -328,6 +498,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
     ).to(device)
     policy.eval()
 
+    # Build preprocessing/postprocessing pipelines for observations/actions
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=cfg.policy,
         pretrained_path=cfg.policy.pretrained_path,
@@ -335,8 +506,10 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
 
+    # Prepare configs and scorer artifacts for each uncertainty estimation method
     scorer_artifacts_by_method: Dict[str, ScorerArtifacts] = {}
     uncertainty_config_by_method: Dict[str, UncertaintySamplerConfig] = {}
+    scoring_metric_by_method: Dict[str, Optional[str]] = {}
     for uncert_est_method in cfg.eval_uncert_est.uncert_est_methods:
         uncertainty_config = deepcopy(cfg.uncertainty_sampler)
         uncertainty_config.type = uncert_est_method
@@ -348,11 +521,17 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             dataset_cfg=cfg.dataset,
             policy=policy,
         )
+        scoring_metric_by_method[uncert_est_method] = getattr(uncertainty_config.active_config, "scoring_metric", None)
 
+    # Storage for uncertainty scores (per task) and group-aggregated scores
     uncertainty_scores: Dict[Tuple[str, int], Dict[str, Dict[Tuple[str, str], List[np.ndarray]]]] = defaultdict(
         lambda: defaultdict(lambda: {(d, o): [] for d in cfg.eval_uncert_est.domains for o in ("success", "failure")})
     )
+    group_uncertainty_scores: Dict[str, Dict[str, Dict[Tuple[str, str], List[np.ndarray]]]] = defaultdict(
+        lambda: defaultdict(lambda: {(d, o): [] for d in cfg.eval_uncert_est.domains for o in ("success", "failure")})
+    )
 
+    # Roll out each episode across all domains, tasks, and methods
     n_episodes = cfg.eval_uncert_est.n_episodes
     progbar = trange(
         n_episodes,
@@ -363,69 +542,25 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             # Flatten envs into list of (task_group, task_id, env)
             tasks = [(tg, tid, env) for tg, group in envs.items() for tid, env in group.items()]
             for task_group, task_id, env in tasks:
-                task_title = get_task_title(task_group=task_group, task_id=task_id)
-                for uncert_est_method in cfg.eval_uncert_est.uncert_est_methods:
-                    policy.init_uncertainty_sampler(
-                        config=uncertainty_config_by_method[uncert_est_method],
-                        scorer_artifacts=scorer_artifacts_by_method[uncert_est_method],
-                    )
-
-                    ep_info = rollout(
-                        env=env,
-                        policy=policy,
-                        preprocessor=preprocessor,
-                        postprocessor=postprocessor,
-                    )
-
-                    uncertainty_scores[(task_group, task_id)][uncert_est_method][(domain, ep_info["outcome"])].append(ep_info["ep_uncertainties"])
-
-                    task_dir = get_task_dir(out_root=cfg.output_dir, task_group=task_group, task_id=task_id)
-                    save_episode_video(
-                        ep_frames=ep_info["ep_frames"],
-                        out_root=task_dir / uncert_est_method / f"{domain}_{ep_info['outcome']}",
-                        episode_idx=episode + 1,
-                        fps=env.metadata["render_fps"],
-                    )
-
-                    if cfg.eval_uncert_est.collapse_success_failure:
-                        uncertainty_buckets_for_method = uncertainty_scores[(task_group, task_id)][uncert_est_method]
-                        uncertainty_buckets: Dict[str, List[np.ndarray]] = {}
-                        for domain in cfg.eval_uncert_est.domains:
-                            label = "In-Distribution" if domain == "id" else "Out-of-Distribution"
-                            merged_uncertainties: List[np.ndarray] = []
-                            for outcome in ("success", "failure"):
-                                merged_uncertainties.extend(uncertainty_buckets_for_method[(domain, outcome)])
-                            uncertainty_buckets[label] = merged_uncertainties
-                        plot_uncertainties(
-                            uncert_est_method=uncert_est_method,
-                            scoring_metric=getattr(getattr(policy.uncertainty_sampler, "scoring_metric", None), "name", None),
-                            task_title=task_title,
-                            uncertainty_buckets=uncertainty_buckets,
-                            color_map={
-                                "In-Distribution": "C0",
-                                "Out-of-Distribution": "C1",
-                            },
-                            output_dir=task_dir / uncert_est_method,
-                        )
-                    else:
-                        uncertainty_buckets_for_method = uncertainty_scores[(task_group, task_id)][uncert_est_method]
-                        uncertainty_buckets: Dict[str, List[np.ndarray]] = {}
-                        for (domain, outcome), uncertainties_per_episode in uncertainty_buckets_for_method.items():
-                            label = f"{'ID' if domain == 'id' else 'OOD'} {outcome.title()}"
-                            uncertainty_buckets[label] = uncertainties_per_episode
-                        plot_uncertainties(
-                            uncert_est_method=uncert_est_method,
-                            scoring_metric=getattr(getattr(policy.uncertainty_sampler, "scoring_metric", None), "name", None),
-                            task_title=task_title,
-                            uncertainty_buckets=uncertainty_buckets,
-                            color_map={
-                                "ID Success": "C0",
-                                "ID Failure": "C3",
-                                "OOD Success": "C2",
-                                "OOD Failure": "C1",
-                            },
-                            output_dir=task_dir / uncert_est_method,
-                        )
+                # Evaluate uncertainty methods on this task instance
+                evaluate_methods_on_task_env(
+                    cfg=cfg,
+                    policy=policy,
+                    preprocessor=preprocessor,
+                    postprocessor=postprocessor,
+                    env=env,
+                    domain=domain,
+                    task_group=task_group,
+                    task_id=task_id,
+                    episode_idx=episode,
+                    uncertainty_config_by_method=uncertainty_config_by_method,
+                    scorer_artifacts_by_method=scorer_artifacts_by_method,
+                    scoring_metric_by_method=scoring_metric_by_method,
+                    uncertainty_scores=uncertainty_scores,
+                    group_uncertainty_scores=group_uncertainty_scores,
+                    plot_group=plot_group[task_group],
+                    output_root=cfg.output_dir,
+                )
 
 
 if __name__ == "__main__":

@@ -57,7 +57,7 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, Ten
 
         for imgkey, img in imgs.items():
             # TODO(aliberts, rcadene): use transforms.ToTensor()?
-            img = torch.from_numpy(img)
+            img = torch.from_numpy(img.copy())
 
             # When preprocessing observations in a non-vectorized environment, we need to add a batch dimension.
             # This is the case for human-in-the-loop RL where there is only one environment.

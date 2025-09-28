@@ -331,18 +331,18 @@ class LiberoEnv(EnvConfig):
     def __post_init__(self):
         if self.obs_type == "pixels":
             self.features["pixels/agentview_image"] = PolicyFeature(
-                type=FeatureType.VISUAL, shape=(360, 360, 3)
+                type=FeatureType.VISUAL, shape=(256, 256, 3)
             )
             self.features["pixels/robot0_eye_in_hand_image"] = PolicyFeature(
-                type=FeatureType.VISUAL, shape=(360, 360, 3)
+                type=FeatureType.VISUAL, shape=(256, 256, 3)
             )
         elif self.obs_type == "pixels_agent_pos":
             self.features["agent_pos"] = PolicyFeature(type=FeatureType.STATE, shape=(8,))
             self.features["pixels/agentview_image"] = PolicyFeature(
-                type=FeatureType.VISUAL, shape=(360, 360, 3)
+                type=FeatureType.VISUAL, shape=(256, 256, 3)
             )
             self.features["pixels/robot0_eye_in_hand_image"] = PolicyFeature(
-                type=FeatureType.VISUAL, shape=(360, 360, 3)
+                type=FeatureType.VISUAL, shape=(256, 256, 3)
             )
         else:
             raise ValueError(f"Unsupported obs_type: {self.obs_type}")
