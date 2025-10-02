@@ -29,7 +29,7 @@ from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset, make_train_val_split
 from lerobot.datasets.sampler import EpisodeAwareSampler
-from lerobot.datasets.utils import cycle, patch_dataset_episode_boundaries
+from lerobot.datasets.utils import cycle, filter_libero_episodes, patch_dataset_episode_boundaries
 from lerobot.envs.factory import make_env
 from lerobot.envs.utils import close_envs
 from lerobot.optim.factory import make_optimizer_and_scheduler
@@ -206,7 +206,18 @@ def train(cfg: TrainPipelineConfig):
     )
     full_dataset = patch_dataset_episode_boundaries(dataset=full_dataset)
     if cfg.enable_val_loss:
-        train_val_split = make_train_val_split(full_dataset, cfg)
+        if cfg.dataset.repo_id == "HuggingFaceVLA/libero":
+            episode_ids_to_exclude = filter_libero_episodes(
+                dataset=full_dataset,
+                tasks_to_remove={"libero_10": [0, 3, 4, 7, 8]},
+            )
+        else:
+            episode_ids_to_exclude = None
+        train_val_split = make_train_val_split(
+            full_dataset=full_dataset,
+            cfg=cfg,
+            episode_ids_to_exclude=episode_ids_to_exclude,
+        )
         train_dataset, val_dataset = train_val_split.train_dataset, train_val_split.val_dataset
         train_ep_ids = train_val_split.train_ep_ids
     else:
@@ -257,8 +268,8 @@ def train(cfg: TrainPipelineConfig):
     if cfg.env is not None:
         logging.info(f"{cfg.env.task=}")
     logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
-    logging.info(f"{full_dataset.num_frames=} ({format_big_number(full_dataset.num_frames)})")
-    logging.info(f"{full_dataset.num_episodes=}")
+    logging.info(f"{full_dataset.num_frames=} ({format_big_number(len(train_dataset))})")
+    logging.info(f"{full_dataset.num_episodes=} ({format_big_number(full_dataset.num_episodes - len(episode_ids_to_exclude))})" )
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
@@ -410,8 +421,8 @@ def train(cfg: TrainPipelineConfig):
             }
             eval_tracker = MetricsTracker(
                 cfg.batch_size,
-                full_dataset.num_frames,
-                full_dataset.num_episodes,
+                len(train_dataset),
+                full_dataset.num_episodes - len(episode_ids_to_exclude),
                 eval_metrics,
                 initial_step=step
             )
