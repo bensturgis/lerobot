@@ -110,6 +110,7 @@ def make_dataset(
             dataset = StreamingLeRobotDataset(
                 dataset_cfg.repo_id,
                 root=dataset_cfg.root,
+                episodes=dataset_cfg.episodes,
                 delta_timestamps=delta_timestamps,
                 image_transforms=image_transforms,
                 revision=dataset_cfg.revision,
@@ -186,7 +187,7 @@ def _split_indices_by_episode(
 
 
 def make_train_val_split(
-    full_dataset: LeRobotDataset, cfg: TrainPipelineConfig
+    full_dataset: LeRobotDataset, cfg: TrainPipelineConfig, episode_ids_to_exclude: List[int],
 ) -> TrainValSplit:
     """
     Load a full dataset and return disjoint train/validation subsets by episode.
@@ -200,9 +201,12 @@ def make_train_val_split(
     """
     # Build a mapping from episode ID to a list of frame indices
     frame_idxs_per_ep: Dict[int, List[int]] = {}
-    ep_starts = full_dataset.meta.episodes["dataset_from_index"]
-    ep_ends = full_dataset.meta.episodes["dataset_to_index"]
-    for ep_id, (ep_start_idx, ep_end_idx) in enumerate(zip(ep_starts, ep_ends, strict=True)):
+    ep_ids = list(full_dataset.meta.episodes["episode_index"])
+    ep_starts = list(full_dataset.meta.episodes["dataset_from_index"])
+    ep_ends = (full_dataset.meta.episodes["dataset_to_index"])
+    for ep_id, ep_start_idx, ep_end_idx in zip(ep_ids, ep_starts, ep_ends, strict=True):
+        if ep_id in episode_ids_to_exclude:
+            continue
         frame_idxs_per_ep[ep_id] = list(range(ep_start_idx, ep_end_idx))
 
     # Split into two flat index lists, using cfg.val_ratio

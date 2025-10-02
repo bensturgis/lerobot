@@ -27,8 +27,8 @@ from lerobot.optim.schedulers import (
 class SmolVLAConfig(PreTrainedConfig):
     # Input / output structure.
     n_obs_steps: int = 1
-    chunk_size: int = 50
-    n_action_steps: int = 50
+    chunk_size: int = 16
+    n_action_steps: int = 1
 
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
@@ -39,11 +39,11 @@ class SmolVLAConfig(PreTrainedConfig):
     )
 
     # Shorter state and action vectors will be padded
-    max_state_dim: int = 32
-    max_action_dim: int = 32
+    max_state_dim: int = 8
+    max_action_dim: int = 7
 
     # Image preprocessing
-    resize_imgs_with_padding: tuple[int, int] = (512, 512)
+    resize_imgs_with_padding: tuple[int, int] = (256, 256)
 
     # Add empty images. Used by smolvla_aloha_sim which adds the empty
     # left and right wrist cameras in addition to the top camera.
@@ -83,7 +83,7 @@ class SmolVLAConfig(PreTrainedConfig):
     scheduler_decay_lr: float = 2.5e-6
 
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"  # Select the VLM backbone.
-    load_vlm_weights: bool = False  # Set to True in case of training the expert from scratch. True when init from pretrained SmolVLA weights
+    load_vlm_weights: bool = True  # Set to True in case of training the expert from scratch. True when init from pretrained SmolVLA weights
 
     add_image_special_tokens: bool = False  # Whether to use special image tokens around image features.
 
@@ -94,9 +94,9 @@ class SmolVLAConfig(PreTrainedConfig):
     pad_language_to: str = "longest"  # "max_length"
 
     num_expert_layers: int = -1  # Less or equal to 0 is the default where the action expert has the same number of layers of VLM. Otherwise the expert have less layers.
-    num_vlm_layers: int = 16  # Number of layers used in the VLM (first num_vlm_layers layers)
+    num_vlm_layers: int = 0  # Number of layers used in the VLM (first num_vlm_layers layers)
     self_attn_every_n_layers: int = 2  # Interleave SA layers each self_attn_every_n_layers
-    expert_width_multiplier: float = 0.75  # The action expert hidden size (wrt to the VLM)
+    expert_width_multiplier: float = 0.5  # The action expert hidden size (wrt to the VLM)
 
     min_period: float = 4e-3  # sensitivity range for the timestep used in sine-cosine positional encoding
     max_period: float = 4.0

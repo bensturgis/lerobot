@@ -255,8 +255,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
 
-        images, img_masks = self.prepare_images(batch)
-        state = self.prepare_state(batch)
+        images, img_masks = self.model.prepare_images(batch)
+        state = self.model.prepare_state(batch)
         lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
         lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
 
@@ -316,11 +316,11 @@ class SmolVLAPolicy(PreTrainedPolicy):
             batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
             batch[ACTION] = self._pi_aloha_encode_actions_inv(batch[ACTION])
 
-        images, img_masks = self.prepare_images(batch)
-        state = self.prepare_state(batch)
+        images, img_masks = self.model.prepare_images(batch)
+        state = self.model.prepare_state(batch)
         lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
         lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
-        actions = self.prepare_action(batch)
+        actions = self.model.prepare_action(batch)
         actions_is_pad = batch.get("actions_id_pad")
         loss_dict = {}
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
@@ -340,48 +340,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # For backward pass
         loss_dict["loss"] = loss.item()
         return loss, loss_dict
-
-    def prepare_images(self, batch):
-        """Apply SmolVLA preprocessing to the images, like resizing to 224x224 and padding to keep aspect ratio, and
-        convert pixel range from [0.0, 1.0] to [-1.0, 1.0] as requested by SigLIP.
-        """
-        images = []
-        img_masks = []
-        present_img_keys = [key for key in self.config.image_features if key in batch]
-        missing_img_keys = [key for key in self.config.image_features if key not in batch]
-
-        if len(present_img_keys) == 0:
-            raise ValueError(
-                f"All image features are missing from the batch. At least one expected. (batch: {batch.keys()}) (image_features:{self.config.image_features})"
-            )
-        # Preprocess image features present in the batch
-        for key in present_img_keys:
-            img = batch[key][:, -1, :, :, :] if batch[key].ndim == 5 else batch[key]
-            if self.config.resize_imgs_with_padding is not None:
-                img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
-
-            # Normalize from range [0,1] to [-1,1] as expacted by siglip
-            img = img * 2.0 - 1.0
-
-            bsize = img.shape[0]
-            device = img.device
-            if f"{key}_padding_mask" in batch:
-                mask = batch[f"{key}_padding_mask"].bool()
-            else:
-                mask = torch.ones(bsize, dtype=torch.bool, device=device)
-            images.append(img)
-            img_masks.append(mask)
-
-        # Create image features not present in the batch
-        # as fully 0 padded images.
-        for num_empty_cameras in range(len(missing_img_keys)):
-            if num_empty_cameras >= self.config.empty_cameras:
-                break
-            img = torch.ones_like(img) * -1
-            mask = torch.zeros_like(mask)
-            images.append(img)
-            img_masks.append(mask)
-        return images, img_masks
 
     def _pi_aloha_decode_state(self, state):
         # Flip the joints.
@@ -408,17 +366,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # Reverse the gripper transformation that is being applied by the Aloha runtime.
         for motor_idx in [6, 13]:
             actions[:, :, motor_idx] = aloha_gripper_from_angular_inv(actions[:, :, motor_idx])
-        return actions
-
-    def prepare_state(self, batch):
-        """Pad state"""
-        state = batch[OBS_STATE][:, -1, :] if batch[OBS_STATE].ndim > 2 else batch[OBS_STATE]
-        state = pad_vector(state, self.config.max_state_dim)
-        return state
-
-    def prepare_action(self, batch):
-        """Pad action"""
-        actions = pad_vector(batch[ACTION], self.config.max_action_dim)
         return actions
 
 
@@ -529,6 +476,59 @@ class VLAFlowMatching(nn.Module):
         time_beta = beta_dist.sample((bsize,)).to(device=device, dtype=torch.float32)
         time = time_beta * 0.999 + 0.001
         return time
+
+    def prepare_images(self, batch):
+        """Apply SmolVLA preprocessing to the images, like resizing to 224x224 and padding to keep aspect ratio, and
+        convert pixel range from [0.0, 1.0] to [-1.0, 1.0] as requested by SigLIP.
+        """
+        images = []
+        img_masks = []
+        present_img_keys = [key for key in self.config.image_features if key in batch]
+        missing_img_keys = [key for key in self.config.image_features if key not in batch]
+
+        if len(present_img_keys) == 0:
+            raise ValueError(
+                f"All image features are missing from the batch. At least one expected. (batch: {batch.keys()}) (image_features:{self.config.image_features})"
+            )
+        # Preprocess image features present in the batch
+        for key in present_img_keys:
+            img = batch[key][:, -1, :, :, :] if batch[key].ndim == 5 else batch[key]
+            if self.config.resize_imgs_with_padding is not None:
+                img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
+
+            # Normalize from range [0,1] to [-1,1] as expacted by siglip
+            img = img * 2.0 - 1.0
+
+            bsize = img.shape[0]
+            device = img.device
+            if f"{key}_padding_mask" in batch:
+                mask = batch[f"{key}_padding_mask"].bool()
+            else:
+                mask = torch.ones(bsize, dtype=torch.bool, device=device)
+            images.append(img)
+            img_masks.append(mask)
+
+        # Create image features not present in the batch
+        # as fully 0 padded images.
+        for num_empty_cameras in range(len(missing_img_keys)):
+            if num_empty_cameras >= self.config.empty_cameras:
+                break
+            img = torch.ones_like(img) * -1
+            mask = torch.zeros_like(mask)
+            images.append(img)
+            img_masks.append(mask)
+        return images, img_masks
+
+    def prepare_state(self, batch):
+        """Pad state"""
+        state = batch[OBS_STATE][:, -1, :] if batch[OBS_STATE].ndim > 2 else batch[OBS_STATE]
+        state = pad_vector(state, self.config.max_state_dim)
+        return state
+
+    def prepare_action(self, batch):
+        """Pad action"""
+        actions = pad_vector(batch[ACTION], self.config.max_action_dim)
+        return actions
 
     def embed_prefix(
         self, images, img_masks, lang_tokens, lang_masks, state: torch.Tensor = None

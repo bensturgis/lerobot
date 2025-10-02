@@ -78,6 +78,16 @@ def get_task_init_states(task_suite: Any, i: int) -> np.ndarray:
     return init_states
 
 
+def get_task_description(task_group: str, task_id: int) -> str:
+    bench = benchmark.get_benchmark_dict()
+    if task_group not in bench:
+        raise ValueError(f"Unknown suite '{task_group}'. Available: {sorted(bench.keys())}")
+    suite = bench[task_group]()            # e.g. "libero_10", "libero_90", "libero_goal", ...
+    if not (0 <= task_id < len(suite.tasks)):
+        raise ValueError(f"task_id {task_id} out of range [0, {len(suite.tasks)-1}]")
+    return suite.get_task(task_id).language
+
+
 def get_libero_dummy_action():
     """Get dummy/no-op action, used to roll out the simulation while the robot does nothing."""
     return [0, 0, 0, 0, 0, 0, -1]
