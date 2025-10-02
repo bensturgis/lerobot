@@ -1,19 +1,19 @@
 dataset:
-  repo_id: lerobot/libero_spatial_one_bowl
+  repo_id: HuggingFaceVLA/libero
 
 env:
   type: libero
-  task: LiberoEnv-v0
-  benchmark: libero_spatial
+  task: libero_10
 
 eval_uncert_est:
   n_episodes: 50
-  uncert_est_methods: [composed_sequence, cross_bayesian, composed_cross_bayesian]
+  uncert_est_methods: [cross_bayesian]
+  domains: [id]
 
 uncertainty_sampler:
   composed_cross_bayesian_sampler:
     scorer_type: ensemble
-    ensemble_model_path: outputs/train/flow_matching_libero_spatial_02/checkpoints/035000/pretrained_model
+    ensemble_model_path: outputs/train/flow_matching/libero_spatial_02/checkpoints/035000/pretrained_model_migrated
     scoring_metric:
       metric_type: mode_distance
     num_action_seq_samples: 5
@@ -23,7 +23,7 @@ uncertainty_sampler:
     num_action_seq_samples: 5
   cross_bayesian_sampler:
     scorer_type: ensemble
-    ensemble_model_path: outputs/train/flow_matching_libero_spatial_02/checkpoints/035000/pretrained_model
+    ensemble_model_path: outputs/train/flow_matching/libero_spatial_02/checkpoints/035000/pretrained_model_migrated
     scoring_metric:
       metric_type: mode_distance
     num_action_seq_samples: 5
@@ -32,4 +32,4 @@ uncertainty_sampler:
 
 seed: 42
 
-# python lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/flow_matching_libero_spatial/checkpoints/035000/pretrained_model
+# python src/lerobot/scripts/flow_matching/eval_uncertainty_estimation.py --config=configs/flow_matching/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/flow_matching/libero_spatial/checkpoints/035000/pretrained_model_migrated

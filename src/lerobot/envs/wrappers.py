@@ -1,10 +1,11 @@
-import numpy as np
 import random
 import warnings
 from typing import Any, Dict, Optional, Tuple, Union
 
 import gymnasium as gym
+import numpy as np
 from gymnasium.utils import seeding
+
 
 class PerturbationWrapper(gym.Wrapper):
     """
@@ -38,7 +39,7 @@ class PerturbationWrapper(gym.Wrapper):
                 f"Invalid patch fractions: ({min_patch_frac}, {max_patch_frac}). "
                 "Values must be in [0.0, 1.0] and min <= max."
             )
-        
+
         if allowed_area is not None:
             allowed_width, allowed_height = allowed_area
             if not (0.0 < allowed_width <= 1.0 and 0.0 < allowed_height <= 1.0):
@@ -103,7 +104,7 @@ class PerturbationWrapper(gym.Wrapper):
     def _apply_patch(self, img: np.ndarray) -> np.ndarray:
         """
         Apply a black rectangle to the input image using a fixed patch region.
-        
+
         Args:
             img: The input image to apply the patch to.
 
@@ -112,12 +113,12 @@ class PerturbationWrapper(gym.Wrapper):
         """
         height, width = img.shape[:2]
         top_frac, left_frac, patch_height_frac, patch_width_frac = self.patch_frac
-        
+
         patch_top = int(round(top_frac * height))
         patch_left = int(round(left_frac * width))
         patch_height = int(round(patch_height_frac * height))
         patch_width = int(round(patch_width_frac * width))
-        
+
         img = img.copy()
         img[patch_top : patch_top + patch_height, patch_left : patch_left + patch_width] = self.patch_color
         return img
@@ -175,7 +176,7 @@ class PerturbationWrapper(gym.Wrapper):
             frame = self._apply_patch(frame.copy())
 
         return frame
-    
+
     def get_obs(self):
         # Call env.get_obs(), then patch the returned obs
         obs = self.env.get_obs()

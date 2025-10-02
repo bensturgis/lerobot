@@ -286,7 +286,7 @@ class ODESolver():
                     # Compute Hutchinson divergence estimator z^T D_x(v_t(x_t)) z by averaging
                     # over `num_hutchinson_samples` samples z
                     div = torch.zeros(x_t.shape[0], device=x_t.device)
-                    for z in z_samples:                        
+                    for z in z_samples:
                         # Dot product v_t · z for each batch element
                         v_t_dot_z = torch.einsum(
                             "ij,ij->i", v_t.flatten(start_dim=1), z.flatten(start_dim=1)

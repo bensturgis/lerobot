@@ -27,7 +27,7 @@ from lerobot.optim.schedulers import (
 class SmolVLAConfig(PreTrainedConfig):
     # Input / output structure.
     n_obs_steps: int = 1
-    chunk_size: int = 50
+    chunk_size: int = 16
     n_action_steps: int = 1
 
     normalization_mapping: dict[str, NormalizationMode] = field(

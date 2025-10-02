@@ -12,15 +12,15 @@ from torch.nn.utils import vector_to_parameters
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 
-from lerobot.common.datasets.factory import make_dataset
-from lerobot.common.policies.flow_matching.conditional_probability_path import OTCondProbPath
-from lerobot.common.policies.flow_matching.modelling_flow_matching import (
+from lerobot.configs.default import DatasetConfig
+from lerobot.configs.policies import PreTrainedConfig
+from lerobot.datasets.factory import make_dataset
+from lerobot.policies.flow_matching.conditional_probability_path import OTCondProbPath
+from lerobot.policies.flow_matching.modelling_flow_matching import (
     FlowMatchingModel,
     FlowMatchingPolicy,
 )
-from lerobot.common.utils.utils import get_safe_torch_device
-from lerobot.configs.default import DatasetConfig
-from lerobot.configs.policies import PreTrainedConfig
+from lerobot.utils.utils import get_safe_torch_device
 
 
 @dataclass(frozen=True)
@@ -102,7 +102,7 @@ def make_laplace_collate(
             # Get ground-truth trajectory (x_1)
             trajectory = batch["action"]
             batch_size = trajectory.shape[0]
-            
+
             # Sample a random time for each item in the batch.
             times = torch.rand(
                 size=(batch_size,),
@@ -157,7 +157,7 @@ def create_laplace_flow_matching_calib_loader(
         calib_fraction: Fraction of the full dataset to reserve for calibration
             (between 0 and 1).
         batch_size: Number of samples per batch in the returned DataLoader.
-            
+
     Returns:
         A data loader over a small calibration set yielding batches of the form
         ((interpolated_trajectory, time_step, observation), target_velocity).
@@ -182,7 +182,7 @@ def create_laplace_flow_matching_calib_loader(
     return calib_loader
 
 def draw_laplace_flow_matching_model(
-    laplace_posterior: BaseLaplace, 
+    laplace_posterior: BaseLaplace,
     flow_matching_model: nn.Module,
     generator: Optional[torch.Generator] = None,
 ) -> FlowMatchingModel:
@@ -223,7 +223,7 @@ def draw_laplace_flow_matching_model(
 
     # Write sampled parameters into the copied model (in-place assignment)
     vector_to_parameters(laplace_model_weights, target_params)
-    
+
     # Move the model to the same device as sampled weights and switch to inference mode
     laplace_flow_matching_model = laplace_flow_matching_model.to(laplace_model_weights.device)
     laplace_flow_matching_model.eval()
@@ -242,7 +242,7 @@ class FlowMatchingModelWrapper(nn.Module):
     def forward(self, input: FlowMatchingInput):
         # Unpack FlowMatchingInput attributes and forward them to the velocity model
         output = self.base_model(input.interp_traj, input.time, input.observation)
-        return output.flatten(start_dim=1) 
+        return output.flatten(start_dim=1)
 
 class PointwiseConv1dToLinear(nn.Module):
     """
@@ -288,7 +288,7 @@ class PointwiseConv1dToLinear(nn.Module):
         # Restore shape: (bach_size*horizon, action_dim, horizon)
         outputs = flat_outputs.view(batch_size, horizon, self.out_channels).permute(0, 2, 1)
         return outputs
-    
+
 REPO_DIR_MAP: Dict[str, str] = {
     "lerobot/pusht": "pusht",
     "lerobot/aloha_sim_transfer_cube_human": "aloha_transfer",
@@ -329,7 +329,7 @@ def get_laplace_posterior(
     """
     Build (or load) a diagonal Laplace posterior for a sub-network of a
     flow matching model.
-    
+
     Args:
         laplace_scope: Which part of the model to approximate
             - "velocity_last": final layer of the velocity model
@@ -349,9 +349,18 @@ def get_laplace_posterior(
     # Select target modules for Laplace approximation
     laplace_approx_targets: list[str] = []
     if laplace_scope in ["velocity_last", "both"]:
-        flow_matching_model.unet.final_conv[1] = PointwiseConv1dToLinear(
-            flow_matching_model.unet.final_conv[1]
-        )
+        if isinstance(flow_matching_model.unet.final_conv[1], nn.Conv1d):
+            flow_matching_model.unet.final_conv[1] = PointwiseConv1dToLinear(
+                flow_matching_model.unet.final_conv[1]
+            )
+        elif (
+            not isinstance(flow_matching_model.unet.final_conv[1], nn.Linear) and
+            not isinstance(flow_matching_model.unet.final_conv[1], PointwiseConv1dToLinear)
+        ):
+            raise ValueError(
+                "Expected final layer of velocity model to be nn.Conv1d or nn.Linear, "
+                f"got {type(flow_matching_model.unet.final_conv[1])}"
+            )
         laplace_approx_targets.append("unet.final_conv.1.linear_layer")
 
     if laplace_scope in ["rgb_last", "both"]:

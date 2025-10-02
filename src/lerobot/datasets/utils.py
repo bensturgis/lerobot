@@ -43,6 +43,7 @@ from lerobot.datasets.backward_compatibility import (
     BackwardCompatibilityError,
     ForwardCompatibilityError,
 )
+from lerobot.envs.libero import get_task_description
 from lerobot.utils.utils import is_valid_numpy_dtype_string
 
 DEFAULT_CHUNK_SIZE = 1000  # Max number of files per chunk
@@ -1492,3 +1493,29 @@ def patch_dataset_episode_boundaries(dataset: torch.utils.data.Dataset) -> torch
     dataset.meta.episodes = dataset.meta.episodes.add_column("dataset_to_index", end_indices)
 
     return dataset
+
+
+def filter_libero_episodes(
+    dataset: torch.utils.data.Dataset,
+    tasks_to_remove: dict[str, list[int]],
+) -> list[int]:
+    descriptions_to_remove: set[str] = {
+        get_task_description(task_group=task_group, task_id=task_id)
+        for task_group, task_ids in tasks_to_remove.items()
+        for task_id in task_ids
+    }
+
+    ep_df = dataset.meta.episodes
+
+    episode_indices = list(ep_df["episode_index"])
+    episode_task_descriptions = list(ep_df["tasks"])
+    for desc in episode_task_descriptions:
+        if len(desc) > 1:
+            raise ValueError("Training sample belongs to two or more tasks.")
+
+    episode_ids_to_exclude: list[int] = [
+        idx for idx, desc in zip(episode_indices, episode_task_descriptions, strict=True)
+        if desc[0] in descriptions_to_remove
+    ]
+
+    return episode_ids_to_exclude

@@ -30,6 +30,8 @@ from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 from robosuite.utils.transform_utils import quat2axisangle
 
+from .configs import OODConfig
+
 
 def _parse_camera_names(camera_name: str | Sequence[str]) -> list[str]:
     """Normalize camera_name into a non-empty list of strings."""
@@ -74,6 +76,16 @@ def get_task_init_states(task_suite: Any, i: int) -> np.ndarray:
     )
     init_states = torch.load(init_states_path, weights_only=False)  # nosec B614
     return init_states
+
+
+def get_task_description(task_group: str, task_id: int) -> str:
+    bench = benchmark.get_benchmark_dict()
+    if task_group not in bench:
+        raise ValueError(f"Unknown suite '{task_group}'. Available: {sorted(bench.keys())}")
+    suite = bench[task_group]()            # e.g. "libero_10", "libero_90", "libero_goal", ...
+    if not (0 <= task_id < len(suite.tasks)):
+        raise ValueError(f"task_id {task_id} out of range [0, {len(suite.tasks)-1}]")
+    return suite.get_task(task_id).language
 
 
 def get_libero_dummy_action():
@@ -280,7 +292,7 @@ class LiberoEnv(gym.Env):
         self._env.close()
 
 
-def _make_env_fns(
+def build_libero_env_factories(
     *,
     suite,
     suite_name: str,
@@ -288,21 +300,27 @@ def _make_env_fns(
     n_envs: int,
     camera_names: list[str],
     init_states: bool,
+    ood: OODConfig,
     gym_kwargs: Mapping[str, Any],
 ) -> list[Callable[[], LiberoEnv]]:
     """Build n_envs factory callables for a single (suite, task_id)."""
 
-    def _make_env(episode_index: int, **kwargs) -> LiberoEnv:
-        local_kwargs = dict(kwargs)
-        return LiberoEnv(
+    def _make_env(episode_index: int, **gym_kwargs) -> LiberoEnv:
+        gym_kwargs = dict(gym_kwargs)
+        # Edit the environment kwargs before creation if OoD is enabled
+        gym_kwargs = ood.tweak_gym_kwargs(gym_kwargs)
+        env =  LiberoEnv(
             task_suite=suite,
             task_id=task_id,
             task_suite_name=suite_name,
             camera_name=camera_names,
             init_states=init_states,
             episode_index=episode_index,
-            **local_kwargs,
+            **gym_kwargs,
         )
+        # Wrap the environment if OoD is enabled
+        env = ood.wrap(env)
+        return env
 
     fns: list[Callable[[], LiberoEnv]] = []
     for episode_index in range(n_envs):
@@ -313,12 +331,38 @@ def _make_env_fns(
 # ---- Main API ----------------------------------------------------------------
 
 
+def create_single_libero_envs(
+    task: str,
+    ood: OODConfig,
+    camera_name: str | Sequence[str] = "agentview_image,robot0_eye_in_hand_image",
+    init_states: bool = True,
+    gym_kwargs: dict[str, Any] | None = None,
+) -> dict[str, dict[int, LiberoEnv]]:
+    """
+    Create single non-vectorized LIBERO environments.
+
+    Returns:
+        dict[str, dict[int, gym.Env]]:
+            A mapping from suite name and task ID to a single LIBERO environment.
+    """
+    return create_libero_envs(
+        task=task,
+        n_envs=1,
+        gym_kwargs=gym_kwargs,
+        camera_name=camera_name,
+        init_states=init_states,
+        vectorize=False,
+        ood=ood,
+    )
+
 def create_libero_envs(
     task: str,
     n_envs: int,
+    ood: OODConfig,
     gym_kwargs: dict[str, Any] | None = None,
     camera_name: str | Sequence[str] = "agentview_image,robot0_eye_in_hand_image",
     init_states: bool = True,
+    vectorize: bool = True,
     env_cls: Callable[[Sequence[Callable[[], Any]]], Any] | None = None,
 ) -> dict[str, dict[int, Any]]:
     """
@@ -331,10 +375,14 @@ def create_libero_envs(
         - `task` can be a single suite or a comma-separated list of suites.
         - You may pass `task_ids` (list[int]) inside `gym_kwargs` to restrict tasks per suite.
     """
-    if env_cls is None or not callable(env_cls):
-        raise ValueError("env_cls must be a callable that wraps a list of environment factory callables.")
     if not isinstance(n_envs, int) or n_envs <= 0:
         raise ValueError(f"n_envs must be a positive int; got {n_envs}.")
+    if vectorize:
+        if env_cls is None or not callable(env_cls):
+            raise ValueError("env_cls must be a callable that wraps a list of environment factory callables.")
+    else:
+        if n_envs != 1:
+            raise ValueError("When vectorize=False, n_envs must be exactly 1.")
 
     gym_kwargs = dict(gym_kwargs or {})
     task_ids_filter = gym_kwargs.pop("task_ids", None)  # optional: limit to specific tasks
@@ -361,17 +409,22 @@ def create_libero_envs(
             raise ValueError(f"No tasks selected for suite '{suite_name}' (available: {total}).")
 
         for tid in selected:
-            fns = _make_env_fns(
+            fns = build_libero_env_factories(
                 suite=suite,
                 suite_name=suite_name,
                 task_id=tid,
                 n_envs=n_envs,
                 camera_names=camera_names,
                 init_states=init_states,
+                ood=ood,
                 gym_kwargs=gym_kwargs,
             )
-            out[suite_name][tid] = env_cls(fns)
-            print(f"Built vec env | suite={suite_name} | task_id={tid} | n_envs={n_envs}")
+            if vectorize:
+                out[suite_name][tid] = env_cls(fns)
+                print(f"Built vec env | suite={suite_name} | task_id={tid} | n_envs={n_envs}")
+            else:
+                out[suite_name][tid] = fns[0]()  # single env
+                print(f"Built single env | suite={suite_name} | task_id={tid}")
 
     # return plain dicts for predictability
     return {suite: dict(task_map) for suite, task_map in out.items()}

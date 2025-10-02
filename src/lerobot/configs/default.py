@@ -75,8 +75,11 @@ class EvalConfig:
 @dataclass
 class EvalUncertEstConfig:
     n_episodes: int = 20
-    
-    # If True we ignore success/failure and only keep ID vs. OoD
+
+    # Which environment domains to evaluate. Allowed values: "id" (in-distribution), "ood" (out-of-distribution).
+    domains: tuple[str] = ("id", "ood")
+
+    # If True, merge success and failure episodes into a single bucket when plotting uncertainty scores
     collapse_success_failure: bool = False
 
     # Which uncertainty estimation methods to evaluate
@@ -91,8 +94,17 @@ class EvalUncertEstConfig:
     # Paths to ID and OoD failure seeds to balance success and failure cases
     id_failure_seeds_path: Path | None = None
     ood_failure_seeds_path: Path | None = None
-    
+
     def validate(self):
+        allowed_domains = {"id", "ood"}
+        if len(self.domains) == 0:
+            raise ValueError("At least one eval domain must be specified.")
+        for d in self.domains:
+            if d not in allowed_domains:
+                raise ValueError(
+                    f"Unknown eval domain '{d}'. Allowed: {sorted(allowed_domains)}."
+                )
+
         allowed_methods = {
             "composed_sequence",
             "composed_cross_bayesian",

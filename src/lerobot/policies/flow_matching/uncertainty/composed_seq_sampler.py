@@ -3,9 +3,9 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
-from lerobot.common.policies.factory import make_flow_matching_uncertainty_scoring_metric
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+from lerobot.policies.factory import make_flow_matching_uncertainty_scoring_metric
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
+from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
     ComposedSequenceSamplerConfig,
 )
 

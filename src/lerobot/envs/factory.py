@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
+from typing import Callable
 
 import gymnasium as gym
 
@@ -31,6 +32,57 @@ def make_env_config(env_type: str, **kwargs) -> EnvConfig:
         return LiberoEnv(**kwargs)
     else:
         raise ValueError(f"Policy type '{env_type}' is not available.")
+
+def build_env_factory(cfg: EnvConfig) -> Callable[[], gym.Env]:
+    """Build single factory callable that constructs a single env."""
+    package_name = f"gym_{cfg.type}"
+    try:
+        importlib.import_module(package_name)
+    except ModuleNotFoundError as e:
+        print(f"{package_name} is not installed. Please install it with `pip install 'lerobot[{cfg.type}]'`")
+        raise e
+
+    gym_handle = f"{package_name}/{cfg.task}"
+
+    # Edit the environment kwargs before creation if OoD is enabled
+    gym_kwargs = cfg.ood.tweak_gym_kwargs(cfg.gym_kwargs)
+
+    def _make_single_env() -> gym.Env:
+        env = gym.make(gym_handle, disable_env_checker=cfg.disable_env_checker, **gym_kwargs)
+        # Wrap the environment if OoD is enabled
+        env = cfg.ood.wrap(env)
+        return env
+
+    return _make_single_env
+
+def make_single_env(cfg: EnvConfig) -> dict[str, dict[int, gym.Env]]:
+    """
+    Creates single non-vectorized environments according to the config.
+
+    Args:
+        cfg (EnvConfig): the config of the environment to instantiate.
+
+    Returns:
+        dict[str, dict[int, gym.Env]]:
+            A mapping from suite name and task ID to a single environment.
+            - For multi-task benchmarks (e.g., LIBERO): one entry per suite, and one env per task_id.
+            - For single-task environments: a single suite entry (cfg.type) with task_id=0.
+    """
+    if "libero" in cfg.type:
+        from lerobot.envs.libero import create_single_libero_envs
+
+        return create_single_libero_envs(
+            task=cfg.task,
+            camera_name=cfg.camera_name,
+            init_states=cfg.init_states,
+            gym_kwargs=cfg.gym_kwargs,
+            ood=cfg.ood,
+        )
+
+    env_fn = build_env_factory(cfg=cfg)
+    # normalize to {suite: {task_id: vec_env}} for consistency
+    suite_name = cfg.type  # e.g., "pusht", "aloha"
+    return {suite_name: {0: env_fn()}}
 
 def make_env(
     cfg: EnvConfig,
@@ -71,21 +123,11 @@ def make_env(
             init_states=cfg.init_states,
             gym_kwargs=cfg.gym_kwargs,
             env_cls=env_cls,
+            ood=cfg.ood,
         )
 
-    package_name = f"gym_{cfg.type}"
-    try:
-        importlib.import_module(package_name)
-    except ModuleNotFoundError as e:
-        print(f"{package_name} is not installed. Please install it with `pip install 'lerobot[{cfg.type}]'`")
-        raise e
-
-    gym_handle = f"{package_name}/{cfg.task}"
-
-    def _make_one():
-        return gym.make(gym_handle, disable_env_checker=cfg.disable_env_checker, **(cfg.gym_kwargs or {}))
-
-    vec = env_cls([_make_one for _ in range(n_envs)])
+    env_fn = build_env_factory(cfg=cfg)
+    vec = env_cls([env_fn for _ in range(n_envs)])
 
     # normalize to {suite: {task_id: vec_env}} for consistency
     suite_name = cfg.type  # e.g., "pusht", "aloha"

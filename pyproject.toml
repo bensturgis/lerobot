@@ -140,6 +140,8 @@ pusht = ["gym-pusht>=0.1.5", "pymunk>=6.6.0,<7.0.0"] # TODO: Fix pymunk version 
 xarm = ["gym-xarm>=0.1.1"]
 libero = ["lerobot[transformers-dep]", "libero @ git+https://github.com/huggingface/lerobot-libero.git@main#egg=libero"]
 
+# Uncertainty Estimation
+uncertainty = ["laplace-torch>=0.2.2.2,<0.3"]
 
 # All
 all = [

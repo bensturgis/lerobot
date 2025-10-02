@@ -4,23 +4,23 @@ dataset:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero
+  repo_id: bensturgis/smolvla-libero-filtered
 
 env:
   type: libero
-  task: libero_10
+  task: libero_spatial
 
 eval:
   batch_size: 1
   n_episodes: 5
 
-output_dir: outputs/train/smolvla_libero_scratch
+output_dir: outputs/train/smolvla_libero_scratch_filtered
 steps: 200000
 batch_size: 64
 eval_freq: 5000
 val_ratio: 0.05
 save_freq: 10000
-seed: 22110026
+seed: 17021012
 wandb:
   enable: true
 
