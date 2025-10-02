@@ -39,11 +39,11 @@ class SmolVLAConfig(PreTrainedConfig):
     )
 
     # Shorter state and action vectors will be padded
-    max_state_dim: int = 32
-    max_action_dim: int = 32
+    max_state_dim: int = 8
+    max_action_dim: int = 7
 
     # Image preprocessing
-    resize_imgs_with_padding: tuple[int, int] = (512, 512)
+    resize_imgs_with_padding: tuple[int, int] = (256, 256)
 
     # Add empty images. Used by smolvla_aloha_sim which adds the empty
     # left and right wrist cameras in addition to the top camera.
@@ -89,7 +89,7 @@ class SmolVLAConfig(PreTrainedConfig):
 
     attention_mode: str = "cross_attn"
 
-    prefix_length: int = 0
+    prefix_length: int = -1
 
     pad_language_to: str = "longest"  # "max_length"
 
