@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """
-Evaluate a Flow Matching policy's uncertainty estimates for in-distribution and out-of-distribution
-scenarios.
+Evaluate a Flow Matching policy's uncertainty estimates for in-distribution and out-of-distribution scenarios.
 
 Runs rollouts with multiple uncertainty estimation methods, records per-step uncertainty scores,
 saves rollout videos, and generates comparison plots for each method.
@@ -39,16 +38,16 @@ from lerobot.envs.configs import EnvConfig
 from lerobot.envs.factory import make_single_env
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
-from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
-    UncertaintySamplerConfig,
-)
-from lerobot.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
-    ScorerArtifacts,
-    build_scorer_artifacts_for_uncertainty_sampler,
-)
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.processor import PolicyAction, PolicyProcessorPipeline
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
+)
+from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import (
+    ScorerArtifacts,
+    build_scorer_artifacts_for_uncertainty_sampler,
+)
 from lerobot.utils.io_utils import save_episode_video
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import get_safe_torch_device, init_logging
@@ -213,7 +212,7 @@ def rollout(
     else:
         ep_frames.append(env.render())
 
-    max_episode_steps = env._max_episode_steps
+    max_episode_steps = env.spec.max_episode_steps
     progbar = trange(
         max_episode_steps,
         desc=f"Running rollout with at most {max_episode_steps} steps."
@@ -470,10 +469,11 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
     # Check device is available
     device = get_safe_torch_device(cfg.policy.device, log=True)
 
-    if cfg.policy.type != "flow_matching":
+    allowed_policies = {"flow_matching", "smolvla"}
+    if cfg.policy.type not in allowed_policies:
         raise ValueError(
-            f"eval_uncertainty_estimation.py only supports Flow Matching policies, "
-            f"but got policy type '{cfg.policy.type}'."
+            f"eval_uncertainty_estimation.py only supports policy types {allowed_policies}, "
+            f"but got '{cfg.policy.type}'."
         )
 
     logging.info("Making environment.")
@@ -520,6 +520,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             env_cfg=cfg.env,
             dataset_cfg=cfg.dataset,
             policy=policy,
+            preprocesser=preprocessor,
         )
         scoring_metric_by_method[uncert_est_method] = getattr(uncertainty_config.active_config, "scoring_metric", None)
 

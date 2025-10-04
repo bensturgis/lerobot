@@ -1,56 +1,51 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 from torch import Tensor
 from torch.distributions import Independent, Normal
 
-from lerobot.policies.flow_matching.conditional_probability_path import (
+from lerobot.policies.common.flow_matching.conditional_probability_path import (
     OTCondProbPath,
     VPDiffusionCondProbPath,
 )
-from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
-from lerobot.policies.flow_matching.ode_solver import (
+from lerobot.policies.common.flow_matching.ode_solver import (
     ODESolver,
     make_lik_estimation_time_grid,
     select_ode_states,
 )
-from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
-from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
-from .configuration_uncertainty_sampler import ScoringMetricConfig
+from ..uncertainty_samplers.configuration_uncertainty_sampler import ScoringMetricConfig
+from ..uncertainty_samplers.uncertainty_sampler import UncertaintySampler
 
 
-class FlowMatchingUncertaintyMetric(ABC):  # noqa: B024
-    """Abstract base class for flow matching uncertainty metrics."""
+class UncertaintyMetric(ABC):  # noqa: B024
+    """Abstract base class for uncertainty metrics."""
     name: str = "base"
     type: str = "base"
 
 
-class TerminalStateMetric(FlowMatchingUncertaintyMetric, ABC):
+class TerminalStateMetric(UncertaintyMetric, ABC):
     """
     Abstract base class for uncertainty metrics that operate on terminal action sequences,
     i.e., the final outputs of the flow matching ODE integration.
-    Subclasses define how the velocity model is applied to score these sequences
-    and produce an uncertainty score.
+    Subclasses define how the velocity model is applied to score these sequences and produce
+    an uncertainty score.
     """
     type: str = "terminal"
 
     @abstractmethod
     def __call__(
         self,
-        velocity_model: FlowMatchingConditionalUnet1d,
-        global_cond: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
         action_sequences: Tensor,
         **kwargs: Any,
     ) -> Tensor:
         """
-        Compute an uncertainty score for a batch of action sequences using a scorer
-        flow matching model.
+        Compute an uncertainty score for a batch of action sequences using a scorer flow matching model.
         Args:
-            velocity_model: Flow matching velocity model for scoring.
-            global_cond: Conditioning vector for the scorer velocity model.
-                Shape: (batch_size, cond_dim).
+            velocity_fn: Velocity function defining the right-hand side of the flow matching ODE
+                d/dt φ_t(x) = v_t(φ_t(x), conditoning).
             action_sequence: Final action sequences to score. Shape: (batch_size,
                 horizon, action_dim).
 
@@ -77,8 +72,7 @@ class TerminalVelNorm(TerminalStateMetric):
 
     def __call__(
         self,
-        velocity_model: FlowMatchingConditionalUnet1d,
-        global_cond: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
         action_sequences: Tensor,
         **_: Any
     ) -> Tensor:
@@ -86,18 +80,11 @@ class TerminalVelNorm(TerminalStateMetric):
         Evaluate the velocity only at the terminal action sequences for multiple evaluation
         times and return the mean L2 norm as the uncertainty score.
         """
-        device = get_device_from_parameters(velocity_model)
-        dtype = get_dtype_from_parameters(velocity_model)
         # Evaluate velocity on the final sampled sequence
         terminal_vel_norms: list[float] = []
         for time in self.velocity_eval_times:
-            time_batch = torch.full(
-                (action_sequences.shape[0],), time, device=device, dtype=dtype
-            )
-            velocity = velocity_model(
-                action_sequences,
-                time_batch,
-                global_cond,
+            velocity = velocity_fn(
+                x_t=action_sequences, t=torch.tensor(time, device=action_sequences.device)
             )
             terminal_vel_norms.append(torch.norm(velocity, dim=(1, 2)))
 
@@ -116,34 +103,26 @@ class ModeDistance(TerminalStateMetric):
         """
         Args:
             config: Scoring metric settings.
+            device: The PyTorch device on which to store and perform tensor operations.
         """
         self.velocity_eval_times = config.velocity_eval_times
 
     def __call__(
         self,
-        velocity_model: FlowMatchingConditionalUnet1d,
-        global_cond: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
         action_sequences: Tensor,
         **_: Any,
     ) -> Tensor:
         """
         Compute the proxy "distance-from-mode" score computed by averaging (1 - t) * ‖v(x; t)‖
-        of the velocity at the terminal action sequence x across the specified
-        evaluation times.
+        of the velocity at the terminal action sequence x across the specified evaluation times.
         """
-        device = get_device_from_parameters(velocity_model)
-        dtype = get_dtype_from_parameters(velocity_model)
         distances: list[Tensor] = []
         # Loop over each time in [0, 1) at which we want to probe the velocity field
         for time in self.velocity_eval_times:
-            time_batch = torch.full(
-                (action_sequences.shape[0],), time, device=device, dtype=dtype
-            )
             # Query the velocity field at the terminal action sequence and this time
-            velocity = velocity_model(
-                action_sequences,
-                time_batch,
-                global_cond,
+            velocity = velocity_fn(
+                x_t=action_sequences, t=torch.tensor(time, device=action_sequences.device)
             )
             velocity_norm = torch.norm(velocity, dim=(1, 2))
             # Scale by (1 - time) as a simple proxy for “distance from the mode”
@@ -161,7 +140,7 @@ class Likelihood(TerminalStateMetric):
     """
     name: str = "likelihood"
 
-    def __init__(self, config: ScoringMetricConfig, uncertainty_sampler: FlowMatchingUncertaintySampler):
+    def __init__(self, config: ScoringMetricConfig, uncertainty_sampler: UncertaintySampler):
         """
         Args:
             config: Scoring metric settings.
@@ -187,10 +166,11 @@ class Likelihood(TerminalStateMetric):
             device=self.device,
         )
 
+        self.ode_solver = ODESolver()
+
     def __call__(
         self,
-        velocity_model: FlowMatchingConditionalUnet1d,
-        global_cond: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
         action_sequences: Tensor,
         generator: Optional[torch.Generator] = None,
         **_: Any,
@@ -200,11 +180,10 @@ class Likelihood(TerminalStateMetric):
         action sequence; the score is the negative log-likelihood.
         """
         # Compute log-likelihood of sampled action sequences in scorer model
-        scoring_ode_solver = ODESolver(velocity_model)
-        _, log_probs = scoring_ode_solver.sample_with_log_likelihood(
+        _, log_probs = self.ode_solver.sample_with_log_likelihood(
             x_init=action_sequences,
             time_grid=self.lik_estimation_time_grid,
-            global_cond=global_cond,
+            velocity_fn=velocity_fn,
             log_p_0=self.gaussian_log_density,
             method=self.lik_ode_solver_cfg.method,
             atol=self.lik_ode_solver_cfg.atol,
@@ -217,7 +196,7 @@ class Likelihood(TerminalStateMetric):
         return -log_probs
 
 
-class InterVelDiff(FlowMatchingUncertaintyMetric):
+class InterVelDiff(UncertaintyMetric):
     """
     Uncertainty metric based on intermediate velocity discrepancies.
 
@@ -228,7 +207,7 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
     name: str = "inter_vel_diff"
     type: str = "trajectory"
 
-    def __init__(self, config: ScoringMetricConfig, uncertainty_sampler: FlowMatchingUncertaintySampler):
+    def __init__(self, config: ScoringMetricConfig, uncertainty_sampler: UncertaintySampler):
         """
         Args:
             config: Scoring metric settings.
@@ -238,11 +217,11 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
         self.dtype = uncertainty_sampler.dtype
         self.ode_solver = uncertainty_sampler.sampling_ode_solver
         self.sampling_time_grid = uncertainty_sampler.sampling_time_grid
-        self.cond_vf_type = uncertainty_sampler.flow_matching_cfg.cond_vf_type
+        self.cond_vf_type = uncertainty_sampler.policy_config.cond_vf_type
         if self.cond_vf_type == "vp":
             self.cond_prob_path = VPDiffusionCondProbPath(
-                beta_min=uncertainty_sampler.flow_matching_cfg.beta_min,
-                beta_max=uncertainty_sampler.flow_matching_cfg.beta_max,
+                beta_min=uncertainty_sampler.policy_config.beta_min,
+                beta_max=uncertainty_sampler.policy_config.beta_max,
             )
         elif self.cond_vf_type == "ot":
             self.cond_prob_path = OTCondProbPath()
@@ -254,11 +233,9 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
     def __call__(
         self,
         ref_ode_states: Tensor,
-        ref_velocity_model: FlowMatchingConditionalUnet1d,
-        ref_global_cond: Tensor,
+        ref_velocity_fn: Callable[[Tensor, Tensor], Tensor],
         cmp_ode_states: Tensor,
-        cmp_velocity_model: FlowMatchingConditionalUnet1d,
-        cmp_global_cond: Tensor,
+        cmp_velocity_fn: Callable[[Tensor, Tensor], Tensor],
     ) -> Tensor:
         """
         Compute the average velocity discrepancy between two trajectories at intermediate ODE states.
@@ -273,12 +250,12 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
         Args:
             ref_ode_states: ODE integration states of the reference trajectory.
                 Shape: (timesteps, batch_size, horizon, action_dim).
-            ref_velocity_model: Velocity model associated with the reference trajectory.
+            ref_velocity_fn: Conditional velocity function associated with the reference trajectory.
             ref_global_cond: Conditioning vector for the reference model.
                 Shape: (batch_size, cond_dim).
             cmp_ode_states: ODE integration states of the comparison trajectory.
                 Shape: (timesteps, batch_size, horizon, action_dim).
-            cmp_velocity_model: Velocity model associated with the comparison trajectory.
+            cmp_velocity_fn: Conditional velocity function associated with the comparison trajectory.
             cmp_global_cond: Conditioning vector for the comparison model.
                 Shape: (batch_size, cond_dim).
 
@@ -312,19 +289,8 @@ class InterVelDiff(FlowMatchingUncertaintyMetric):
             # Determine dt: difference to next time or to 1.0 for last step
             dt = selected_ref_grid_times[idx + 1] - time if idx < len(selected_ref_grid_times) - 1 else 1.0 - time
 
-            time_batch = torch.full(
-                (batch_size,), time, device=self.device, dtype=self.dtype
-            )
-            ref_velocity = ref_velocity_model(
-                ref_inter_state,
-                time_batch,
-                ref_global_cond,
-            )
-            cmp_velocity = cmp_velocity_model(
-                cmp_inter_state,
-                time_batch,
-                cmp_global_cond,
-            )
+            ref_velocity = ref_velocity_fn(x_t=ref_inter_state, t=torch.tensor(time, device=self.device))
+            cmp_velocity = cmp_velocity_fn(x_t=cmp_inter_state, t=torch.tensor(time, device=self.device))
             # L2 norm across horizon and action dims gives magnitude of velocity difference
             velocity_difference = torch.norm(ref_velocity - cmp_velocity, dim=(1, 2)) ** 2
 

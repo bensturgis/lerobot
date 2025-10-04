@@ -4,11 +4,15 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
-from ..conditional_probability_path import OTCondProbPath, VPDiffusionCondProbPath
-from ..configuration_flow_matching import FlowMatchingConfig
-from ..modelling_flow_matching import FlowMatchingModel
-from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
+from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
+from lerobot.policies.common.flow_matching.conditional_probability_path import (
+    OTCondProbPath,
+    VPDiffusionCondProbPath,
+)
+
 from .configuration_uncertainty_sampler import EntropySamplerConfig
+from .uncertainty_sampler import FlowMatchingUncertaintySampler
 
 
 class EntropySampler(FlowMatchingUncertaintySampler):

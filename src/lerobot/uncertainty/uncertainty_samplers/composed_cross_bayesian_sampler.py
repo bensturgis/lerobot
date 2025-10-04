@@ -4,20 +4,20 @@ import torch
 from torch import Tensor
 
 from lerobot.policies.factory import make_flow_matching_uncertainty_scoring_metric
+from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
-    CrossBayesianSamplerConfig,
-)
-from lerobot.policies.flow_matching.uncertainty.utils.laplace_utils import (
+
+from ..laplace_utils.posterior_builder import (
     draw_laplace_flow_matching_model,
 )
-from lerobot.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
+from ..scoring.scorer_artifacts import (
     ScorerArtifacts,
 )
-
-from ..configuration_flow_matching import FlowMatchingConfig
-from .base_uncertainty_sampler import FlowMatchingUncertaintySampler
-from .utils.sampler_utils import compose_ode_states, select_and_expand_ode_states, splice_noise_with_prev
+from .configuration_uncertainty_sampler import (
+    CrossBayesianSamplerConfig,
+)
+from .uncertainty_sampler import FlowMatchingUncertaintySampler
+from .utils import compose_ode_states, select_and_expand_ode_states, splice_noise_with_prev
 
 
 class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):

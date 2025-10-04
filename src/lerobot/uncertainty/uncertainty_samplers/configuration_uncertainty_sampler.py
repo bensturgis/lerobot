@@ -10,7 +10,7 @@ Explanation of shared uncertainy sampler attributes:
 - scoring_metric:
     - metric_type: Which uncertainty metric to use.
         - "likelihood": Negative log-likelihood of the action sequence.
-        - "mode_distance": Proxy "distance-from-mode" score computed by averaging 
+        - "mode_distance": Proxy "distance-from-mode" score computed by averaging
             (1 - t) * ‖v(t)‖ of the scorer's velocity at the final sampled action sequence
             across the specified evaluation times.
         - "terminal_vel_norm": Average L2-norm of the velocity field evaluated only for the
@@ -21,7 +21,7 @@ Explanation of shared uncertainy sampler attributes:
         used to compute the log-probability.
         - exact_divergence: Whether to compute the exact divergence or use the Hutchinson
             trace estimator when computing the log-likelihood for an action sequence sample.
-    - velocity_eval_times: When we score based on the velocity field, these are the time-points 
+    - velocity_eval_times: When we score based on the velocity field, these are the time-points
         we evaluate the velocity field to compute the metrics.
 - ensemble_model_path: Path to the pretrained flow matching model that serves as the “scorer”
     for ensembling methods. The scorer is the model used to compute log-likelihoods for the

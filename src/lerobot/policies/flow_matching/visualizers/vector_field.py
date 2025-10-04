@@ -12,7 +12,7 @@ from lerobot.common.policies.flow_matching.ode_solver import ODESolver
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 from lerobot.configs.default import VectorFieldVisConfig
 
-from .base import FlowMatchingVisualizer
+from .visualizer import FlowMatchingVisualizer
 from .utils import add_actions
 
 

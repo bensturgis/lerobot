@@ -70,7 +70,7 @@ from lerobot.utils.utils import get_safe_dtype
 
 
 def create_sinusoidal_pos_embedding(
-    time: torch.tensor, dimension: int, min_period: float, max_period: float, device="cpu"
+    time: Tensor, dimension: int, min_period: float, max_period: float, device="cpu"
 ) -> Tensor:
     """Computes sine-cosine positional embedding vectors for scalar positions."""
     if dimension % 2 != 0:

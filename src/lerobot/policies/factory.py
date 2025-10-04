@@ -20,6 +20,7 @@ import logging
 from typing import Any, TypedDict
 
 import torch
+from torch import nn
 from typing_extensions import Unpack
 
 from lerobot.configs.policies import PreTrainedConfig
@@ -32,18 +33,6 @@ from lerobot.envs.utils import env_to_policy_features
 from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
-from lerobot.policies.flow_matching.uncertainty.base_uncertainty_sampler import (
-    FlowMatchingUncertaintySampler,
-)
-from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
-    ScoringMetricConfig,
-    UncertaintySamplerConfig,
-)
-from lerobot.policies.flow_matching.uncertainty.scoring_metrics import FlowMatchingUncertaintyMetric
-from lerobot.policies.flow_matching.uncertainty.utils.scorer_artifacts import (
-    ScorerArtifacts,
-)
 from lerobot.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -59,6 +48,18 @@ from lerobot.processor.converters import (
     transition_to_batch,
     transition_to_policy_action,
 )
+from lerobot.uncertainty.uncertainty_adapters.factory import make_uncertainty_adapter
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
+    ScoringMetricConfig,
+    UncertaintySamplerConfig,
+)
+from lerobot.uncertainty.uncertainty_samplers.uncertainty_sampler import (
+    UncertaintySampler,
+)
+from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import (
+    ScorerArtifacts,
+)
+from lerobot.uncertainty.uncertainty_scoring.scoring_metrics import UncertaintyMetric
 
 
 def get_policy_class(name: str) -> type[PreTrainedPolicy]:
@@ -415,22 +416,22 @@ def make_policy(
     return policy
 
 
-def make_flow_matching_uncertainty_sampler(
-    flow_matching_cfg: FlowMatchingConfig,
-    uncertainty_sampler_cfg: UncertaintySamplerConfig,
-    flow_matching_model: FlowMatchingModel,
+def make_uncertainty_sampler(
+    uncertainty_sampler_config: UncertaintySamplerConfig,
+    policy_config: PreTrainedConfig,
+    model: nn.Module,
     scorer_artifacts: ScorerArtifacts,
-) -> FlowMatchingUncertaintySampler:
-    if uncertainty_sampler_cfg.type == "composed_cross_bayesian":
-        from lerobot.policies.flow_matching.uncertainty.composed_cross_bayesian_sampler import (
+) -> UncertaintySampler:
+    if uncertainty_sampler_config.type == "composed_cross_bayesian":
+        from lerobot.uncertainty.uncertainty_samplers.composed_cross_bayesian_sampler import (
             ComposedCrossBayesianSampler,
         )
 
-        if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_model is None:
+        if uncertainty_sampler_config.composed_cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_adapter is None:
             raise ValueError(
                 "Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model."
             )
-        if uncertainty_sampler_cfg.composed_cross_bayesian_sampler.scorer_type == "laplace" and scorer_artifacts.laplace_posterior is None:
+        if uncertainty_sampler_config.composed_cross_bayesian_sampler.scorer_type == "laplace" and scorer_artifacts.laplace_posterior is None:
             raise ValueError(
                 "Composed Cross-Bayesian uncertainty sampler with scorer_type=laplace requires Laplace posterior "
                 "to draw a scorer model from."
@@ -438,42 +439,46 @@ def make_flow_matching_uncertainty_sampler(
 
         return ComposedCrossBayesianSampler(
             flow_matching_cfg=flow_matching_cfg,
-            cfg=uncertainty_sampler_cfg.composed_cross_bayesian_sampler,
+            cfg=uncertainty_sampler_config.composed_cross_bayesian_sampler,
             sampler_model=flow_matching_model,
             scorer_artifacts=scorer_artifacts,
         )
-    if uncertainty_sampler_cfg.type == "composed_sequence":
-        from lerobot.policies.flow_matching.uncertainty.composed_seq_sampler import (
+    if uncertainty_sampler_config.type == "composed_sequence":
+        from lerobot.uncertainty.uncertainty_samplers.composed_seq_sampler import (
             ComposedSequenceSampler,
         )
 
         return ComposedSequenceSampler(
-            flow_matching_cfg=flow_matching_cfg, 
+            flow_matching_cfg=flow_matching_cfg,
             cfg=uncertainty_sampler_cfg.composed_sequence_sampler,
             flow_matching_model=flow_matching_model
         )
-    elif uncertainty_sampler_cfg.type == "cross_bayesian":
-        from lerobot.policies.flow_matching.uncertainty.cross_bayesian_sampler import (
+    elif uncertainty_sampler_config.type == "cross_bayesian":
+        from lerobot.uncertainty.uncertainty_samplers.cross_bayesian_sampler import (
             CrossBayesianSampler,
         )
 
-        if uncertainty_sampler_cfg.cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_model is None:
+        if uncertainty_sampler_config.cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_model is None:
             raise ValueError(
                 "Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model."
             )
-        if uncertainty_sampler_cfg.cross_bayesian_sampler.scorer_type == "laplace" and scorer_artifacts.laplace_posterior is None:
+        if uncertainty_sampler_config.cross_bayesian_sampler.scorer_type == "laplace" and scorer_artifacts.laplace_posterior is None:
             raise ValueError(
                 "Bayesian uncertainty sampler with scorer_type=laplace requires Laplace posterior to draw a scorer model from."
             )
 
+        sampler_model = make_uncertainty_adapter(
+            model=model,
+            policy_config=policy_config
+        )
+
         return CrossBayesianSampler(
-            flow_matching_cfg=flow_matching_cfg,
-            cfg=uncertainty_sampler_cfg.cross_bayesian_sampler,
-            sampler_model=flow_matching_model,
+            config=uncertainty_sampler_config.cross_bayesian_sampler,
+            sampler_model=sampler_model,
             scorer_artifacts=scorer_artifacts,
         )
     elif uncertainty_sampler_cfg.type == "entropy":
-        from lerobot.policies.flow_matching.uncertainty.entropy_sampler import (
+        from lerobot.uncertainty.uncertainty_samplers.entropy_sampler import (
             EntropySampler,
         )
 
@@ -485,30 +490,30 @@ def make_flow_matching_uncertainty_sampler(
     else:
         raise ValueError(f"Unknown uncertainty sampler {uncertainty_sampler_cfg.type}.")
 
-def make_flow_matching_uncertainty_scoring_metric(
+def make_uncertainty_scoring_metric(
     config: ScoringMetricConfig,
-    uncertainty_sampler: FlowMatchingUncertaintySampler | None = None,
-) -> FlowMatchingUncertaintyMetric:
+    uncertainty_sampler: UncertaintySampler | None = None,
+) -> UncertaintyMetric:
     if config.metric_type == "inter_vel_diff":
-        from lerobot.policies.flow_matching.uncertainty.scoring_metrics import InterVelDiff
+        from lerobot.uncertainty.uncertainty_scoring.scoring_metrics import InterVelDiff
 
         return InterVelDiff(
             config=config,
             uncertainty_sampler=uncertainty_sampler
         )
     elif config.metric_type == "likelihood":
-        from lerobot.policies.flow_matching.uncertainty.scoring_metrics import Likelihood
+        from lerobot.uncertainty.uncertainty_scoring.scoring_metrics import Likelihood
 
         return Likelihood(
             config=config,
             uncertainty_sampler=uncertainty_sampler,
         )
     elif config.metric_type == "mode_distance":
-        from lerobot.policies.flow_matching.uncertainty.scoring_metrics import ModeDistance
+        from lerobot.uncertainty.uncertainty_scoring.scoring_metrics import ModeDistance
 
         return ModeDistance(config=config)
     elif config.metric_type == "terminal_vel_norm":
-        from lerobot.policies.flow_matching.uncertainty.scoring_metrics import TerminalVelNorm
+        from lerobot.uncertainty.uncertainty_scoring.scoring_metrics import TerminalVelNorm
 
         return TerminalVelNorm(config=config)
     else:

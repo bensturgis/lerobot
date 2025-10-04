@@ -7,7 +7,7 @@ from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig, EvalUncertEstConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.envs import EnvConfig
-from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
     UncertaintySamplerConfig,
 )
 

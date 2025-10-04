@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from typing import Dict, Sequence, Union
+from typing import Callable, Dict, Sequence, Union
 
 import einops
 import numpy as np
@@ -16,17 +16,11 @@ from torch import Tensor, nn
 from tqdm import tqdm
 
 from lerobot.constants import ACTION, FINAL_FEATURE_MAP_MODULE, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
-from lerobot.policies.flow_matching.conditional_probability_path import (
-    OTCondProbPath,
-    VPDiffusionCondProbPath,
-)
+from lerobot.policies.common.flow_matching.conditional_probability_path import make_cond_prob_path
+from lerobot.policies.common.flow_matching.ode_solver import ODESolver
 from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
     FiperDataRecorderConfig,
-)
-from lerobot.policies.flow_matching.ode_solver import ODESolver
-from lerobot.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
-    UncertaintySamplerConfig,
 )
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import (
@@ -35,6 +29,9 @@ from lerobot.policies.utils import (
     get_output_shape,
     populate_queues,
     replace_submodules,
+)
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
 )
 
 
@@ -79,12 +76,12 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         """
         Constructs the uncertainty sampler based on the config.
         """
-        from lerobot.policies.factory import make_flow_matching_uncertainty_sampler
+        from lerobot.policies.factory import make_uncertainty_sampler
 
-        self.uncertainty_sampler = make_flow_matching_uncertainty_sampler(
-            flow_matching_cfg=self.config,
-            uncertainty_sampler_cfg=config,
-            flow_matching_model=self.flow_matching,
+        self.uncertainty_sampler = make_uncertainty_sampler(
+            uncertainty_sampler_config=config,
+            policy_config=self.config,
+            model=self.flow_matching,
             scorer_artifacts=scorer_artifacts,
         )
 
@@ -289,16 +286,13 @@ class FlowMatchingModel(nn.Module):
             global_cond_dim += self.config.env_state_feature.shape[0]
 
         self.unet = FlowMatchingConditionalUnet1d(config, global_cond_dim=global_cond_dim * config.n_obs_steps)
-        if self.config.cond_vf_type == "ot":
-            self.cond_prob_path = OTCondProbPath(sigma_min=self.config.sigma_min)
-        elif self.config.cond_vf_type == "vp":
-            self.cond_prob_path = VPDiffusionCondProbPath(
-                beta_min=self.config.beta_min,
-                beta_max=self.config.beta_max,
-            )
-        else:
-            raise ValueError(f"Unknown conditional vector field type {self.config.cond_vf_type}")
-        self.ode_solver = ODESolver(self.unet)
+        self.cond_prob_path = make_cond_prob_path(
+            cond_vf_type=self.config.cond_vf_type,
+            sigma_min=self.config.sigma_min,
+            beta_min=self.config.beta_min,
+            beta_max=self.config.beta_max,
+        )
+        self.ode_solver = ODESolver()
 
     def forward(
         self, interpolated_trajectory: Tensor, timestep: Tensor, observation: Dict[str, Tensor]
@@ -325,6 +319,11 @@ class FlowMatchingModel(nn.Module):
         predicted_velocity = self.unet(interpolated_trajectory, timestep, global_cond)
 
         return predicted_velocity
+
+    def make_velocity_fn(self, global_cond: Tensor) -> Callable[[Tensor, Tensor], Tensor]:
+        def v_t(t: Tensor, x_t: Tensor) -> Tensor:
+            return self.unet(x_t, t.expand(x_t.shape[0]), global_cond=global_cond)
+        return v_t
 
     # ========= inference  ============
     def conditional_sample(
@@ -365,7 +364,7 @@ class FlowMatchingModel(nn.Module):
         # Use the velocity field model and an ODE solver to predict a sample from the target distribution.
         sample = self.ode_solver.sample(
             x_0=noise_sample,
-            global_cond=global_cond,
+            velocity_fn=self.make_velocity_fn(global_cond=global_cond),
             step_size=self.config.ode_step_size,
             method=self.config.ode_solver_method,
             atol=self.config.atol,

@@ -16,7 +16,7 @@ eval:
 
 output_dir: outputs/train/smolvla_libero_scratch_filtered
 steps: 200000
-batch_size: 64
+batch_size: 20
 eval_freq: 5000
 val_ratio: 0.05
 save_freq: 10000

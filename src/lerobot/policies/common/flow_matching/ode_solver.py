@@ -4,7 +4,7 @@ import warnings
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 from torchdiffeq import odeint
 
 FIXED_STEP_SOLVERS = {
@@ -24,18 +24,15 @@ ADAPTIVE_SOLVERS = {
 
 class ODESolver():
     """
-    Wrapper class for solving flow-matching-based ODEs using a velocity model.
+    Wrapper class for solving flow-matching-based ODEs using a velocity function.
 
-    Supports sampling from a learned distribution and computing log-likelihoods 
+    Supports sampling from a learned distribution and computing log-likelihoods
     of a target sample via numerical ODE integration with torchdiffeq.
     """
-    def __init__(self, velocity_model: nn.Module):
-        self.velocity_model = velocity_model
-
     def sample(
         self,
         x_0: Tensor,
-        global_cond: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
         method: str,
         atol: float,
         rtol: float,
@@ -53,18 +50,24 @@ class ODESolver():
 
         Args:
             x_0: Initial sample from source distribution. Shape: [batch_size, ...].
-            global_cond: Global conditioning vector, encoding the robot's state and its visual
-                observations. Shape: [batch_size, cond_dim].
+            velocity_fn: Velocity function defining the right-hand side of the flow matching ODE
+                d/dt φ_t(x) = v_t(φ_t(x), conditoning).
+                    Args:
+                        t: Current scalar time of the ODE integration.
+                        x_t: Current state x_t along the flow trajectory.
+
+                    Returns:
+                        Velocity v_t(φ_t(x), conditoning) with the same shape as `x`.
             method: An ODE solver method supported by torchdiffeq. For a complete list, see torchdiffeq.
                 Some examples are:
-                - Fixed-step examples: "euler", "midpoint", "rk4", ... 
+                - Fixed-step examples: "euler", "midpoint", "rk4", ...
                 - Adaptive examples: "dopri5", "bosh3", ...
             step_size: Size of an integration step only for fixed-step solvers. Ignored
                 for adaptive solvers.
             atol, rtol: Absolute/relative error tolerances for accepting an adaptive solver step.
                 Ignored for fixed-step solvers.
             time_grid: Times at which ODE is evaluated. Integration runs from time_grid[0] to time_grid[-1].
-                Must start at 0.0 and end at 1.0 for flow matching sampling. 
+                Must start at 0.0 and end at 1.0 for flow matching sampling.
             return_intermediate_states: If True then return intermediate evaluation points according to time_grid.
             return_intermediate_vels: If True then return velocities at intermediate evaluation points acoording
                 to time_grid.
@@ -78,40 +81,22 @@ class ODESolver():
         """
         if time_grid[0] != 0.0 or time_grid[-1] != 1.0:
             raise ValueError(f"Time grid must start at 0.0 and end at 1.0. Got {time_grid}.")
-        
+
         # Ensure all tensors are on the same device
         time_grid = time_grid.to(x_0.device)
-        global_cond = global_cond.to(x_0.device)
-        
+
         # Validate input shapes and solver parameters and build keyword arguments for odeint method
         ode_kwargs = self._validate_and_configure_solver(
-            x_init=x_0,
-            global_cond=global_cond,
             method=method,
             step_size=step_size,
             atol=atol,
             rtol=rtol,
         )
 
-        def velocity_field(t: Tensor, x: Tensor) -> Tensor:
-            """
-            Helper function defining the right-hand side of the flow matching ODE
-            d/dt φ_t(x) = v_t(φ_t(x), global_cond). `global_cond` is captured from the
-            outer scope.
-            
-            Args:
-                t: Current scalar time of the ODE integration.
-                x: Current state x_t along the flow trajectory. Shape like `x_0`.
-            
-            Returns:
-                Velocity v_t(φ_t(x), global_cond) with the same shape as `x`.
-            """
-            return self.velocity_model(x, t.expand(x.shape[0]), global_cond)
-
         with torch.set_grad_enabled(enable_grad):
             # Approximate ODE solution with numerical ODE solver
             trajetory = odeint(
-                velocity_field,
+                velocity_fn,
                 x_0,
                 time_grid,
                 method=method,
@@ -128,8 +113,7 @@ class ODESolver():
         if return_intermediate_vels:
             velocities = []
             for t, x_t in zip(time_grid, trajetory, strict=False):
-                t_batch = t.expand(x_t.shape[0])
-                velocities.append(self.velocity_model(x_t, t_batch, global_cond))
+                velocities.append(velocity_fn(t=t, x_t=x_t))
             outputs.append(torch.stack(velocities, dim=0))
 
         return outputs[0] if len(outputs) == 1 else tuple(outputs)
@@ -138,7 +122,7 @@ class ODESolver():
         self,
         x_init: Tensor,
         time_grid: Tensor,
-        global_cond: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
         log_p_0: Callable[[Tensor], Tensor],
         method: str,
         atol: Optional[float],
@@ -163,17 +147,23 @@ class ODESolver():
 
         Args:
             x_init: Initial state. Shape: [batch_size, ...].
-                - If time_grid[0] = 0.0, sample from the source distribution, i.e. `x_init` ~ p_0. 
+                - If time_grid[0] = 0.0, sample from the source distribution, i.e. `x_init` ~ p_0.
                 - If time_grid[0] = 1.0, sample from the target distribution, i.e. `x_init` ~ p_1.
             time_grid: Times at which ODE is evluated. Integration runs from time_grid[0] to time_grid[-1].
                 Use [0.0, ..., 1.0] for forward integration (starting from a source sample),
                 or [1.0, ..., 0.0] for reverse integration (starting from a target sample).
+            velocity_fn: Velocity function defining the right-hand side of the flow matching ODE
+                d/dt φ_t(x) = v_t(φ_t(x), conditoning).
+                    Args:
+                        t: Current scalar time of the ODE integration.
+                        x_t: Current state x_t along the flow trajectory.
+
+                    Returns:
+                        Velocity v_t(φ_t(x), conditoning) with the same shape as `x`.
             log_p_0: Log-probability function of the source distribution p_0.
-            global_cond: Global conditioning vector, encoding the robot's state and its visual
-                observations. Shape: [batch_size, cond_dim].
             method: An ODE solver method supported by torchdiffeq. For a complete list, see torchdiffeq.
                 Some examples are:
-                - Fixed-step examples: "euler", "midpoint", "rk4", ... 
+                - Fixed-step examples: "euler", "midpoint", "rk4", ...
                 - Adaptive examples: "dopri5", "bosh3", ...
             step_size: Size of an integration step only for fixed-step solvers. Ignored
                 for adaptive solvers.
@@ -197,18 +187,16 @@ class ODESolver():
             (time_grid[0] == 1.0 and time_grid[-1] == 0.0)
         ):
             raise ValueError(f"Time grid must go from 0.0 to 1.0 or from 1.0 to 0.0. Got {time_grid}.")
-        
+
         if not exact_divergence and num_hutchinson_samples is None:
             raise ValueError("`num_hutchinson_samples` must be specified when `exact_divergence` is False.")
 
         # Ensure all tensors are on the same device
-        global_cond = global_cond.to(x_init.device)
         time_grid = time_grid.to(x_init.device)
-        
+
         # Validate input shapes and solver parameters and build keyword arguments for odeint method
         ode_kwargs = self._validate_and_configure_solver(
             x_init=x_init,
-            global_cond=global_cond,
             method=method,
             step_size=step_size,
             atol=atol,
@@ -226,21 +214,6 @@ class ODESolver():
                 generator=generator,
             ) * 2 - 1
 
-        def velocity_field(t: Tensor, x: Tensor) -> Tensor:
-            """
-            Helper function defining the right-hand side of the flow matching ODE
-            d/dt φ_t(x) = v_t(φ_t(x), global_cond). `global_cond` is captured
-            from the outer scope. 
-            
-            Args:
-                t: Current scalar time of the ODE integration.
-                x: Current state x_t along the flow trajectory. Shape like `x_init`.
-            
-            Returns:
-                Velocity v_t(φ_t(x), global_cond) with the same shape as `x`.
-            """
-            return self.velocity_model(x, t.expand(x.shape[0]), global_cond)
-
         def combined_dynamics(t: Tensor, states: Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
             """
             Helper function defining the right-hand side of the combined ODE to compute the
@@ -250,7 +223,7 @@ class ODESolver():
                 d/dt f(t) = div(v_t(φ_t(x), global_cond)) (exact divergence computation) or
                 d/dt f(t) = z^T D_{x_t} v_t(x_t, global_cond) z (Hutchinson divergence estimator)
             For the log-likelihood computation the ODE is solved in forward or reverse direction.
-            `global_cond` is captured from the outer scope. 
+            `global_cond` is captured from the outer scope.
 
             Args:
                 t: Current scalar time of the ODE integration.
@@ -259,13 +232,13 @@ class ODESolver():
 
             Returns:
                 Velocity d/dt φ_t(x) with the same shape as `states[0]` and scalar divergence term d/dt f(t).
-            """           
+            """
             # Current state φ_t(x) along the flow trajectory
             x_t = states[0]
             with torch.set_grad_enabled(True):
                 x_t.requires_grad_()
                 # Compute velocity v_t(φ_t(x), global_cond)
-                v_t = velocity_field(t, x_t)
+                v_t = velocity_fn(t=t, x_t=x_t)
 
                 # Compute or estimate divergence div(v_t(φ_t(x), global_cond))
                 if exact_divergence:
@@ -273,7 +246,7 @@ class ODESolver():
                     # div(v_t(φ_t(x), global_cond)) = tr(D_{x_t} v_t(x_t, global_cond))
                     div = torch.zeros(x_t.shape[0], device=x_t.device)
                     feature_dims = v_t.shape[1:]
-                    for idx in itertools.product(*(range(d) for d in feature_dims)):                      
+                    for idx in itertools.product(*(range(d) for d in feature_dims)):
                         # Add batch dimension to index
                         idx = [slice(None)] + list(idx)
                         div += torch.autograd.grad(
@@ -326,11 +299,11 @@ class ODESolver():
         if time_grid[-1] == 0:
             # Extract initial noise sample from reverse flow trajectory
             x_0 = trajectory[-1]
-            
+
             # Compute log-probability of target sample using log-probability of initial noise
             # sample and change-of-variables correction
             log_p_1_x_1 = log_p_0(x_0) + log_prob_diff[-1]
-        elif time_grid[-1] == 1:           
+        elif time_grid[-1] == 1:
             # Compute log-probability of target sample using log-probability of initial noise
             # sample and change-of-variables correction
             log_p_1_x_1 = log_p_0(x_init) - log_prob_diff[-1]
@@ -339,8 +312,6 @@ class ODESolver():
 
     def _validate_and_configure_solver(
         self,
-        x_init: Tensor,
-        global_cond: Tensor,
         method: str,
         step_size: Optional[float],
         atol: Optional[float],
@@ -350,19 +321,6 @@ class ODESolver():
         Validate input shapes and solver parameters, and construct appropriate
         keyword arguments for `torchdiffeq.odeint`.
         """
-        # Check input shapes
-        if global_cond.dim() != 2:
-            raise ValueError(
-                f"`global_cond` must have dimensions (batch, cond_dim); "
-                f"got tensor with shape {tuple(global_cond.shape)}."
-            )
-
-        if global_cond.shape[0] != x_init.shape[0]:
-            raise ValueError(
-                "`x_0` and `global_cond` must have same batch size:"
-                f"`x_0` has {x_init.shape[0]} but global_cond has {global_cond.shape[0]}."
-            )
-        
         # Check ODE solver parameters
         if method in FIXED_STEP_SOLVERS:
             # Positive step‑size required
@@ -377,7 +335,7 @@ class ODESolver():
                     )
                 return {"options": {"step_size": float(step_size)}}
             else:
-                return {}    
+                return {}
 
         if method in ADAPTIVE_SOLVERS:
             if atol is None or rtol is None or atol <= 0.0 or rtol <= 0.0:
@@ -394,7 +352,7 @@ class ODESolver():
             f"Unknown solver '{method}'. Choose one of "
             f"{sorted(FIXED_STEP_SOLVERS | ADAPTIVE_SOLVERS)}."
         )
-    
+
 
 def make_sampling_time_grid(
     step_size: float,
@@ -510,7 +468,7 @@ def select_ode_states(
                 f"Requested time {req_t.item()} matched {match_count} entries in time_grid; "
                 "expected exactly one."
             )
-        
+
         # Grab index of match
         index = time_mask.nonzero(as_tuple=True)[0].item()
         matched_indices.append(index)

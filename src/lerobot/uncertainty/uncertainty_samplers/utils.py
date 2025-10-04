@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from ...configuration_flow_matching import FlowMatchingConfig
+from lerobot.policies.flow_matching import FlowMatchingConfig
 
 
 def splice_noise_with_prev(
@@ -10,25 +10,25 @@ def splice_noise_with_prev(
     flow_matching_cfg: FlowMatchingConfig,
 ) -> Tensor:
     """
-    Splice newly sampled noise with the overlapping segment from the 
+    Splice newly sampled noise with the overlapping segment from the
     previously selected trajectory to maintain temporal consistency.
 
     Args:
-        new_noise_sample: Freshly sampled noise for this step. 
+        new_noise_sample: Freshly sampled noise for this step.
             Shape: (num_action_seq_samples, horizon, action_dim)
         prev_noise_sample: Noise from the previously selected action sequence.
             Shape: (horizon, action_dim).
         flow_matching_cfg: Configuration object for Flow Matching policy settings.
 
     Returns:
-        Updated noise tensor where the overlapping part has been replaced 
-        with the corresponding segment from the previous trajectory, ensuring 
+        Updated noise tensor where the overlapping part has been replaced
+        with the corresponding segment from the previous trajectory, ensuring
         consistency with already executed actions.
     """
     # Indices marking the portion of the trajectory that will actually be executed
     exec_start_idx = flow_matching_cfg.n_obs_steps - 1
     exec_end_idx = exec_start_idx + flow_matching_cfg.n_action_steps
-    
+
     # Compute the cutoff index: how far the new noise sample overlaps with the old one
     new_noise_overlap_end = exec_start_idx + (flow_matching_cfg.horizon - exec_end_idx)
 
@@ -61,7 +61,7 @@ def compose_ode_states(
     Returns:
         The composed ODE states. Shape: (timesteps, batch_size, horizon, action_dim) or
             (batch_size, horizon, action_dim) for final action sequences.
-    """       
+    """
     def add_time_dimension(ode_states: Tensor) -> tuple[Tensor, bool]:
         if ode_states.ndim == 3:   # (batch_size, horizon, action_dim)
             return ode_states.unsqueeze(0), False  # (1, batch_size, horizon, action_dim)
@@ -96,7 +96,7 @@ def compose_ode_states(
     prev_ode_states_duplicated = prev_ode_states.expand(
         -1, batch_size, -1, -1
     )
-    
+
     # Compose from stored prefix and newly generated ODE states
     composed_ode_states = torch.cat([
         prev_ode_states_duplicated[:, :, :exec_end_idx, :],
@@ -107,13 +107,13 @@ def compose_ode_states(
         return composed_ode_states.squeeze(0)
     else:
         return composed_ode_states
-    
+
 def select_and_expand_ode_states(
     ode_states: torch.Tensor,
     traj_idx: int,
 ) -> torch.Tensor:
     """
-    Select a single trajectory from the ODE states (by index) and 
+    Select a single trajectory from the ODE states (by index) and
     broadcast it across the batch dimension.
 
     Args:

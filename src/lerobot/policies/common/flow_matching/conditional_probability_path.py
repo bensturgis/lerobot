@@ -1,4 +1,5 @@
 import abc
+from typing import Literal
 
 import torch
 from torch import Tensor
@@ -24,7 +25,7 @@ class CondProbPath(abc.ABC):
         Compute the conditional velocity vector u_t(x|x_1).
         """
         raise NotImplementedError
-    
+
     def get_vel_diff_scaling_factor(self, t: Tensor) -> Tensor:
         """
         Compute the time-dependent scaling factor used to weight velocity differences 
@@ -59,14 +60,14 @@ class OTCondProbPath(CondProbPath):
         Compute velocity u_t(x|x_1) of the optimal transport conditional vector field.
         """
         return (x_1 - (1 - self.sigma_min) * x_t) / (1 - (1 - self.sigma_min) * t)
-    
+
     def get_vel_diff_scaling_factor(self, t: Tensor) -> Tensor:
         """
         Compute the time-dependent scaling factor used to weight velocity differences 
         in the intermediate velocity difference score.
         """
         return t / (1 - t)
-        
+
 
 class VPDiffusionCondProbPath(CondProbPath):
     """
@@ -85,7 +86,7 @@ class VPDiffusionCondProbPath(CondProbPath):
         # Compute the cumulative noise amount at s
         T = self.beta_min * s + 0.5 * (self.beta_max - self.beta_min) * (s ** 2)
         return torch.exp(-0.5 * T)
-    
+
     def get_sigma(self, t: Tensor) -> Tensor:
         """Compute the sigma value for the variance-preserving diffusion path."""
         # Convert t so that s = 0 means clean data and s = 1 means full noise as
@@ -94,7 +95,7 @@ class VPDiffusionCondProbPath(CondProbPath):
         # Compute the cumulative noise amount at s
         T = self.beta_min * s + 0.5 * (self.beta_max - self.beta_min) * (s ** 2)
         return torch.sqrt(1.0 - torch.exp(-T))
-    
+
     def get_beta(self, t: Tensor) -> Tensor:
         """Compute the beta value for the variance-preserving diffusion path."""
         # Convert t so that s = 0 means clean data and s = 1 means full noise as
@@ -110,7 +111,7 @@ class VPDiffusionCondProbPath(CondProbPath):
         T = self.beta_min * s + 0.5 * (self.beta_max - self.beta_min) * (s ** 2)
         beta = self.get_beta(t)
         return 0.5 * beta * torch.exp(-0.5 * T)
-    
+
     def get_dsigma(self, t: Tensor) -> Tensor:
         """Compute the derivative of sigma with respect to t."""
         # Convert t so that s = 0 means clean data and s = 1 means full noise as
@@ -119,7 +120,7 @@ class VPDiffusionCondProbPath(CondProbPath):
         T = self.beta_min * s + 0.5 * (self.beta_max - self.beta_min) * (s ** 2)
         beta = self.get_beta(t)
         return -0.5 * beta * torch.exp(-T) / self.get_sigma(t)
-    
+
     def sample(self, x_1: Tensor, t: Tensor) -> Tensor:
         """
         Sample x_t from the conditional probability p_t(x|x_1) based on variance-
@@ -147,12 +148,36 @@ class VPDiffusionCondProbPath(CondProbPath):
         # Compute the derivatives of alpha and sigma with respect to t
         d_alpha = self.get_dalpha(t)
         d_sigma = self.get_dsigma(t)
-  
+
         return (d_sigma / sigma) * (x_t - alpha * x_1) + d_alpha * x_1
-    
+
     def get_vel_diff_scaling_factor(self, t: Tensor) -> Tensor:
         """
-        Compute the time-dependent scaling factor used to weight velocity differences 
+        Compute the time-dependent scaling factor used to weight velocity differences
         in the intermediate velocity difference score.
         """
         return 2.0 / self.get_beta(t)
+
+
+def make_cond_prob_path(cond_vf_type: Literal["ot", "vp"], **kwargs) -> CondProbPath:
+    """
+    Factory function to create a conditional probability path based on the specifie type.
+
+    Args:
+        cond_vf_type: Type of conditional vector field ("ot" or "vp").
+        **kwargs: Additional parameters for the conditional path.
+
+    Returns:
+        An instance of a subclass of CondProbPath.
+    """
+    if cond_vf_type == "ot":
+        return OTCondProbPath(
+            sigma_min=kwargs.get("sigma_min", 0.0)
+        )
+    elif cond_vf_type == "vp":
+        return VPDiffusionCondProbPath(
+            beta_min=kwargs.get("beta_min", 0.1),
+            beta_max=kwargs.get("beta_max", 20.0),
+        )
+    else:
+        raise ValueError(f"Unknown conditional vector field type {cond_vf_type}.")

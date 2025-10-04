@@ -8,7 +8,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 10
-  uncert_est_methods: [entropy]
+  uncert_est_methods: [cross_bayesian]
   collapse_success_failure: True
 
 uncertainty_sampler:
@@ -23,10 +23,10 @@ uncertainty_sampler:
       metric_type: mode_distance
     num_action_seq_samples: 5
   cross_bayesian_sampler:
-    scorer_type: ensemble
+    scorer_type: laplace
     ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model_migrated
     scoring_metric:
-      metric_type: terminal_vel_norm
+      metric_type: mode_distance
     num_action_seq_samples: 5
   entropy_sampler:
     num_action_seq_samples: 100

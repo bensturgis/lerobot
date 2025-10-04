@@ -4,4 +4,6 @@ env:
 
 eval:
   batch_size: 1
-  n_episodes: 100
+  n_episodes: 5
+
+# python src/lerobot/scripts/eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla_libero_scratch_filtered/checkpoints/last/pretrained_model

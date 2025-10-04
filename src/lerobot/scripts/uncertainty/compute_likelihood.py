@@ -21,7 +21,7 @@ from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.utils import cycle
 from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
-from lerobot.policies.flow_matching.ode_solver import ODESolver
+from lerobot.policies.common.flow_matching.ode_solver import ODESolver
 from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 

@@ -52,18 +52,18 @@ class FiperDataRecorderConfig:
     laplace_scope: str = "both"
     calib_fraction: float = 1.0
     batch_size: int = 1
-    
+
     # Times at which to record ODE states and velocities during the flow integration
     ode_eval_times: list[float] = field(
         default_factory=lambda: [round(i * 0.05, 2) for i in range(20)] + [1.0]
     )
 
-    # Times at which to evaluate the velocity of the sampled action sequence under a 
+    # Times at which to evaluate the velocity of the sampled action sequence under a
     # scorer model
     terminal_vel_eval_times: list[float] = field(
         default_factory=lambda: [round(i * 0.1, 1) for i in range(10)]
     )
-    
+
     # Configuration for the ODE solver used in likelihood estimation
     likelihood_ode_solver_cfg: LikelihoodODESolverConfig = field(
         default_factory=LikelihoodODESolverConfig

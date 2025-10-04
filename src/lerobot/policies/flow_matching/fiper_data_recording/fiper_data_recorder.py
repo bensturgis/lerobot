@@ -9,13 +9,13 @@ from torch.distributions import Independent, Normal
 
 from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
-from ..conditional_probability_path import (
+from ...common.flow_matching.conditional_probability_path import (
     OTCondProbPath,
     VPDiffusionCondProbPath,
 )
 from ..configuration_flow_matching import FlowMatchingConfig
 from ..modelling_flow_matching import FlowMatchingModel
-from ..ode_solver import (
+from ...common.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
     ODESolver,

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch import Tensor, nn
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 
 from .utils import make_gif, make_run_dir, next_available_name
 
