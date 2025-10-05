@@ -58,7 +58,7 @@ def build_scorer_artifacts_for_uncertainty_sampler(
         laplace_posterior = get_laplace_posterior(
             policy=policy,
             preprocessor=preprocesser,
-            laplace_scope=active_config.laplace_scope,
+            laplace_scopes=active_config.laplace_scopes,
             calib_fraction=active_config.calib_fraction,
             batch_size=active_config.batch_size,
             dataset_cfg=dataset_cfg,

@@ -20,7 +20,7 @@ noise_to_action:
 composed_sequence_sampler:
     scoring_metric:
       metric_type: inter_vel_diff
-    num_action_seq_samples: 20
+    num_action_samples: 20
 
 show: False
 seed: 6

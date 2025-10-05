@@ -14,7 +14,7 @@ eval:
   batch_size: 1
   n_episodes: 5
 
-output_dir: outputs/train/smolvla_libero_scratch_filtered
+output_dir: outputs/train/test
 steps: 200000
 batch_size: 20
 eval_freq: 5000

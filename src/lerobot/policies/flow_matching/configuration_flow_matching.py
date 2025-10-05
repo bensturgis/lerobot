@@ -100,8 +100,8 @@ class FlowMatchingConfig(PreTrainedConfig):
     beta_max: float = 20.0
 
     # ODE solver.
-    ode_step_size: float | None = 0.1
     ode_solver_method: str = "euler"
+    ode_step_size: float | None = 0.1
     atol: float | None = None
     rtol: float | None = None
 

@@ -357,6 +357,7 @@ class ODESolver():
 def make_sampling_time_grid(
     step_size: float,
     device: torch.device,
+    dtype: torch.dtype,
     extra_times: Optional[Union[Tensor, Sequence]] = None,
 ) -> Tensor:
     """
@@ -364,8 +365,9 @@ def make_sampling_time_grid(
 
     Args:
         step_size: Spacing between regular points.
-        extra_times: Additional timepoints to include.
         device: The device on which to create the time grid.
+        dtype: The dtype of the resulting tensor
+        extra_times: Additional timepoints to include.
 
     Returns:
         A time grid of unique, sorted times in [0.0, 1.0.]
@@ -382,18 +384,19 @@ def make_sampling_time_grid(
         n * step_size,
         steps=n + 1,
         device=device,
+        dtype=dtype,
     )
 
     # Ensure time grid ends with 1.0
     if time_grid[-1] < 1.0:
         time_grid = torch.cat([
-            time_grid, torch.tensor([1.0], device=device)
+            time_grid, torch.tensor([1.0], device=device, dtype=dtype)
         ])
 
     # Merge step size time grid with extra times and sort
     if extra_times is not None:
         time_grid = torch.cat([
-            time_grid, torch.tensor(extra_times, device=device).clamp(0.0, 1.0)
+            time_grid, torch.tensor(extra_times, device=device, dtype=dtype).clamp(0.0, 1.0)
         ])
 
     # Remove near-duplicates and sort
@@ -408,7 +411,7 @@ def make_sampling_time_grid(
     return time_grid
 
 
-def make_lik_estimation_time_grid(ode_solver_method: str, device: torch.device,) -> Tensor:
+def make_lik_estimation_time_grid(ode_solver_method: str, device: torch.device, dtype: torch.dtype) -> Tensor:
     """
     Build time grid to estimate likelihood according to ODE solver method.
 
@@ -419,11 +422,11 @@ def make_lik_estimation_time_grid(ode_solver_method: str, device: torch.device,)
         A 1D time grid.
     """
     if ode_solver_method in FIXED_STEP_SOLVERS:
-        fine = torch.linspace(1.0, 0.93, steps=10, device=device)
-        coarse = torch.linspace(0.9, 0.0,  steps=10, device=device)
+        fine = torch.linspace(1.0, 0.93, steps=10, device=device, dtype=dtype)
+        coarse = torch.linspace(0.9, 0.0,  steps=10, device=device, dtype=dtype)
         return torch.cat((fine, coarse))
     elif ode_solver_method in ADAPTIVE_SOLVERS:
-        lik_estimation_time_grid = torch.tensor([1.0, 0.0], device=device)
+        lik_estimation_time_grid = torch.tensor([1.0, 0.0], device=device, dtype=dtype)
     else:
         raise ValueError(
             f"Unknown ODE solver method {ode_solver_method}. "

@@ -40,7 +40,7 @@ class CrossBayesianSampler(UncertaintySampler):
 
         super().__init__(
             model=sampler_model,
-            num_action_seq_samples=config.num_action_seq_samples,
+            num_action_samples=config.num_action_samples,
             extra_sampling_times=extra_sampling_times,
         )
         self.method_name = "cross_bayesian"
@@ -80,34 +80,29 @@ class CrossBayesianSampler(UncertaintySampler):
 
         Returns:
             - Action sequences drawn from the sampler model.
-              Shape: [num_action_seq_samples, horizon, action_dim].
+              Shape: [num_action_samples, horizon, action_dim].
             - Uncertainty score where a higher value means more uncertain.
         """
         # Build the velocity function conditioned on the current observation
-        conditioning = self.model.prepare_conditioning(observation)
+        conditioning = self.model.prepare_conditioning(observation, self.num_action_samples)
         velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
 
         # Sample noise priors
-        noise_samples = torch.randn(
-            size=(self.num_action_seq_samples, self.horizon, self.action_dim),
-            dtype=self.dtype,
-            device=self.device,
+        noise_sample = self.model.sample_prior(
+            num_samples=self.num_action_samples,
             generator=generator,
         )
 
         # Solve ODE forward from noise to sample action sequences
         ode_states = self.sampling_ode_solver.sample(
-            x_0=noise_samples,
+            x_0=noise_sample,
             velocity_fn=velocity_fn,
-            method=self.policy_config.ode_solver_method,
-            atol=self.policy_config.atol,
-            rtol=self.policy_config.rtol,
+            method=self.ode_solver_config["solver_method"],
+            atol=self.ode_solver_config["atol"],
+            rtol=self.ode_solver_config["rtol"],
             time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
-
-        # Store sampled action sequences for logging
-        self.latest_action_candidates = ode_states[-1]
 
         if self.config.scorer_type == "laplace":
             # Draw flow matching model from the Laplace posterior
@@ -120,13 +115,13 @@ class CrossBayesianSampler(UncertaintySampler):
             scorer_model = self.ensemble_adapter
 
         # Build the conditioned velocity function of the scorer
-        scorer_conditioning = scorer_model.prepare_conditioning(observation)
+        scorer_conditioning = scorer_model.prepare_conditioning(observation, self.num_action_samples)
         scorer_velocity_fn = scorer_model.make_velocity_fn(conditioning=scorer_conditioning)
 
         # Compute uncertainty based on selected metric
         if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
             uncertainty_scores = self.scoring_metric(
-                action_sequences=self.latest_action_candidates,
+                action_sequences=ode_states[-1],
                 velocity_fn=scorer_velocity_fn,
             )
         elif self.scoring_metric.name == "inter_vel_diff":
@@ -142,4 +137,13 @@ class CrossBayesianSampler(UncertaintySampler):
         # Average uncertainty scores and store for logging
         self.latest_uncertainty = uncertainty_scores.mean().item()
 
-        return self.latest_action_candidates, self.latest_uncertainty
+        # Pick one action sequence at random
+        actions, _ = self.rand_pick_action(action_candidates=ode_states[-1])
+
+        return actions.to(device="cpu", dtype=torch.float32), self.latest_uncertainty
+
+    def reset(self):
+        """
+        Reset internal state to prepare for a new rollout.
+        """
+        pass

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import torch
 from torch import Tensor
@@ -27,8 +27,28 @@ class SmolVLAUncertaintyAdapter(UncertaintyModelAdapter):
     def action_dim(self) -> int:
         return self.config.max_action_dim
 
+    @property
+    def ode_solver_config(self) -> Dict[str, Any]:
+        return {
+            "solver_method": "euler",
+            "step_size": 0.1,
+            "atol": None,
+            "rtol": None,
+        }
+
+    @property
+    def cond_vf_config(self) -> Dict[str, Any]:
+        return {
+            "type": "ot",
+            "sigma_min": 0,
+            "beta_min": None,
+            "beta_max": None,
+        }
+
     @torch.no_grad()
-    def prepare_conditioning(self, observation: dict[str, Tensor]) -> Dict[str, Tensor]:
+    def prepare_conditioning(self, observation: dict[str, Tensor], num_action_samples: int) -> Dict[str, Tensor]:
+        observation = self.expand_observation(observation=observation, num_action_samples=num_action_samples)
+
         images, img_masks = self.model.prepare_images(observation)
         state = self.model.prepare_state(observation)
         lang_tokens = observation[f"{OBS_LANGUAGE_TOKENS}"]
@@ -58,16 +78,6 @@ class SmolVLAUncertaintyAdapter(UncertaintyModelAdapter):
             "prefix_pad_masks": prefix_pad_masks,
             "past_key_values": past_key_values,
         }
-
-    @torch.no_grad()
-    def sample_prior(
-        self,
-        num_samples: int,
-        device: torch.device,
-        dtype: torch.dtype,
-        generator: Optional[torch.Generator] = None,
-    ) -> Tensor:
-        return torch.randn(num_samples, self.horizon, self.action_dim, device=device, dtype=dtype, generator=generator)
 
     def make_velocity_fn(self, conditioning: Dict[str, Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
         def v_t(t: Tensor, x_t: Tensor) -> Tensor:

@@ -17,19 +17,20 @@ uncertainty_sampler:
     ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model_migrated
     scoring_metric:
       metric_type: mode_distance
-    num_action_seq_samples: 5
+    num_action_samples: 5
   composed_sequence_sampler:
     scoring_metric:
       metric_type: mode_distance
-    num_action_seq_samples: 5
+    num_action_samples: 5
   cross_bayesian_sampler:
     scorer_type: laplace
+    calib_fraction: 0.1
     ensemble_model_path: outputs/train/flow_matching_pusht_02/checkpoints/200000/pretrained_model_migrated
     scoring_metric:
       metric_type: mode_distance
-    num_action_seq_samples: 5
+    num_action_samples: 5
   entropy_sampler:
-    num_action_seq_samples: 100
+    num_action_samples: 100
 
 seed: 42
 

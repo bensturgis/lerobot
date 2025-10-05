@@ -199,7 +199,7 @@ def main(cfg: VisualizeEnsemblePipelineConfig):
                 mean_uncertainty = float(uncertainties.mean().item())
 
                 # Sample actions with the scorer model to compare with the sampler actions
-                num_samples = cfg.ensemble_sampler.num_action_seq_samples
+                num_samples = cfg.ensemble_sampler.num_action_samples
                 scorer_actions = scorer_flow_matching_model.conditional_sample(
                     batch_size=num_samples, global_cond=scorer_global_cond.repeat(num_samples, 1), generator=generator
                 )

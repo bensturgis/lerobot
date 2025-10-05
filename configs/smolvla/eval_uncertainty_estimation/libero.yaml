@@ -1,0 +1,36 @@
+dataset:
+  repo_id: HuggingFaceVLA/libero
+  # Ensure Laplace approximation is only based on 5 left out LIBERO 10 tasks
+
+env:
+  type: libero
+  task: libero_10
+  task_ids: [0, 1, 2]
+
+eval_uncert_est:
+  n_episodes: 50
+  uncert_est_methods: [cross_bayesian]
+  domains: [id]
+
+uncertainty_sampler:
+  composed_cross_bayesian_sampler:
+    scorer_type: laplace
+    laplace_scopes: [action_out_proj]
+    scoring_metric:
+      metric_type: mode_distance
+    num_action_samples: 5
+  composed_sequence_sampler:
+    scoring_metric:
+      metric_type: mode_distance
+    num_action_samples: 5
+  cross_bayesian_sampler:
+    scorer_type: laplace
+    laplace_scopes: [action_out_proj]
+    calib_fraction: 0.02
+    scoring_metric:
+      metric_type: mode_distance
+    num_action_samples: 5
+
+seed: 42
+
+# python src/lerobot/scripts/smolvla/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_base/last/pretrained_model

@@ -118,13 +118,8 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         if self.config.env_state_feature:
             self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
 
-        if (
-            self.uncertainty_sampler is not None and
-            self.uncertainty_sampler.method_name in [
-                "composed_cross_bayesian", "composed_sequence"
-            ]
-        ):
-            self.uncertainty_sampler.prev_selected_action_idx = None
+        if self.uncertainty_sampler is not None:
+            self.uncertainty_sampler.reset()
 
         if self.fiper_data_recorder is not None:
             self.fiper_data_recorder.reset()
@@ -160,30 +155,14 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         if not self.training and self.uncertainty_sampler is not None:
             if batch_size != 1:
                 raise ValueError(
-                    f"Sampling with uncertainty requires batch size of 1, but got {batch_size}."
+                    f"Sampling with uncertainty currently only supports batch size of 1, but got {batch_size}."
                 )
 
             # Sample action sequence candidates and compute their uncertainty.
-            action_candidates, uncertainties = self.uncertainty_sampler.conditional_sample_with_uncertainty(
+            actions, uncertainty = self.uncertainty_sampler.conditional_sample_with_uncertainty(
                 observation=batch, generator=generator
             )
-
-            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainties}")
-
-            # Pick one action sequence at random.
-            rand_idx = torch.randint(
-                low=0,
-                high=self.uncertainty_sampler.num_action_seq_samples,
-                size=(1,),
-                generator=generator,
-                device=action_candidates.device
-            ).item()
-            actions = action_candidates[rand_idx : rand_idx+1]
-
-            if self.uncertainty_sampler.method_name in [
-                "composed_sequence", "composed_cross_bayesian"
-            ]:
-                self.uncertainty_sampler.prev_selected_action_idx = rand_idx
+            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty}")
         elif not self.training and self.fiper_data_recorder is not None:
             if batch_size != 1:
                 raise ValueError(
@@ -239,7 +218,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
 
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
-            batch["observation.images"] = torch.stack(
+            batch[OBS_IMAGES] = torch.stack(
                 [batch[key] for key in self.config.image_features], dim=-4
             )
         # NOTE: It's important that this happens after stacking the images into a single key.

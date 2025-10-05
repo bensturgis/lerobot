@@ -20,7 +20,7 @@ vector_field:
   grid_size: 25
 
 composed_seq_sampler:
-  num_action_seq_samples: 25
+  num_action_samples: 25
   scoring_metric: mode_distance
   velocity_eval_times: [0.0, 0.1, 0.2]
 

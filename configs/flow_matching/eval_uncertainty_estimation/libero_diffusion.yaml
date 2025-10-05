@@ -16,17 +16,17 @@ uncertainty_sampler:
     ensemble_model_path: outputs/train/flow_matching_libero_spatial_diffusion_02/checkpoints/last/pretrained_model
     scoring_metric: mode_distance
     velocity_eval_times: [0.0, 0.1, 0.2]
-    num_action_seq_samples: 5
+    num_action_samples: 5
   cross_bayesian_sampler:
     scorer_type: ensemble
     ensemble_model_path: outputs/train/flow_matching_libero_spatial_diffusion_02/checkpoints/last/pretrained_model
     scoring_metric: inter_vel_diff
     velocity_eval_times: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
-    num_action_seq_samples: 5
+    num_action_samples: 5
   composed_sequence_sampler:
     scoring_metric: mode_distance
     velocity_eval_times: [0.0, 0.1, 0.2]
-    num_action_seq_samples: 5
+    num_action_samples: 5
 
 seed: 221100
 

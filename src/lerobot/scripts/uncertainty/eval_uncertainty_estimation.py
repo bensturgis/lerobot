@@ -212,7 +212,11 @@ def rollout(
     else:
         ep_frames.append(env.render())
 
-    max_episode_steps = env.spec.max_episode_steps
+    if env.spec is None:
+        max_episode_steps = env._max_episode_steps
+    else:
+        max_episode_steps = env.spec.max_episode_steps
+
     progbar = trange(
         max_episode_steps,
         desc=f"Running rollout with at most {max_episode_steps} steps."

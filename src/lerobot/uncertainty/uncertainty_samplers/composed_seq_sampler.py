@@ -38,7 +38,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
             flow_matching_model=flow_matching_model,
-            num_action_seq_samples=cfg.num_action_seq_samples,
+            num_action_samples=cfg.num_action_samples,
             extra_sampling_times=extra_sampling_times,
         )
         self.method_name = "composed_sequence"
@@ -59,14 +59,14 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
 
         # Index of the selected action sequence from the previous actions batch
         self.prev_selected_action_idx: Optional[int] = None
-        
+
     def conditional_sample_with_uncertainty(
         self,
         observation: dict[str, Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Tuple[Tensor, float]:
         """
-        Samples num_action_seq_samples many new action sequences and computes uncertainty
+        Samples num_action_samples many new action sequences and computes uncertainty
         scores by composing them with a previous action sequence and evaluating them under
         the flow model.
 
@@ -83,19 +83,19 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             generator: PyTorch random number generator.
 
         Returns:
-            - Action sequence samples. Shape: [num_action_seq_samples, horizon, action_dim].
+            - Action sequence samples. Shape: [num_action_samples, horizon, action_dim].
             - Uncertainty score where a higher value means more uncertain.
         """
         # Encode image features and concatenate them all together along with the state vector
         # to create the flow matching conditioning vectors
         global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
-        
+
         # Adjust shape of conditioning vector
         global_cond = self._reshape_conditioning(global_cond)
 
-        # Sample noise priors        
+        # Sample noise priors
         new_noise_sample = torch.randn(
-            size=(self.num_action_seq_samples, self.horizon, self.action_dim),
+            size=(self.num_action_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
             generator=generator,
@@ -119,9 +119,6 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
-
-        # Store sampled action sequences for logging
-        self.latest_action_candidates = new_ode_states[-1]
 
         # If no previous trajectory is stored, return placeholder uncertainties
         if self.prev_selected_action_idx is None:
@@ -160,7 +157,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                 )
             else:
                 raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
-            
+
             # Average uncertainty scores and store for logging
             self.latest_uncertainty = uncertainty_scores.mean().item()
 
@@ -168,5 +165,16 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         self.prev_global_cond = global_cond
         self.prev_ode_states = new_ode_states
 
-        return self.latest_action_candidates, self.latest_uncertainty
-    
+        # Pick one action sequence at random
+        actions, self.prev_selected_action_idx = self.rand_pick_action(action_candidates=new_ode_states[-1])
+
+        return actions.to(device="cpu", dtype=torch.float32), self.latest_uncertainty
+
+    def reset(self):
+        """
+        Reset internal state to prepare for a new rollout.
+        """
+        # Clear stored conditioning vector, ODE states and selected action sequence from previous step
+        self.prev_global_cond: Optional[Tensor] = None
+        self.prev_ode_states: Optional[Tensor] = None
+        self.prev_selected_action_idx: Optional[int] = None

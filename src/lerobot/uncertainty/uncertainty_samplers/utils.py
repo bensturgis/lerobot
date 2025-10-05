@@ -15,7 +15,7 @@ def splice_noise_with_prev(
 
     Args:
         new_noise_sample: Freshly sampled noise for this step.
-            Shape: (num_action_seq_samples, horizon, action_dim)
+            Shape: (num_action_samples, horizon, action_dim)
         prev_noise_sample: Noise from the previously selected action sequence.
             Shape: (horizon, action_dim).
         flow_matching_cfg: Configuration object for Flow Matching policy settings.

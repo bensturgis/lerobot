@@ -54,7 +54,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         super().__init__(
             flow_matching_cfg=flow_matching_cfg,
             flow_matching_model=sampler_model,
-            num_action_seq_samples=cfg.num_action_seq_samples,
+            num_action_samples=cfg.num_action_samples,
             extra_sampling_times=extra_sampling_times,
         )
         self.method_name = "composed_cross_bayesian"
@@ -113,7 +113,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
 
         Returns:
             - Action sequences drawn from the sampler model.
-              Shape: [num_action_seq_samples, horizon, action_dim].
+              Shape: [num_action_samples, horizon, action_dim].
             - Uncertainty score where a higher value means more uncertain.
         """
         # Encode image features and concatenate them all together along with the state vector
@@ -125,7 +125,7 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
 
         # Sample noise priors
         new_noise_sample = torch.randn(
-            size=(self.num_action_seq_samples, self.horizon, self.action_dim),
+            size=(self.num_action_samples, self.horizon, self.action_dim),
             dtype=self.dtype,
             device=self.device,
             generator=generator,
@@ -149,9 +149,6 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
             time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
-
-        # Store sampled action sequences for logging
-        self.latest_action_candidates = new_ode_states[-1]
 
         if self.cfg.scorer_type == "laplace":
             # Draw flow matching model from the Laplace posterior
@@ -214,4 +211,19 @@ class ComposedCrossBayesianSampler(FlowMatchingUncertaintySampler):
         self.prev_global_cond = global_cond
         self.prev_ode_states = new_ode_states
 
-        return self.latest_action_candidates, self.latest_uncertainty
+        # Pick one action sequence at random
+        actions, self.prev_selected_action_idx = self.rand_pick_action(action_candidates=new_ode_states[-1])
+
+        return actions.to(device="cpu", dtype=torch.float32), self.latest_uncertainty
+
+    def reset(self):
+        """
+        Reset internal state to prepare for a new rollout.
+        """
+        # Clear stored conditioning vector, ODE states and selected action sequence from previous step
+        self.prev_global_cond: Optional[Tensor] = None
+        self.prev_ode_states: Optional[Tensor] = None
+        self.prev_selected_action_idx: Optional[int] = None
+
+        # Reset the previous laplace model
+        self.prev_scorer_flow_matching_model: Optional[FlowMatchingModel] = None

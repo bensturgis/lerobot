@@ -58,13 +58,24 @@ from collections import deque
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
+from tqdm import tqdm
 
 from lerobot.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS, OBS_STATE
+from lerobot.policies.common.aloha import (
+    pi_aloha_decode_state,
+    pi_aloha_encode_actions,
+    pi_aloha_encode_actions_inv,
+)
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.smolvla.smolvlm_with_expert import SmolVLMWithExpertModel
 from lerobot.policies.utils import (
+    get_device_from_parameters,
+    get_dtype_from_parameters,
     populate_queues,
+)
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
 )
 from lerobot.utils.utils import get_safe_dtype
 
@@ -159,60 +170,6 @@ def pad_vector(vector, new_dim):
     return new_vector
 
 
-def normalize(x, min_val, max_val):
-    return (x - min_val) / (max_val - min_val)
-
-
-def unnormalize(x, min_val, max_val):
-    return x * (max_val - min_val) + min_val
-
-
-def safe_arcsin(value):
-    # This ensures that the input stays within
-    # [−1,1] to avoid invalid values for arcsin
-    return torch.arcsin(torch.clamp(value, -1.0, 1.0))
-
-
-def aloha_gripper_to_angular(value):
-    # Aloha transforms the gripper positions into a linear space. The following code
-    # reverses this transformation to be consistent with smolvla which is pretrained in
-    # angular space.
-    #
-    # These values are coming from the Aloha code:
-    # PUPPET_GRIPPER_POSITION_OPEN, PUPPET_GRIPPER_POSITION_CLOSED
-    value = unnormalize(value, min_val=0.01844, max_val=0.05800)
-
-    # This is the inverse of the angular to linear transformation inside the Interbotix code.
-    def linear_to_radian(linear_position, arm_length, horn_radius):
-        value = (horn_radius**2 + linear_position**2 - arm_length**2) / (2 * horn_radius * linear_position)
-        return safe_arcsin(value)
-
-    # The constants are taken from the Interbotix code.
-    value = linear_to_radian(value, arm_length=0.036, horn_radius=0.022)
-
-    # Normalize to [0, 1].
-    # The values 0.4 and 1.5 were measured on an actual Trossen robot.
-    return normalize(value, min_val=0.4, max_val=1.5)
-
-
-def aloha_gripper_from_angular(value):
-    # Convert from the gripper position used by smolvla to the gripper position that is used by Aloha.
-    # Note that the units are still angular but the range is different.
-
-    # The values 0.4 and 1.5 were measured on an actual Trossen robot.
-    value = unnormalize(value, min_val=0.4, max_val=1.5)
-
-    # These values are coming from the Aloha code:
-    # PUPPET_GRIPPER_JOINT_OPEN, PUPPET_GRIPPER_JOINT_CLOSE
-    return normalize(value, min_val=-0.6213, max_val=1.4910)
-
-
-def aloha_gripper_from_angular_inv(value):
-    # Directly inverts the gripper_from_angular function.
-    value = unnormalize(value, min_val=-0.6213, max_val=1.4910)
-    return normalize(value, min_val=0.4, max_val=1.5)
-
-
 class SmolVLAPolicy(PreTrainedPolicy):
     """Wrapper class around VLAFlowMatching model to train and run inference within LeRobot."""
 
@@ -234,13 +191,36 @@ class SmolVLAPolicy(PreTrainedPolicy):
         self.config = config
 
         self.model = VLAFlowMatching(config)
+
+        self.uncertainty_sampler = None
+
         self.reset()
+
+    def init_uncertainty_sampler(
+        self,
+        config: UncertaintySamplerConfig,
+        scorer_artifacts,
+    ):
+        """
+        Constructs the uncertainty sampler based on the config.
+        """
+        from lerobot.policies.factory import make_uncertainty_sampler
+
+        self.uncertainty_sampler = make_uncertainty_sampler(
+            uncertainty_sampler_config=config,
+            policy_config=self.config,
+            model=self.model,
+            scorer_artifacts=scorer_artifacts,
+        )
 
     def reset(self):
         """This should be called whenever the environment is reset."""
         self._queues = {
             ACTION: deque(maxlen=self.config.n_action_steps),
         }
+
+        if self.uncertainty_sampler is not None:
+            self.uncertainty_sampler.reset()
 
     def get_optim_params(self) -> dict:
         return self.parameters()
@@ -255,25 +235,39 @@ class SmolVLAPolicy(PreTrainedPolicy):
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
 
-        images, img_masks = self.model.prepare_images(batch)
-        state = self.model.prepare_state(batch)
-        lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
-        lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+        # Run sampling.
+        if not self.training and self.uncertainty_sampler is not None:
+            batch_size = batch["observation.state"].shape[0]
+            if batch_size != 1:
+                raise ValueError(
+                    f"Sampling with uncertainty currently only supports batch size of 1, but got {batch_size}."
+                )
 
-        actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
+            # Sample action sequence candidates and compute their uncertainty.
+            actions, uncertainty = self.uncertainty_sampler.conditional_sample_with_uncertainty(
+                observation=batch,
+            )
+            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty}")
+        else:
+            images, img_masks = self.model.prepare_images(batch)
+            state = self.model.prepare_state(batch)
+            lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
+            lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+
+            actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
 
         # Unpad actions
         original_action_dim = self.config.action_feature.shape[0]
         actions = actions[:, :, :original_action_dim]
 
         if self.config.adapt_to_pi_aloha:
-            actions = self._pi_aloha_encode_actions(actions)
+            actions = pi_aloha_encode_actions(actions)
 
         return actions
 
     def _prepare_batch(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         if self.config.adapt_to_pi_aloha:
-            batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
+            batch[OBS_STATE] = pi_aloha_decode_state(batch[OBS_STATE])
 
         return batch
 
@@ -313,26 +307,21 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def forward(self, batch: dict[str, Tensor], noise=None, time=None) -> dict[str, Tensor]:
         """Do a full training forward pass to compute the loss"""
         if self.config.adapt_to_pi_aloha:
-            batch[OBS_STATE] = self._pi_aloha_decode_state(batch[OBS_STATE])
-            batch[ACTION] = self._pi_aloha_encode_actions_inv(batch[ACTION])
+            batch[OBS_STATE] = pi_aloha_decode_state(batch[OBS_STATE])
+            batch[ACTION] = pi_aloha_encode_actions_inv(batch[ACTION])
 
-        images, img_masks = self.model.prepare_images(batch)
-        state = self.model.prepare_state(batch)
-        lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
-        lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
-        actions = self.model.prepare_action(batch)
-        actions_is_pad = batch.get("actions_id_pad")
         loss_dict = {}
-        losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
+        losses = self.model.forward(batch, noise, time)
         loss_dict["losses_after_forward"] = losses.clone()
 
+        actions_is_pad = batch.get("action_is_pad")
         if actions_is_pad is not None:
             in_episode_bound = ~actions_is_pad
             losses = losses * in_episode_bound.unsqueeze(-1)
             loss_dict["losses_after_in_ep_bound"] = losses.clone()
 
         # Remove padding
-        losses = losses[:, :, : self.config.max_action_dim]
+        losses = losses[:, :, :self.config.action_feature.shape[0]]
         loss_dict["losses_after_rm_padding"] = losses.clone()
 
         # For backward pass
@@ -340,33 +329,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # For backward pass
         loss_dict["loss"] = loss.item()
         return loss, loss_dict
-
-    def _pi_aloha_decode_state(self, state):
-        # Flip the joints.
-        for motor_idx in [1, 2, 8, 9]:
-            state[:, motor_idx] *= -1
-        # Reverse the gripper transformation that is being applied by the Aloha runtime.
-        for motor_idx in [6, 13]:
-            state[:, motor_idx] = aloha_gripper_to_angular(state[:, motor_idx])
-        return state
-
-    def _pi_aloha_encode_actions(self, actions):
-        # Flip the joints.
-        for motor_idx in [1, 2, 8, 9]:
-            actions[:, :, motor_idx] *= -1
-        # Reverse the gripper transformation that is being applied by the Aloha runtime.
-        for motor_idx in [6, 13]:
-            actions[:, :, motor_idx] = aloha_gripper_from_angular(actions[:, :, motor_idx])
-        return actions
-
-    def _pi_aloha_encode_actions_inv(self, actions):
-        # Flip the joints again.
-        for motor_idx in [1, 2, 8, 9]:
-            actions[:, :, motor_idx] *= -1
-        # Reverse the gripper transformation that is being applied by the Aloha runtime.
-        for motor_idx in [6, 13]:
-            actions[:, :, motor_idx] = aloha_gripper_from_angular_inv(actions[:, :, motor_idx])
-        return actions
 
 
 def pad_tensor(tensor, max_len, pad_value=0):
@@ -626,15 +588,20 @@ class VLAFlowMatching(nn.Module):
 
     def embed_suffix(self, noisy_actions, timestep):
         """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
+        device = get_device_from_parameters(self.action_in_proj)
+        dtype = get_dtype_from_parameters(self.action_in_proj)
+        bsize = noisy_actions.shape[0]
+
+        noisy_actions = noisy_actions.to(device=device, dtype=dtype)
+        timestep = timestep.to(device=device, dtype=dtype)
+
         embs = []
         pad_masks = []
         att_masks = []
 
         # Fuse timestep + action information using an MLP
         action_emb = self.action_in_proj(noisy_actions)
-        device = action_emb.device
-        bsize = action_emb.shape[0]
-        dtype = action_emb.dtype
+
         # Embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
         time_emb = create_sinusoidal_pos_embedding(
             timestep,
@@ -668,9 +635,15 @@ class VLAFlowMatching(nn.Module):
         return embs, pad_masks, att_masks
 
     def forward(
-        self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
+        self, batch, noise=None, time=None
     ) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
+        images, img_masks = self.prepare_images(batch)
+        state = self.prepare_state(batch)
+        lang_tokens = batch[f"{OBS_LANGUAGE_TOKENS}"]
+        lang_masks = batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+        actions = self.prepare_action(batch)
+
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 

@@ -1,7 +1,7 @@
 import copy
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import torch
 from laplace import Laplace
@@ -17,6 +17,7 @@ from lerobot.processor import PolicyProcessorPipeline
 from lerobot.uncertainty.uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 
 from .laplace_wrappers.factory import make_laplace_wrapper
+from .laplace_wrappers.laplace_wrapper import LaplaceWrapper
 
 
 @torch.no_grad()
@@ -105,21 +106,22 @@ def sample_adapter_from_posterior(
 
 
 def make_laplace_path(
+    laplace_wrapper: LaplaceWrapper,
     pretrained_path: Path | str,
-    scope: str,
     calib_fraction: float,
 ) -> Path:
     """
     Build (and create) the on-disk path where we save/load a Laplace posterior.
     """
+    scope_abbreviations = sorted([laplace_wrapper.scope_abbr[scope] for scope in laplace_wrapper.scopes])
     calib_fraction_pct = int(calib_fraction * 100)
-    fname = f"laplace_{scope}_frac{calib_fraction_pct}pct.bin"
-    return Path(pretrained_path) / fname
+    filename = f"laplace_{'_'.join(scope_abbreviations)}_frac{calib_fraction_pct}pct.bin"
+    return Path(pretrained_path) / filename
 
 def get_laplace_posterior(
     policy: PreTrainedPolicy,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
-    laplace_scope: str,
+    laplace_scopes: List[str],
     calib_fraction: float,
     batch_size: int,
     dataset_cfg: DatasetConfig,
@@ -133,16 +135,14 @@ def get_laplace_posterior(
     Returns:
         A fitted or loaded Laplace posterior.
     """
+    # Wrap the flow matching model so it takes inputs and generates outputs compatible with Laplace
+    laplace_wrapper = make_laplace_wrapper(policy=policy, scopes=laplace_scopes)
+
     laplace_path = make_laplace_path(
+        laplace_wrapper=laplace_wrapper,
         pretrained_path=policy.config.pretrained_path,
-        scope=laplace_scope,
         calib_fraction=calib_fraction,
     )
-
-    # Wrap the flow matching model so it takes inputs and generates outputs compatible with Laplace
-    laplace_wrapper = make_laplace_wrapper(policy=policy)
-
-    laplace_wrapper.apply_laplace_scope(scope=laplace_scope)
 
     laplace_posterior = Laplace(
         laplace_wrapper,

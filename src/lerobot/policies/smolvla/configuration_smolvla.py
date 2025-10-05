@@ -40,7 +40,7 @@ class SmolVLAConfig(PreTrainedConfig):
 
     # Shorter state and action vectors will be padded
     max_state_dim: int = 8
-    max_action_dim: int = 7
+    max_action_dim: int = 8
 
     # Image preprocessing
     resize_imgs_with_padding: tuple[int, int] = (256, 256)
