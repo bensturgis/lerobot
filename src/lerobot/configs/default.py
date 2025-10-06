@@ -40,6 +40,7 @@ class DatasetConfig:
     use_imagenet_stats: bool = True
     video_backend: str = field(default_factory=get_safe_default_codec)
     streaming: bool = False
+    libero_tasks: dict[str, list[int]] | None = None
 
 
 @dataclass

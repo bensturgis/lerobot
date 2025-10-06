@@ -205,25 +205,97 @@ def train(cfg: TrainPipelineConfig):
         num_workers=cfg.num_workers,
     )
     full_dataset = patch_dataset_episode_boundaries(dataset=full_dataset)
-    if cfg.enable_val_loss:
-        if cfg.dataset.repo_id == "HuggingFaceVLA/libero":
-            episode_ids_to_exclude = filter_libero_episodes(
-                dataset=full_dataset,
-                tasks_to_remove={"libero_10": [0, 3, 4, 7, 8]},
-            )
-        else:
-            episode_ids_to_exclude = None
-        train_val_split = make_train_val_split(
-            full_dataset=full_dataset,
-            cfg=cfg,
-            episode_ids_to_exclude=episode_ids_to_exclude,
+
+    all_episode_ids = list(full_dataset.meta.episodes["episode_index"])
+    if cfg.dataset.repo_id == "HuggingFaceVLA/libero" and cfg.dataset.libero_tasks is not None:
+        episode_ids_to_use = filter_libero_episodes(
+            dataset=full_dataset,
+            tasks_to_use=cfg.dataset.libero_tasks,
         )
-        train_dataset, val_dataset = train_val_split.train_dataset, train_val_split.val_dataset
-        train_ep_ids = train_val_split.train_ep_ids
     else:
-        train_dataset = full_dataset
-        val_dataset = None
-        train_ep_ids = None
+        episode_ids_to_use = all_episode_ids
+
+    if cfg.enable_val_loss:
+        train_episode_ids, val_episode_ids = make_train_val_split(
+            episode_ids=episode_ids_to_use,
+            val_ratio=cfg.val_ratio,
+            seed=cfg.seed,
+        )
+    else:
+        train_episode_ids = episode_ids_to_use
+        val_episode_ids = []
+
+    # Create dataloader for offline training
+    train_sampler = None
+    if train_episode_ids != all_episode_ids or getattr(cfg.policy, "drop_n_last_frames", 0) > 0:
+        if cfg.dataset.streaming:
+            raise RuntimeError(
+                "Episode filtering or frame dropping requires an episode aware sampler, "
+                "which is disallowed in streaming mode."
+            )
+        train_sampler = EpisodeAwareSampler(
+            dataset_from_indices=full_dataset.meta.episodes["dataset_from_index"],
+            dataset_to_indices=full_dataset.meta.episodes["dataset_to_index"],
+            episode_indices_to_use=sorted(train_episode_ids),
+            drop_n_last_frames=getattr(cfg.policy, "drop_n_last_frames", 0),
+            shuffle=True,
+        )
+
+    train_shuffle = (train_sampler is None) and (not cfg.dataset.streaming)
+    train_loader = torch.utils.data.DataLoader(
+        full_dataset,
+        num_workers=cfg.num_workers,
+        batch_size=cfg.batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        pin_memory=device.type == "cuda",
+        drop_last=False,
+        prefetch_factor=2,
+    )
+
+    # Effective sizes for logging and trackers
+    effective_train_frames = len(train_sampler) if train_sampler is not None else len(full_dataset)
+    effective_train_eps = len(train_episode_ids)
+
+    val_loader = None
+    val_sampler = None
+    if cfg.enable_val_loss and len(val_episode_ids) > 0:
+        val_sampler = EpisodeAwareSampler(
+            dataset_from_indices=full_dataset.meta.episodes["dataset_from_index"],
+            dataset_to_indices=full_dataset.meta.episodes["dataset_to_index"],
+            episode_indices_to_use=sorted(val_episode_ids),
+            drop_n_last_frames=getattr(cfg.policy, "drop_n_last_frames", 0),
+            shuffle=True,
+        )
+        val_loader = torch.utils.data.DataLoader(
+            full_dataset,
+            num_workers=cfg.num_workers,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            sampler=val_sampler,
+            pin_memory=device.type == "cuda",
+            drop_last=False,
+        )
+        effective_val_frames = len(val_sampler)
+        effective_val_eps = len(val_episode_ids)
+    else:
+        effective_val_frames = 0
+        effective_val_eps    = 0
+
+    if cfg.val_freq is None:
+        val_freq = math.ceil(effective_train_frames / cfg.batch_size) if val_loader is not None else float("inf")
+    else:
+        val_freq = cfg.val_freq
+
+    logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
+    if cfg.env is not None:
+        logging.info(f"{cfg.env.task=}")
+    logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
+    logging.info(f"Total number of episodes: {full_dataset.num_episodes} and frames: {full_dataset.num_frames} ({format_big_number(len(full_dataset))})")
+    if cfg.dataset.repo_id == "HuggingFaceVLA/libero" and cfg.dataset.libero_tasks is not None:
+        logging.info(f"Number of selected episodes: {len(episode_ids_to_use)} and frames: {effective_train_frames + effective_val_frames} ({format_big_number(effective_train_frames + effective_val_frames)})")
+    logging.info(f"Number of train episodes: {effective_train_eps} and frames: {effective_train_frames} ({format_big_number(effective_train_frames)})")
+    logging.info(f"Number of val episodes: {effective_val_eps} and frames: {effective_val_frames} ({format_big_number(effective_val_frames)})")
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -263,55 +335,10 @@ def train(cfg: TrainPipelineConfig):
 
     num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
     num_total_params = sum(p.numel() for p in policy.parameters())
-
-    logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
-    if cfg.env is not None:
-        logging.info(f"{cfg.env.task=}")
-    logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
-    logging.info(f"{full_dataset.num_frames=} ({format_big_number(len(train_dataset))})")
-    logging.info(f"{full_dataset.num_episodes=} ({format_big_number(full_dataset.num_episodes - len(episode_ids_to_exclude))})" )
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
-    # create dataloader for offline training
-    if hasattr(cfg.policy, "drop_n_last_frames"):
-        shuffle = False
-        sampler = EpisodeAwareSampler(
-            full_dataset.meta.episodes["dataset_from_index"],
-            full_dataset.meta.episodes["dataset_to_index"],
-            drop_n_last_frames=cfg.policy.drop_n_last_frames,
-            shuffle=True,
-        )
-    else:
-        shuffle = True
-        sampler = None
-
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        num_workers=cfg.num_workers,
-        batch_size=cfg.batch_size,
-        shuffle=shuffle and not cfg.dataset.streaming,
-        sampler=sampler,
-        pin_memory=device.type == "cuda",
-        drop_last=False,
-        prefetch_factor=2,
-    )
     dl_iter = cycle(train_loader)
-
-    if cfg.enable_val_loss:
-        val_loader = torch.utils.data.DataLoader(
-            val_dataset,
-            num_workers=cfg.num_workers,
-            batch_size=cfg.batch_size,
-            shuffle=False,
-            pin_memory=device.type == "cuda",
-            drop_last=False,
-        )
-    if cfg.val_freq is None:
-        val_freq = math.ceil(len(train_dataset) / cfg.batch_size)
-    else:
-        val_freq = cfg.val_freq
-
     policy.train()
 
     train_metrics = {
@@ -324,8 +351,8 @@ def train(cfg: TrainPipelineConfig):
 
     train_tracker = MetricsTracker(
         batch_size   = cfg.batch_size,
-        num_frames   = len(train_dataset) if cfg.enable_val_loss else train_dataset.num_frames,
-        num_episodes = len(train_ep_ids) if cfg.enable_val_loss else train_dataset.num_episodes,
+        num_frames   = effective_train_frames,
+        num_episodes = effective_train_eps,
         metrics      = train_metrics,
         initial_step = step,
     )
@@ -421,8 +448,8 @@ def train(cfg: TrainPipelineConfig):
             }
             eval_tracker = MetricsTracker(
                 cfg.batch_size,
-                len(train_dataset),
-                full_dataset.num_episodes - len(episode_ids_to_exclude),
+                effective_train_frames,
+                effective_train_eps,
                 eval_metrics,
                 initial_step=step
             )

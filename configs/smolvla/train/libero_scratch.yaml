@@ -1,5 +1,11 @@
 dataset:
   repo_id: HuggingFaceVLA/libero
+  libero_tasks: {
+    libero_spatial: [],
+    libero_object: [],
+    libero_goal: [],
+    libero_10: [0]
+  }
 
 policy:
   type: smolvla
@@ -9,6 +15,7 @@ policy:
 env:
   type: libero
   task: libero_spatial
+  task_ids: [0, 1, 2]
 
 eval:
   batch_size: 1

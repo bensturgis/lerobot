@@ -138,92 +138,18 @@ def make_dataset(
     return dataset
 
 
-class TrainValSplit(NamedTuple):
-    train_dataset: Subset
-    val_dataset: Subset
-    train_ep_ids: set[int]
-    val_ep_ids: set[int]
-
-
-def _split_indices_by_episode(
-    frame_idxs_per_ep: dict[int, list[int]],
-    val_ratio: float,
-    seed: Optional[int] = None,
-) -> Tuple[list[int], list[int], set[int], set[int]]:
-    """
-    Split frame indices so that no episode is shared between train and val.
-
-    Args:
-        frame_idxs_per_ep: Mapping from each episode ID to the list of frame indices belonging to it.
-        val_ratio: Fraction of episodes reserved for validation.
-        seed: Random seed for shuffling episodes.
-
-    Returns:
-        Frame indices for the training and validation subset.
-    """
-    # Collect and shuffle episode IDs
-    episode_ids = list(frame_idxs_per_ep.keys())
+def make_train_val_split(
+    episode_ids: List[int], val_ratio: float, seed: int | None,
+) -> Tuple[List[int], List[int]]:
+    """Split episode IDs into train and validation sets using the given ratio."""
     if seed is not None:
         rng = random.Random(seed)
         rng.shuffle(episode_ids)
     else:
         random.shuffle(episode_ids)
 
-    num_val_eps = max(1, int(len(episode_ids) * val_ratio))
-    val_ep_ids = set(episode_ids[:num_val_eps])
-    train_ep_ids = set(episode_ids[num_val_eps:])
+    num_val_episodes = max(1, int(len(episode_ids) * val_ratio))
+    val_episode_ids = set(episode_ids[:num_val_episodes])
+    train_episode_ids = set(episode_ids[num_val_episodes:])
 
-    train_indices = [
-        idx
-        for ep_id in train_ep_ids
-        for idx in frame_idxs_per_ep[ep_id]
-    ]
-    val_indices = [
-        idx
-        for ep_id in val_ep_ids
-        for idx in frame_idxs_per_ep[ep_id]
-    ]
-    return train_indices, val_indices, train_ep_ids, val_ep_ids
-
-
-def make_train_val_split(
-    full_dataset: LeRobotDataset, cfg: TrainPipelineConfig, episode_ids_to_exclude: List[int],
-) -> TrainValSplit:
-    """
-    Load a full dataset and return disjoint train/validation subsets by episode.
-
-    Args:
-        full_dataset: The complete dataset containing all episodes and frames.
-        cfg: A TrainPipelineConfig config which contains a DatasetConfig and a PreTrainedConfig.
-
-    Returns:
-        Training and validation dataset containing separate episodes.
-    """
-    # Build a mapping from episode ID to a list of frame indices
-    frame_idxs_per_ep: Dict[int, List[int]] = {}
-    ep_ids = list(full_dataset.meta.episodes["episode_index"])
-    ep_starts = list(full_dataset.meta.episodes["dataset_from_index"])
-    ep_ends = (full_dataset.meta.episodes["dataset_to_index"])
-    for ep_id, ep_start_idx, ep_end_idx in zip(ep_ids, ep_starts, ep_ends, strict=True):
-        if ep_id in episode_ids_to_exclude:
-            continue
-        frame_idxs_per_ep[ep_id] = list(range(ep_start_idx, ep_end_idx))
-
-    # Split into two flat index lists, using cfg.val_ratio
-    train_idxs, val_idxs, train_ep_ids, val_ep_ids = _split_indices_by_episode(
-        frame_idxs_per_ep,
-        val_ratio=cfg.val_ratio,
-        seed=cfg.seed or None,
-    )
-
-    train_val_split = TrainValSplit(
-        train_dataset=Subset(full_dataset, train_idxs),
-        val_dataset=Subset(full_dataset, val_idxs),
-        train_ep_ids=train_ep_ids,
-        val_ep_ids=val_ep_ids
-    )
-
-    logging.info(f"Number of train episodes: {len(train_ep_ids)}")
-    logging.info(f"Number of validation episodes: {len(val_ep_ids)}")
-
-    return train_val_split
+    return train_episode_ids, val_episode_ids

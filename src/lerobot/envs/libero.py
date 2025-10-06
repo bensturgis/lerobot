@@ -78,7 +78,8 @@ def get_task_init_states(task_suite: Any, i: int) -> np.ndarray:
     return init_states
 
 
-def get_task_description(task_group: str, task_id: int) -> str:
+def get_task_instruction(task_group: str, task_id: int) -> str:
+    """Get the language instruction for task_id in the given task_group suite."""
     bench = benchmark.get_benchmark_dict()
     if task_group not in bench:
         raise ValueError(f"Unknown suite '{task_group}'. Available: {sorted(bench.keys())}")
