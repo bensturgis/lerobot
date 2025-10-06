@@ -146,13 +146,14 @@ class Likelihood(TerminalStateMetric):
             config: Scoring metric settings.
         """
         self.device = uncertainty_sampler.device
+        self.dtype = uncertainty_sampler.dtype
         # Noise distribution is an isotropic Gaussian
         horizon = uncertainty_sampler.horizon
         action_dim = uncertainty_sampler.action_dim
         self.gaussian_log_density = Independent(
             Normal(
-                loc = torch.zeros(horizon, action_dim, device=self.device),
-                scale = torch.ones(horizon, action_dim, device=self.device),
+                loc = torch.zeros(horizon, action_dim, device=self.device, dtype=self.dtype),
+                scale = torch.ones(horizon, action_dim, device=self.device, dtype=self.dtype),
             ),
             reinterpreted_batch_ndims=2
         ).log_prob
@@ -164,6 +165,7 @@ class Likelihood(TerminalStateMetric):
         self.lik_estimation_time_grid = make_lik_estimation_time_grid(
             ode_solver_method=self.lik_ode_solver_cfg.method,
             device=self.device,
+            dtype=self.dtype,
         )
 
         self.ode_solver = ODESolver()
@@ -217,14 +219,14 @@ class InterVelDiff(UncertaintyMetric):
         self.dtype = uncertainty_sampler.dtype
         self.ode_solver = uncertainty_sampler.sampling_ode_solver
         self.sampling_time_grid = uncertainty_sampler.sampling_time_grid
-        self.cond_vf_type = uncertainty_sampler.policy_config.cond_vf_type
+        self.cond_vf_type = uncertainty_sampler.cond_vf_config["type"]
         if self.cond_vf_type == "vp":
             self.cond_prob_path = VPDiffusionCondProbPath(
-                beta_min=uncertainty_sampler.policy_config.beta_min,
-                beta_max=uncertainty_sampler.policy_config.beta_max,
+                beta_min=uncertainty_sampler.cond_vf_config["beta_min"],
+                beta_max=uncertainty_sampler.cond_vf_config["beta_max"],
             )
         elif self.cond_vf_type == "ot":
-            self.cond_prob_path = OTCondProbPath()
+            self.cond_prob_path = OTCondProbPath(uncertainty_sampler.cond_vf_config["sigma_min"])
         else:
             raise ValueError(
                 f"Unknown conditional vector field type {self.cond_vf_type}."

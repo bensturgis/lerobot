@@ -162,7 +162,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             actions, uncertainty = self.uncertainty_sampler.conditional_sample_with_uncertainty(
                 observation=batch, generator=generator
             )
-            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty}")
+            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty:.4f}")
         elif not self.training and self.fiper_data_recorder is not None:
             if batch_size != 1:
                 raise ValueError(

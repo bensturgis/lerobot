@@ -422,6 +422,12 @@ def make_uncertainty_sampler(
     model: nn.Module,
     scorer_artifacts: ScorerArtifacts,
 ) -> UncertaintySampler:
+    # Initialize the uncertainty adapter
+    uncertainty_adapter = make_uncertainty_adapter(
+        model=model,
+        policy_config=policy_config
+    )
+    
     if uncertainty_sampler_config.type == "composed_cross_bayesian":
         from lerobot.uncertainty.uncertainty_samplers.composed_cross_bayesian_sampler import (
             ComposedCrossBayesianSampler,
@@ -449,9 +455,8 @@ def make_uncertainty_sampler(
         )
 
         return ComposedSequenceSampler(
-            flow_matching_cfg=flow_matching_cfg,
-            cfg=uncertainty_sampler_cfg.composed_sequence_sampler,
-            flow_matching_model=flow_matching_model
+            config=uncertainty_sampler_config.composed_sequence_sampler,
+            model=uncertainty_adapter,
         )
     elif uncertainty_sampler_config.type == "cross_bayesian":
         from lerobot.uncertainty.uncertainty_samplers.cross_bayesian_sampler import (
@@ -467,28 +472,22 @@ def make_uncertainty_sampler(
                 "Bayesian uncertainty sampler with scorer_type=laplace requires Laplace posterior to draw a scorer model from."
             )
 
-        sampler_model = make_uncertainty_adapter(
-            model=model,
-            policy_config=policy_config
-        )
-
         return CrossBayesianSampler(
             config=uncertainty_sampler_config.cross_bayesian_sampler,
-            sampler_model=sampler_model,
+            sampler_model=uncertainty_adapter,
             scorer_artifacts=scorer_artifacts,
         )
-    elif uncertainty_sampler_cfg.type == "entropy":
+    elif uncertainty_sampler_config.type == "entropy":
         from lerobot.uncertainty.uncertainty_samplers.entropy_sampler import (
             EntropySampler,
         )
 
         return EntropySampler(
-            flow_matching_cfg=flow_matching_cfg,
-            cfg=uncertainty_sampler_cfg.entropy_sampler,
-            flow_matching_model=flow_matching_model,
+            config=uncertainty_sampler_config.entropy_sampler,
+            model=uncertainty_adapter,
         )
     else:
-        raise ValueError(f"Unknown uncertainty sampler {uncertainty_sampler_cfg.type}.")
+        raise ValueError(f"Unknown uncertainty sampler {uncertainty_sampler_config.type}.")
 
 def make_uncertainty_scoring_metric(
     config: ScoringMetricConfig,

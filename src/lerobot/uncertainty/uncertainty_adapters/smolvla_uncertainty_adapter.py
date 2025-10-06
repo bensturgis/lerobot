@@ -28,6 +28,10 @@ class SmolVLAUncertaintyAdapter(UncertaintyModelAdapter):
         return self.config.max_action_dim
 
     @property
+    def dtype(self) -> torch.dtype:
+        return torch.float32
+
+    @property
     def ode_solver_config(self) -> Dict[str, Any]:
         return {
             "solver_method": "euler",

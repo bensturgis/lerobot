@@ -23,7 +23,7 @@ class EntropySampler(UncertaintySampler):
     def __init__(
         self,
         config: EntropySamplerConfig,
-        sampler_model: UncertaintyModelAdapter,
+        model: UncertaintyModelAdapter,
     ):
         """
         Initializes the entropy sampler.
@@ -32,7 +32,7 @@ class EntropySampler(UncertaintySampler):
             cfg: Sampler-specific settings.
         """
         super().__init__(
-            model=sampler_model,
+            model=model,
             num_action_samples=config.num_action_samples,
         )
         self.method_name = "entropy"

@@ -196,7 +196,6 @@ class ODESolver():
 
         # Validate input shapes and solver parameters and build keyword arguments for odeint method
         ode_kwargs = self._validate_and_configure_solver(
-            x_init=x_init,
             method=method,
             step_size=step_size,
             atol=atol,
@@ -261,6 +260,7 @@ class ODESolver():
                     div = torch.zeros(x_t.shape[0], device=x_t.device)
                     for z in z_samples:
                         # Dot product v_t · z for each batch element
+                        z = z.to(dtype=v_t.dtype)
                         v_t_dot_z = torch.einsum(
                             "ij,ij->i", v_t.flatten(start_dim=1), z.flatten(start_dim=1)
                         )

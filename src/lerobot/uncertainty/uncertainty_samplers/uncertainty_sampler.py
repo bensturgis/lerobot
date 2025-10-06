@@ -38,9 +38,12 @@ class UncertaintySampler(ABC):
         self.num_action_samples = num_action_samples
 
         self.horizon = model.horizon
+        self.n_action_steps = model.n_action_steps
+        self.n_obs_steps = model.n_obs_steps
         self.action_dim = model.action_dim
         self.device = model.device
         self.dtype = model.dtype
+        self.cond_vf_config = model.cond_vf_config
 
         # Store latest sampled action sequences and the uncertainty score for logging
         self.latest_uncertainty: Optional[float] = None

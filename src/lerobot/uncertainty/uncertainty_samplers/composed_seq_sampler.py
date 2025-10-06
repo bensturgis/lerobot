@@ -3,58 +3,54 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
-from lerobot.policies.factory import make_flow_matching_uncertainty_scoring_metric
-from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
+from lerobot.policies.factory import make_uncertainty_scoring_metric
 
+from ..uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 from .configuration_uncertainty_sampler import (
     ComposedSequenceSamplerConfig,
 )
-from .uncertainty_sampler import FlowMatchingUncertaintySampler
+from .uncertainty_sampler import UncertaintySampler
 from .utils import compose_ode_states, select_and_expand_ode_states, splice_noise_with_prev
 
 
-class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
+class ComposedSequenceSampler(UncertaintySampler):
     """
-    Samples action sequences, composes them with a previously executed sequence segment, 
+    Samples action sequences, composes them with a previously executed sequence segment,
     and evaluates their uncertainty under the flow matching model.
 
     The key idea is that if the composed sequences have a low uncertainty, then the model
-    successfully anticipated what is likely to happen next. This implies a good internal model 
+    successfully anticipated what is likely to happen next. This implies a good internal model
     of the environment.
     """
     def __init__(
         self,
-        flow_matching_cfg: FlowMatchingConfig,
-        cfg: ComposedSequenceSamplerConfig,
-        flow_matching_model: FlowMatchingModel,
+        config: ComposedSequenceSamplerConfig,
+        model: UncertaintyModelAdapter,
     ):
         """
         Args:
             cfg: Sampler-specific settings.
         """
-        extra_sampling_times = cfg.scoring_metric.velocity_eval_times if (cfg.scoring_metric.metric_type == "inter_vel_diff") else None
+        extra_sampling_times = config.scoring_metric.velocity_eval_times if (config.scoring_metric.metric_type == "inter_vel_diff") else None
 
         super().__init__(
-            flow_matching_cfg=flow_matching_cfg,
-            flow_matching_model=flow_matching_model,
-            num_action_samples=cfg.num_action_samples,
+            model=model,
+            num_action_samples=config.num_action_samples,
             extra_sampling_times=extra_sampling_times,
         )
         self.method_name = "composed_sequence"
 
         # Initialize scoring metric
-        self.scoring_metric = make_flow_matching_uncertainty_scoring_metric(
-            config=cfg.scoring_metric,
+        self.scoring_metric = make_uncertainty_scoring_metric(
+            config=config.scoring_metric,
             uncertainty_sampler=self,
         )
 
         # Sampler-specific settings
-        self.cfg = cfg
+        self.config = config
 
-        # Store the conditioning vector and ODE states from the previous action
-        # sequence generation
-        self.prev_global_cond: Optional[Tensor] = None
+        # Store the velocity function and ODE states from the previous action sequence generation
+        self.prev_velocity_fn: Optional[Tensor] = None
         self.prev_ode_states: Optional[Tensor] = None
 
         # Index of the selected action sequence from the previous actions batch
@@ -71,33 +67,21 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         the flow model.
 
         Args:
-            observation: Info about the environment used to create the conditioning vector for
-                the flow matching model. It has to contain the following items:
-                {
-                "observation.state": (B, n_obs_steps, state_dim)
-
-                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
-                    AND/OR
-                "observation.environment_state": (B, environment_dim)
-                }
+            observation: Info about the environment used to create the conditioning for
+                the flow matching model.
             generator: PyTorch random number generator.
 
         Returns:
             - Action sequence samples. Shape: [num_action_samples, horizon, action_dim].
             - Uncertainty score where a higher value means more uncertain.
         """
-        # Encode image features and concatenate them all together along with the state vector
-        # to create the flow matching conditioning vectors
-        global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
-
-        # Adjust shape of conditioning vector
-        global_cond = self._reshape_conditioning(global_cond)
+        # Build the velocity function conditioned on the current observation
+        conditioning = self.model.prepare_conditioning(observation, self.num_action_samples)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
 
         # Sample noise priors
-        new_noise_sample = torch.randn(
-            size=(self.num_action_samples, self.horizon, self.action_dim),
-            dtype=self.dtype,
-            device=self.device,
+        new_noise_sample = self.model.sample_prior(
+            num_samples=self.num_action_samples,
             generator=generator,
         )
         if self.prev_selected_action_idx is not None:
@@ -106,16 +90,18 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             new_noise_sample = splice_noise_with_prev(
                 new_noise_sample=new_noise_sample,
                 prev_noise_sample=self.prev_ode_states[0, self.prev_selected_action_idx],
-                flow_matching_cfg=self.flow_matching_cfg
+                horizon=self.horizon,
+                n_action_steps=self.n_action_steps,
+                n_obs_steps=self.n_obs_steps
             )
 
         # Solve ODE forward from noise to sample action sequences
         new_ode_states = self.sampling_ode_solver.sample(
             x_0=new_noise_sample,
-            global_cond=global_cond,
-            method=self.flow_matching_cfg.ode_solver_method,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
+            velocity_fn=velocity_fn,
+            method=self.ode_solver_config["solver_method"],
+            atol=self.ode_solver_config["atol"],
+            rtol=self.ode_solver_config["rtol"],
             time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
@@ -130,7 +116,9 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
                     :, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :
                 ],
                 new_ode_states=new_ode_states,
-                flow_matching_cfg=self.flow_matching_cfg,
+                horizon=self.horizon,
+                n_action_steps=self.n_action_steps,
+                n_obs_steps=self.n_obs_steps
             )
 
             # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix
@@ -143,17 +131,14 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
                 uncertainty_scores = self.scoring_metric(
                     action_sequences=composed_ode_states[-1],
-                    velocity_model=self.velocity_model,
-                    global_cond=self.prev_global_cond,
+                    velocity_fn=self.prev_velocity_fn,
                 )
             elif self.scoring_metric.name == "inter_vel_diff":
                 uncertainty_scores = self.scoring_metric(
                     ref_ode_states=prev_selected_ode_states,
-                    ref_velocity_model=self.velocity_model,
-                    ref_global_cond=self.prev_global_cond,
+                    ref_velocity_fn=self.prev_velocity_fn,
                     cmp_ode_states=composed_ode_states,
-                    cmp_velocity_model=self.velocity_model,
-                    cmp_global_cond=self.prev_global_cond,
+                    cmp_velocity_fn=self.prev_velocity_fn,
                 )
             else:
                 raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
@@ -161,8 +146,8 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
             # Average uncertainty scores and store for logging
             self.latest_uncertainty = uncertainty_scores.mean().item()
 
-        # Store conditioning vector and ODE states from the previous action sampling step
-        self.prev_global_cond = global_cond
+        # Store velocity function and ODE states from the previous action sampling step
+        self.prev_velocity_fn = velocity_fn
         self.prev_ode_states = new_ode_states
 
         # Pick one action sequence at random
@@ -174,7 +159,7 @@ class ComposedSequenceSampler(FlowMatchingUncertaintySampler):
         """
         Reset internal state to prepare for a new rollout.
         """
-        # Clear stored conditioning vector, ODE states and selected action sequence from previous step
-        self.prev_global_cond: Optional[Tensor] = None
+        # Clear stored velocity function, ODE states and selected action sequence from previous step
+        self.prev_velocity_fn: Optional[Tensor] = None
         self.prev_ode_states: Optional[Tensor] = None
         self.prev_selected_action_idx: Optional[int] = None

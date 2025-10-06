@@ -247,7 +247,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
             actions, uncertainty = self.uncertainty_sampler.conditional_sample_with_uncertainty(
                 observation=batch,
             )
-            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty}")
+            tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty:.4f}")
         else:
             images, img_masks = self.model.prepare_images(batch)
             state = self.model.prepare_state(batch)

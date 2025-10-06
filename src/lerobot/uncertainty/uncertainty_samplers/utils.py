@@ -1,13 +1,13 @@
 import torch
 from torch import Tensor
 
-from lerobot.policies.flow_matching import FlowMatchingConfig
-
 
 def splice_noise_with_prev(
     new_noise_sample: Tensor,
     prev_noise_sample: Tensor,
-    flow_matching_cfg: FlowMatchingConfig,
+    horizon: int,
+    n_action_steps: int,
+    n_obs_steps: int,
 ) -> Tensor:
     """
     Splice newly sampled noise with the overlapping segment from the
@@ -18,7 +18,9 @@ def splice_noise_with_prev(
             Shape: (num_action_samples, horizon, action_dim)
         prev_noise_sample: Noise from the previously selected action sequence.
             Shape: (horizon, action_dim).
-        flow_matching_cfg: Configuration object for Flow Matching policy settings.
+        horizon: Total number of timesteps in the planning horizon.
+        n_action_steps: Number of action steps to execute before replanning.
+        n_obs_steps: Number of observation steps used for conditioning.
 
     Returns:
         Updated noise tensor where the overlapping part has been replaced
@@ -26,11 +28,11 @@ def splice_noise_with_prev(
         consistency with already executed actions.
     """
     # Indices marking the portion of the trajectory that will actually be executed
-    exec_start_idx = flow_matching_cfg.n_obs_steps - 1
-    exec_end_idx = exec_start_idx + flow_matching_cfg.n_action_steps
+    exec_start_idx = n_obs_steps - 1
+    exec_end_idx = exec_start_idx + n_action_steps
 
     # Compute the cutoff index: how far the new noise sample overlaps with the old one
-    new_noise_overlap_end = exec_start_idx + (flow_matching_cfg.horizon - exec_end_idx)
+    new_noise_overlap_end = exec_start_idx + (horizon - exec_end_idx)
 
     batch_size = new_noise_sample.shape[0]
     prev_noise_sample_duplicated = prev_noise_sample.expand(batch_size, -1, -1)
@@ -43,7 +45,9 @@ def splice_noise_with_prev(
 def compose_ode_states(
     prev_ode_states: Tensor,
     new_ode_states: Tensor,
-    flow_matching_cfg: FlowMatchingConfig
+    horizon: int,
+    n_action_steps: int,
+    n_obs_steps: int,
 ) -> Tensor:
     """
     Splice ODE states by keeping the executed prefix from the previous rollout and appending the freshly
@@ -56,7 +60,9 @@ def compose_ode_states(
         new_action_seq: Newly generated action sequence or ODE states.
             Shape: (timesteps, batch_size, horizon, action_dim) or (batch_size, horizon, action_dim) for
             final action sequences.
-        flow_matching_cfg: Configuration object for Flow Matching policy settings.
+        horizon: Total number of timesteps in the planning horizon.
+        n_action_steps: Number of action steps to execute before replanning.
+        n_obs_steps: Number of observation steps used for conditioning.
 
     Returns:
         The composed ODE states. Shape: (timesteps, batch_size, horizon, action_dim) or
@@ -85,11 +91,11 @@ def compose_ode_states(
         )
 
     # Indices marking the portion of the trajectory that will actually be executed
-    exec_start_idx = flow_matching_cfg.n_obs_steps - 1
-    exec_end_idx = exec_start_idx + flow_matching_cfg.n_action_steps
+    exec_start_idx = n_obs_steps - 1
+    exec_end_idx = exec_start_idx + n_action_steps
 
     # Compute the cutoff index: how far the new sequence overlaps with the old one
-    new_action_seq_end = exec_start_idx + (flow_matching_cfg.horizon - exec_end_idx)
+    new_action_seq_end = exec_start_idx + (horizon - exec_end_idx)
 
     # Repeat prefix from previous ODE states to match batch dimension
     batch_size = new_ode_states.shape[1]

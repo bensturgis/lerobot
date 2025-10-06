@@ -21,6 +21,14 @@ class UncertaintyModelAdapter(ABC):
         raise NotImplementedError
 
     @property
+    def n_action_steps(self) -> int:
+        return self.config.n_action_steps
+
+    @property
+    def n_obs_steps(self) -> int:
+        return self.config.n_obs_steps
+
+    @property
     @abstractmethod
     def action_dim(self) -> int:
         raise NotImplementedError
