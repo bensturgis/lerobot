@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -28,8 +28,10 @@ class ComposedSequenceSampler(UncertaintySampler):
         model: UncertaintyModelAdapter,
     ):
         """
+        Initializes the composed sequence sampler.
+
         Args:
-            cfg: Sampler-specific settings.
+            config: Sampler-specific settings.
         """
         extra_sampling_times = config.scoring_metric.velocity_eval_times if (config.scoring_metric.metric_type == "inter_vel_diff") else None
 
@@ -50,11 +52,11 @@ class ComposedSequenceSampler(UncertaintySampler):
         self.config = config
 
         # Store the velocity function and ODE states from the previous action sequence generation
-        self.prev_velocity_fn: Optional[Tensor] = None
-        self.prev_ode_states: Optional[Tensor] = None
+        self.prev_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_ode_states: Tensor | None = None
 
         # Index of the selected action sequence from the previous actions batch
-        self.prev_selected_action_idx: Optional[int] = None
+        self.prev_selected_action_idx: int | None = None
 
     def conditional_sample_with_uncertainty(
         self,
@@ -121,12 +123,6 @@ class ComposedSequenceSampler(UncertaintySampler):
                 n_obs_steps=self.n_obs_steps
             )
 
-            # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix
-            prev_selected_ode_states = select_and_expand_ode_states(
-                ode_states=self.prev_ode_states,
-                traj_idx=self.prev_selected_action_idx,
-            )
-
             # Compute uncertainty based on selected metric
             if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
                 uncertainty_scores = self.scoring_metric(
@@ -134,6 +130,12 @@ class ComposedSequenceSampler(UncertaintySampler):
                     velocity_fn=self.prev_velocity_fn,
                 )
             elif self.scoring_metric.name == "inter_vel_diff":
+                # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix
+                prev_selected_ode_states = select_and_expand_ode_states(
+                    ode_states=self.prev_ode_states,
+                    traj_idx=self.prev_selected_action_idx,
+                )
+
                 uncertainty_scores = self.scoring_metric(
                     ref_ode_states=prev_selected_ode_states,
                     ref_velocity_fn=self.prev_velocity_fn,
@@ -160,6 +162,6 @@ class ComposedSequenceSampler(UncertaintySampler):
         Reset internal state to prepare for a new rollout.
         """
         # Clear stored velocity function, ODE states and selected action sequence from previous step
-        self.prev_velocity_fn: Optional[Tensor] = None
-        self.prev_ode_states: Optional[Tensor] = None
-        self.prev_selected_action_idx: Optional[int] = None
+        self.prev_velocity_fn = None
+        self.prev_ode_states = None
+        self.prev_selected_action_idx = None

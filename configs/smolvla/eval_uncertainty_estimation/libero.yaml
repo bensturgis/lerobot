@@ -9,7 +9,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 50
-  uncert_est_methods: [composed_sequence]
+  uncert_est_methods: [composed_cross_bayesian]
   domains: [id]
 
 uncertainty_sampler:

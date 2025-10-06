@@ -427,7 +427,7 @@ def make_uncertainty_sampler(
         model=model,
         policy_config=policy_config
     )
-    
+
     if uncertainty_sampler_config.type == "composed_cross_bayesian":
         from lerobot.uncertainty.uncertainty_samplers.composed_cross_bayesian_sampler import (
             ComposedCrossBayesianSampler,
@@ -444,9 +444,8 @@ def make_uncertainty_sampler(
             )
 
         return ComposedCrossBayesianSampler(
-            flow_matching_cfg=flow_matching_cfg,
-            cfg=uncertainty_sampler_config.composed_cross_bayesian_sampler,
-            sampler_model=flow_matching_model,
+            config=uncertainty_sampler_config.composed_cross_bayesian_sampler,
+            sampler_model=uncertainty_adapter,
             scorer_artifacts=scorer_artifacts,
         )
     if uncertainty_sampler_config.type == "composed_sequence":

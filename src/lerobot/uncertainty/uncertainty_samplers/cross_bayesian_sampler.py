@@ -28,6 +28,8 @@ class CrossBayesianSampler(UncertaintySampler):
         scorer_artifacts: ScorerArtifacts,
     ):
         """
+        Initializes the Initializes the cross bayesian sampler.
+
         Args:
             config: Sampler-specific settings.
             sampler_model: The flow matching model using for sampling actions.
