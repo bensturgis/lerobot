@@ -1,9 +1,17 @@
 dataset:
   repo_id: HuggingFaceVLA/libero
+  libero_tasks: {
+      libero_spatial: [],
+      libero_object: [],
+      libero_goal: [],
+      libero_10: [0, 3, 4, 7, 8]
+    }
+
 
 policy:
   type: smolvla
   device: cuda
+  repo_id: bensturgis/smolvla-libero-filtered-finetuned
 
 env:
   type: libero
@@ -13,13 +21,14 @@ eval:
   batch_size: 1
   n_episodes: 5
 
-output_dir: outputs/train/test
-steps: 200000
-batch_size: 24
+output_dir: outputs/train/smolvla/libero_filtered_finetuned
+steps: 100000
+batch_size: 64
 eval_freq: 2500
 save_freq: 5000
-seed: 221100
+val_ratio: 0.05
+seed: 2219640
 wandb:
   enable: true
 
-# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero.yaml --policy.path=outputs/train/smolvla_base --policy.n_action_steps=8 --policy.repo_id=bensturgis/smolvla-libero
+# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero_finetuning.yaml --policy.path=outputs/train/smolvla/libero_filtered_base/checkpoints/120000/pretrained_model --policy.repo_id=bensturgis/smolvla-libero-filtered-finetuned
