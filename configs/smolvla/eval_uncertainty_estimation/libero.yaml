@@ -32,8 +32,8 @@ uncertainty_sampler:
     scorer_type: laplace
     laplace_scopes: [action_out_proj, expert_last]
     scoring_metric:
-      metric_type: terminal_vel_norm
-    num_action_samples: 5
+      metric_type: mode_distance
+    num_action_samples: 7
 
 seed: 120120
 

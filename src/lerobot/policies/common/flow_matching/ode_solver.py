@@ -83,6 +83,7 @@ class ODESolver():
 
         # Validate input shapes and solver parameters and build keyword arguments for odeint method
         ode_kwargs = self._validate_and_configure_solver(
+            time_grid=time_grid,
             method=method,
             step_size=step_size,
             atol=atol,
@@ -195,6 +196,7 @@ class ODESolver():
 
         # Validate input shapes and solver parameters and build keyword arguments for odeint method
         ode_kwargs = self._validate_and_configure_solver(
+            time_grid=time_grid,
             method=method,
             step_size=step_size,
             atol=atol,
