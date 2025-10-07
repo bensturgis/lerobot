@@ -48,12 +48,12 @@ def build_scorer_artifacts_for_uncertainty_sampler(
     if scorer_type is None:
         return ScorerArtifacts()
     if scorer_type == "ensemble":
-        ensemble_model = build_ensemble_model(
+        ensemble_adapter = build_ensemble_model(
             ensemble_model_path=active_config.ensemble_model_path,
             policy_cfg=policy_cfg,
             env_cfg=env_cfg,
         )
-        return ScorerArtifacts(ensemble_model=ensemble_model)
+        return ScorerArtifacts(ensemble_adapter=ensemble_adapter)
     if scorer_type == "laplace":
         laplace_posterior = get_laplace_posterior(
             policy=policy,

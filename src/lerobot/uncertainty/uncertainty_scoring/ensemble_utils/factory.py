@@ -24,4 +24,16 @@ def build_ensemble_model(
     ensemble_model_config.pretrained_path = str(ensemble_model_path)
     ensemble_policy = make_policy(cfg=ensemble_model_config, env_cfg=env_cfg).to(device)
     ensemble_policy.eval()
-    return make_uncertainty_adapter(policy=ensemble_policy)
+    if ensemble_policy.name == "flow_matching":
+        model = ensemble_policy.flow_matching
+    elif ensemble_policy.name == "smolvla":
+        model = ensemble_policy.model
+    else:
+        raise ValueError(
+            f"Cannot build ensemble member for policy type {ensemble_policy.name}. "
+            "This helper only knows how to extract the underlying flow matching model from "
+            "a FlowMatchingPolicy via policy.flow_matching and SmolVLAPolicy via policy.model."
+        )
+
+
+    return make_uncertainty_adapter(model=model, policy_config=ensemble_policy.config)

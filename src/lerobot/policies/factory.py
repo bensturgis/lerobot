@@ -462,7 +462,7 @@ def make_uncertainty_sampler(
             CrossBayesianSampler,
         )
 
-        if uncertainty_sampler_config.cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_model is None:
+        if uncertainty_sampler_config.cross_bayesian_sampler.scorer_type == "ensemble" and scorer_artifacts.ensemble_adapter is None:
             raise ValueError(
                 "Cross-Bayesian uncertainty sampler with scorer_type=ensemble requires an ensemble model."
             )
