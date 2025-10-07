@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 import torch
 from torch import Tensor
@@ -85,10 +85,12 @@ class SmolVLAUncertaintyAdapter(UncertaintyModelAdapter):
 
     def make_velocity_fn(self, conditioning: Dict[str, Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
         def v_t(t: Tensor, x_t: Tensor) -> Tensor:
-            return self.model.denoise_step(
+            s = 1 - t
+            v_s = self.model.denoise_step(
                 prefix_pad_masks=conditioning["prefix_pad_masks"],
                 past_key_values=conditioning["past_key_values"],
                 x_t=x_t,
-                timestep=t.expand(x_t.shape[0]),
+                timestep=s.expand(x_t.shape[0]),
             )
+            return -v_s
         return v_t
