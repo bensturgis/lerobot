@@ -12,9 +12,12 @@ from torch.utils.data import DataLoader
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.datasets.factory import make_dataset
+from lerobot.datasets.sampler import EpisodeAwareSampler
+from lerobot.datasets.utils import filter_libero_episodes, patch_dataset_episode_boundaries
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.processor import PolicyProcessorPipeline
 from lerobot.uncertainty.uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
+from lerobot.utils.utils import format_big_number, get_safe_torch_device
 
 from .laplace_wrappers.factory import make_laplace_wrapper
 from .laplace_wrappers.laplace_wrapper import LaplaceWrapper
@@ -39,18 +42,42 @@ def create_laplace_calib_loader(
         calib_fraction: Fraction of the full dataset to reserve for calibration (between 0 and 1).
         batch_size: Number of samples per batch in the returned DataLoader.
     """
+    # Check device is available
+    device = get_safe_torch_device(policy_cfg.device, log=True)
+
     # Extract a subset of the full train dataset for calibration
-    train_dataset = make_dataset(dataset_cfg=dataset_cfg, policy_cfg=policy_cfg)
-    num_train_samples = len(train_dataset)
-    num_calib_samples = int(calib_fraction * num_train_samples)
-    calib_indices = torch.randperm(num_train_samples)[:num_calib_samples].tolist()
-    calib_subset = torch.utils.data.Subset(train_dataset, calib_indices)
+    dataset = make_dataset(dataset_cfg=dataset_cfg, policy_cfg=policy_cfg)
+    dataset = patch_dataset_episode_boundaries(dataset=dataset)
+    all_episode_ids = list(dataset.meta.episodes["episode_index"])
+    if dataset_cfg.repo_id == "HuggingFaceVLA/libero" and dataset_cfg.libero_tasks is not None:
+        episode_ids_to_use = filter_libero_episodes(
+            dataset=dataset,
+            tasks_to_use=dataset_cfg.libero_tasks,
+        )
+    else:
+        episode_ids_to_use = all_episode_ids
+    calib_sampler = EpisodeAwareSampler(
+        dataset_from_indices=dataset.meta.episodes["dataset_from_index"],
+        dataset_to_indices=dataset.meta.episodes["dataset_to_index"],
+        episode_indices_to_use=sorted(episode_ids_to_use),
+        drop_n_last_frames=getattr(policy_cfg, "drop_n_last_frames", 0),
+        fraction=calib_fraction,
+        shuffle=True,
+    )
+
+    logging.info(f"Total number of episodes: {dataset.num_episodes} and frames: {dataset.num_frames} ({format_big_number(len(dataset))})")
+    if dataset_cfg.repo_id == "HuggingFaceVLA/libero" and dataset_cfg.libero_tasks is not None:
+        logging.info(f"Number of selected episodes: {len(episode_ids_to_use)}")
+    num_calib_frames = len(calib_sampler)
+    logging.info(f"Number of Laplace calib frames: {num_calib_frames} ({format_big_number(num_calib_frames)}) for calibration fraction: {calib_fraction}")
 
     calib_loader = torch.utils.data.DataLoader(
-        calib_subset,
-        batch_size=batch_size,
-        shuffle=True,
+        dataset,
         num_workers=0,
+        batch_size=batch_size,
+        shuffle=False,
+        sampler=calib_sampler,
+        drop_last=False,
         collate_fn=laplace_wrapper.build_collate_fn(preprocessor=preprocessor),
     )
 

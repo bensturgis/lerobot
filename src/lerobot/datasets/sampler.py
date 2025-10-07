@@ -27,6 +27,7 @@ class EpisodeAwareSampler:
         drop_n_first_frames: int = 0,
         drop_n_last_frames: int = 0,
         shuffle: bool = False,
+        fraction: float | None = None,
     ):
         """Sampler that optionally incorporates episode boundary information.
 
@@ -38,6 +39,7 @@ class EpisodeAwareSampler:
             drop_n_first_frames: Number of frames to drop from the start of each episode.
             drop_n_last_frames: Number of frames to drop from the end of each episode.
             shuffle: Whether to shuffle the indices.
+            fraction: Fraction of the total filtered frames to keep.
         """
         indices = []
         for episode_idx, (start_index, end_index) in enumerate(
@@ -46,7 +48,11 @@ class EpisodeAwareSampler:
             if episode_indices_to_use is None or episode_idx in episode_indices_to_use:
                 indices.extend(range(start_index + drop_n_first_frames, end_index - drop_n_last_frames))
 
-        self.indices = indices
+        if fraction is not None:
+            indices = [indices[i] for i in torch.randperm(len(indices))]
+            indices = indices[:int(fraction * len(indices))]
+
+        self.indices = sorted(indices)
         self.shuffle = shuffle
 
     def __iter__(self) -> Iterator[int]:

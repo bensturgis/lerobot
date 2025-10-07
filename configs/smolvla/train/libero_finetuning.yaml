@@ -1,11 +1,11 @@
 dataset:
   repo_id: HuggingFaceVLA/libero
   libero_tasks: {
-      libero_spatial: [],
-      libero_object: [],
-      libero_goal: [],
-      libero_10: [0, 3, 4, 7, 8]
-    }
+    libero_spatial: [],
+    libero_object: [],
+    libero_goal: [],
+    libero_10: [0, 3, 4, 7, 8]
+  }
 
 
 policy:
