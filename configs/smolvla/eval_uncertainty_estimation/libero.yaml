@@ -30,10 +30,11 @@ uncertainty_sampler:
     num_action_samples: 5
   cross_bayesian_sampler:
     scorer_type: laplace
+    laplace_scopes: [action_out_proj]
     scoring_metric:
       metric_type: terminal_vel_norm
     num_action_samples: 5
 
 seed: 120120
 
-# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned/checkpoints/015000/pretrained_model
+# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned/checkpoints/005000/pretrained_model
