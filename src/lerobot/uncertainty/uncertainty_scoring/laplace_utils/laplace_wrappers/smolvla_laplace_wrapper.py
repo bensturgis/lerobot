@@ -171,10 +171,10 @@ class SmolVLALaplaceWrapper(LaplaceWrapper):
                 target_modules.append(self.model.action_time_mlp_out)
             elif scope == "expert_last":
                 action_expert = self.model.vlm_with_expert.lm_expert
-                target_modules.append(action_expert.self_attn.o_proj)
-                target_modules.append(action_expert.mlp.gate_proj)
-                target_modules.append(action_expert.mlp.up_proj)
-                target_modules.append(action_expert.mlp.down_proj)
+                target_modules.append(action_expert.layers[-1].self_attn.o_proj)
+                target_modules.append(action_expert.layers[-1].mlp.gate_proj)
+                target_modules.append(action_expert.layers[-1].mlp.up_proj)
+                target_modules.append(action_expert.layers[-1].mlp.down_proj)
             else:
                 raise ValueError(
                     f"Unknown Laplace approximation target {scope}. "

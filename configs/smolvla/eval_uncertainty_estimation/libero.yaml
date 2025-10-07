@@ -20,7 +20,7 @@ eval_uncert_est:
 uncertainty_sampler:
   composed_cross_bayesian_sampler:
     scorer_type: laplace
-    laplace_scopes: [action_out_proj]
+    laplace_scopes: [action_out_proj, expert_last]
     scoring_metric:
       metric_type: mode_distance
     num_action_samples: 5
@@ -30,7 +30,7 @@ uncertainty_sampler:
     num_action_samples: 5
   cross_bayesian_sampler:
     scorer_type: laplace
-    laplace_scopes: [action_out_proj]
+    laplace_scopes: [action_out_proj, expert_last]
     scoring_metric:
       metric_type: terminal_vel_norm
     num_action_samples: 5

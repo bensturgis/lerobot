@@ -126,7 +126,7 @@ class ComposedCrossBayesianSamplerConfig:
     ensemble_model_path: str | Path | None = None
 
     # Parameters for the Laplace approximation calibration dataloader
-    laplace_scopes: tuple[str] = ()
+    laplace_scopes: list[str] | None = None
     calib_fraction: float = 1.0
     batch_size: int = 1
 
@@ -158,7 +158,7 @@ class CrossBayesianSamplerConfig:
     ensemble_model_path: str | Path | None = None
 
     # Parameters for the Laplace approximation calibration dataloader
-    laplace_scopes: tuple[str] = ()
+    laplace_scopes: list[str] | None = None
     calib_fraction: float = 1.0
     batch_size: int = 1
 
