@@ -148,7 +148,7 @@ def make_laplace_path(
 def get_laplace_posterior(
     policy: PreTrainedPolicy,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
-    laplace_scopes: List[str],
+    laplace_scopes: Optional[List[str]],
     calib_fraction: float,
     batch_size: int,
     dataset_cfg: DatasetConfig,

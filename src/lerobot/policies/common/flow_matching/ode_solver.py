@@ -67,7 +67,6 @@ class ODESolver():
             atol, rtol: Absolute/relative error tolerances for accepting an adaptive solver step.
                 Ignored for fixed-step solvers.
             time_grid: Times at which ODE is evaluated. Integration runs from time_grid[0] to time_grid[-1].
-                Must start at 0.0 and end at 1.0 for flow matching sampling.
             return_intermediate_states: If True then return intermediate evaluation points according to time_grid.
             return_intermediate_vels: If True then return velocities at intermediate evaluation points acoording
                 to time_grid.
@@ -79,9 +78,6 @@ class ODESolver():
             - If return_intermediate_vels = True, additionally the velocities at the intermediate evaluation
             points specified in time_grid.
         """
-        if time_grid[0] != 0.0 or time_grid[-1] != 1.0:
-            raise ValueError(f"Time grid must start at 0.0 and end at 1.0. Got {time_grid}.")
-
         # Ensure all tensors are on the same device
         time_grid = time_grid.to(x_0.device)
 
@@ -94,14 +90,26 @@ class ODESolver():
         )
 
         with torch.set_grad_enabled(enable_grad):
-            # Approximate ODE solution with numerical ODE solver
-            trajetory = odeint(
-                velocity_fn,
-                x_0,
-                time_grid,
-                method=method,
-                **ode_kwargs,
-            )
+            if method == "euler":
+                trajetory, velocities = euler_integrate(
+                    velocity_fn=velocity_fn,
+                    x_0=x_0,
+                    time_grid=time_grid,
+                    step_size=step_size,
+                )
+            else:
+                # Approximate ODE solution with numerical ODE solver
+                trajetory = odeint(
+                    velocity_fn,
+                    x_0,
+                    time_grid,
+                    method=method,
+                    **ode_kwargs,
+                )
+                if return_intermediate_vels:
+                    velocities = []
+                    for t, x_t in zip(time_grid, trajetory, strict=False):
+                        velocities.append(velocity_fn(t=t, x_t=x_t))
 
         outputs: List[Tensor] = []
 
@@ -111,9 +119,6 @@ class ODESolver():
             outputs.append(trajetory[-1])
 
         if return_intermediate_vels:
-            velocities = []
-            for t, x_t in zip(time_grid, trajetory, strict=False):
-                velocities.append(velocity_fn(t=t, x_t=x_t))
             outputs.append(torch.stack(velocities, dim=0))
 
         return outputs[0] if len(outputs) == 1 else tuple(outputs)
@@ -182,12 +187,6 @@ class ODESolver():
               when `return_intermediate_states` = True
             - The estimated log-likelihood log(p_1(x_1)).
         """
-        if not (
-            (time_grid[0] == 0.0 and time_grid[-1] == 1.0) or
-            (time_grid[0] == 1.0 and time_grid[-1] == 0.0)
-        ):
-            raise ValueError(f"Time grid must go from 0.0 to 1.0 or from 1.0 to 0.0. Got {time_grid}.")
-
         if not exact_divergence and num_hutchinson_samples is None:
             raise ValueError("`num_hutchinson_samples` must be specified when `exact_divergence` is False.")
 
@@ -312,15 +311,28 @@ class ODESolver():
 
     def _validate_and_configure_solver(
         self,
+        time_grid: Tensor,
         method: str,
         step_size: Optional[float],
         atol: Optional[float],
         rtol: Optional[float],
     ) ->  Dict[str, Any]:
         """
-        Validate input shapes and solver parameters, and construct appropriate
-        keyword arguments for `torchdiffeq.odeint`.
+        Validate input shapes and solver parameters, and construct appropriate keyword arguments for `torchdiffeq.odeint`.
         """
+        if not (
+            (time_grid[0] == 0.0 and time_grid[-1] == 1.0) or
+            (time_grid[0] == 1.0 and time_grid[-1] == 0.0)
+        ):
+            raise ValueError(f"Time grid must go from 0.0 to 1.0 or from 1.0 to 0.0. Got {time_grid}.")
+
+        # Ensure time grid is one-dimensional and strictly monotone
+        if time_grid.ndim != 1:
+            raise ValueError("`time_grid` must be one-dimensional.")
+        time_deltas = time_grid[1:] - time_grid[:-1]
+        if not (torch.all(time_deltas > 0) or torch.all(time_deltas < 0)):
+            raise ValueError("`time_grid` must be strictly monotone (all increasing or all decreasing).")
+
         # Check ODE solver parameters
         if method in FIXED_STEP_SOLVERS:
             # Positive step‑size required
@@ -352,6 +364,77 @@ class ODESolver():
             f"Unknown solver '{method}'. Choose one of "
             f"{sorted(FIXED_STEP_SOLVERS | ADAPTIVE_SOLVERS)}."
         )
+
+def euler_integrate(
+    x_0: Tensor,
+    velocity_fn: Callable[[Tensor, Tensor], Tensor],
+    time_grid: Tensor,
+    step_size: Optional[float] = None
+) -> Tuple[Tensor, Tensor]:
+    """
+    Explicit Euler integrator over a time grid.
+
+    Args:
+        x_0: Initial sample from source distribution. Shape: [batch_size, ...].
+        velocity_fn: Velocity function defining the right-hand side of the flow matching ODE
+            d/dt φ_t(x) = v_t(φ_t(x), conditoning).
+                Args:
+                    t: Current scalar time of the ODE integration.
+                    x_t: Current state x_t along the flow trajectory.
+
+                Returns:
+                    Velocity v_t(φ_t(x), conditoning) with the same shape as `x`.
+        time_grid: Times at which ODE is evaluated. Integration runs from time_grid[0] to time_grid[-1].
+        step_size: Take fixed-magnitude substeps of |step_size| starting from t_i until reaching t_{i+1}.
+            If None, take a single Euler step from t_i to t_{i+1}.
+
+    Returns:
+        - The ODE states evaluated at each time in `time_grid`.
+        - The velocities v(t_i, x_i) at these ODE states and evaluation times.
+    """
+    states: List[Tensor] = []
+    vels: List[Tensor] = []
+
+    x_t = x_0
+    for i in range(len(time_grid) - 1):
+        t = time_grid[i]
+        t_next = time_grid[i + 1]
+
+        # Record at current time t
+        states.append(x_t)
+        v_t = velocity_fn(x_t=x_t, t=t)
+        vels.append(v_t)
+
+        if step_size is None:
+            # Single Euler step from t to t_next
+            dt = t_next - t
+            x_t = x_t + dt * v_t
+        else:
+            # Multiple substeps of signed size 'direction * step'
+            t_cur = t
+            direction = torch.sign(t_next - t)
+            while True:
+                remaining_diff = t_next - t_cur
+                # If within one step, take the final shortened step
+                if torch.abs(remaining_diff) <= step_size:
+                    dt = remaining_diff
+                    x_t = x_t + dt * v_t
+                    break
+                else:
+                    # Take a full substep
+                    dt = direction * step_size
+                    x_t = x_t + dt * v_t
+                    t_cur = t_cur + dt
+                    # Update velocity for the next substep
+                    v_t = velocity_fn(t=t_cur, x_t=x_t)
+
+    # Append final state at t_N and its velocity for completeness
+    states.append(x_t)
+    vels.append(velocity_fn(t=time_grid[-1], x_t=x_t))
+
+    trajectory = torch.stack(states, dim=0)
+    velocities = torch.stack(vels, dim=0)
+    return trajectory, velocities
 
 
 def make_sampling_time_grid(
