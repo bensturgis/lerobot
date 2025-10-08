@@ -28,7 +28,7 @@ class SmolVLAConfig(PreTrainedConfig):
     # Input / output structure.
     n_obs_steps: int = 1
     chunk_size: int = 16
-    n_action_steps: int = 1
+    n_action_steps: int = 8
 
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
@@ -39,11 +39,11 @@ class SmolVLAConfig(PreTrainedConfig):
     )
 
     # Shorter state and action vectors will be padded
-    max_state_dim: int = 8
-    max_action_dim: int = 7
+    max_state_dim: int = 2
+    max_action_dim: int = 2
 
     # Image preprocessing
-    resize_imgs_with_padding: tuple[int, int] = (256, 256)
+    resize_imgs_with_padding: tuple[int, int] = (96, 96)
 
     # Add empty images. Used by smolvla_aloha_sim which adds the empty
     # left and right wrist cameras in addition to the top camera.
