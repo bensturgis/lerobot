@@ -43,7 +43,7 @@ class SmolVLAConfig(PreTrainedConfig):
     max_action_dim: int = 2
 
     # Image preprocessing
-    resize_imgs_with_padding: tuple[int, int] = (96, 96)
+    resize_imgs_with_padding: tuple[int, int] = (128, 128)
 
     # Add empty images. Used by smolvla_aloha_sim which adds the empty
     # left and right wrist cameras in addition to the top camera.
