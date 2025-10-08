@@ -23,20 +23,20 @@ uncertainty_sampler:
     ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_02/checkpoints/015000/pretrained_model
     laplace_scopes: [action_out_proj, expert_last]
     scoring_metric:
-      metric_type: mode_distance
+      metric_type: inter_vel_diff
     num_action_samples: 5
   composed_sequence_sampler:
     scoring_metric:
-      metric_type: mode_distance
+      metric_type: inter_vel_diff
     num_action_samples: 5
   cross_bayesian_sampler:
     scorer_type: ensemble
     ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_02/checkpoints/015000/pretrained_model
     laplace_scopes: [action_out_proj, expert_last]
     scoring_metric:
-      metric_type: mode_distance
+      metric_type: inter_vel_diff
     num_action_samples: 5
 
-seed: 221100
+seed: 123321
 
 # python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned/checkpoints/005000/pretrained_model
