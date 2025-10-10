@@ -143,38 +143,48 @@ class SmolVLMWithExpertModel(nn.Module):
     def set_requires_grad(self):
         if self.freeze_text_model and self.freeze_vision_encoder:
             self.vlm.eval()
-            for params in self.vlm.parameters():
-                params.requires_grad = False
-        elif self.freeze_text_model:
-            self.get_vlm_model().text_model.eval()
-            for params in self.get_vlm_model().text_model.parameters():
-                params.requires_grad = False
-        elif self.freeze_vision_encoder:
-            self.get_vlm_model().vision_model.eval()
-            for params in self.get_vlm_model().vision_model.parameters():
-                params.requires_grad = False
+            for p in self.vlm.parameters():
+                p.requires_grad = False
         else:
-            # To avoid unused params issue with distributed training
-            last_layers = [self.num_vlm_layers - 1]
-            if (
-                self.num_vlm_layers != self.num_expert_layers
-                and self.num_vlm_layers % self.num_expert_layers == 0
-            ):
-                last_layers.append(self.num_vlm_layers - 2)
-            frozen_layers = [
-                "lm_head",
-                "text_model.model.norm.weight",
-            ]
-            for layer in last_layers:
-                frozen_layers.append(f"text_model.model.layers.{layer}.")
+            # Freeze vision encoder
+            if self.freeze_vision_encoder:
+                vm = self.get_vlm_model().vision_model
+                vm.eval()
+                for p in vm.parameters():
+                    p.requires_grad = False
 
-            for name, params in self.vlm.named_parameters():
-                if any(k in name for k in frozen_layers):
-                    params.requires_grad = False
-        # To avoid unused params issue with distributed training
-        for name, params in self.lm_expert.named_parameters():
+            # Freeze text model
+            if self.freeze_text_model:
+                tm = self.get_vlm_model().text_model
+                tm.eval()
+                for p in tm.parameters():
+                    p.requires_grad = False
+                for name, p in self.vlm.named_parameters():
+                    if "lm_head" in name:
+                        p.requires_grad = False
+            else:
+                # Partial freeze to avoid unused params in DDP
+                last_layers = [self.num_vlm_layers - 1]
+                if (
+                    self.num_vlm_layers != self.num_expert_layers
+                    and self.num_vlm_layers % self.num_expert_layers == 0
+                ):
+                    last_layers.append(self.num_vlm_layers - 2)
+
+                frozen_layers = [
+                    "lm_head",
+                    "text_model.model.norm.weight",
+                ]
+                for layer in last_layers:
+                    frozen_layers.append(f"text_model.model.layers.{layer}.")
+
+                for name, p in self.vlm.named_parameters():
+                    if any(k in name for k in frozen_layers):
+                        p.requires_grad = False
+
+        for name, p in self.lm_expert.named_parameters():
             if "lm_head" in name:
-                params.requires_grad = False
+                p.requires_grad = False
 
     def train(self, mode: bool = True):
         super().train(mode)
