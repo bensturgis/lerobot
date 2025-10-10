@@ -35,7 +35,7 @@ class FlowMatchingUncertaintyAdapter(UncertaintyModelAdapter):
     @property
     def cond_vf_config(self) -> Dict[str, Any]:
         return {
-            "type": self.config.conf_vf_type,
+            "type": self.config.cond_vf_type,
             "sigma_min": self.config.sigma_min,
             "beta_min": self.config.beta_min,
             "beta_max": self.config.beta_max,
