@@ -63,8 +63,8 @@ class SmolVLMWithExpertModel(nn.Module):
         self,
         model_id: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
         load_vlm_weights: bool = True,
-        train_expert_only: bool = True,
         freeze_vision_encoder: bool = False,
+        freeze_text_model: bool = False,
         attention_mode: str = "self_attn",
         num_expert_layers: int = -1,
         num_vlm_layers: int = -1,
@@ -77,6 +77,11 @@ class SmolVLMWithExpertModel(nn.Module):
             self.vlm = AutoModelForImageTextToText.from_pretrained(
                 model_id,
                 device_map="auto",
+                # max_memory={
+                #     0: "5GiB",
+                #     "cpu": "10GiB",
+                # },
+                # offload_folder="offload_cache",
                 torch_dtype="bfloat16",
                 low_cpu_mem_usage=True,
             )
@@ -127,7 +132,7 @@ class SmolVLMWithExpertModel(nn.Module):
         self.num_key_value_heads = self.config.text_config.num_key_value_heads
 
         self.freeze_vision_encoder = freeze_vision_encoder
-        self.train_expert_only = train_expert_only
+        self.freeze_text_model = freeze_text_model
         self.attention_mode = attention_mode
         self.expert_hidden_size = lm_expert_config.hidden_size
         self.set_requires_grad()
@@ -136,13 +141,17 @@ class SmolVLMWithExpertModel(nn.Module):
         return self.vlm.model
 
     def set_requires_grad(self):
-        if self.freeze_vision_encoder:
-            self.get_vlm_model().vision_model.eval()
-            for params in self.get_vlm_model().vision_model.parameters():
-                params.requires_grad = False
-        if self.train_expert_only:
+        if self.freeze_text_model and self.freeze_vision_encoder:
             self.vlm.eval()
             for params in self.vlm.parameters():
+                params.requires_grad = False
+        elif self.freeze_text_model:
+            self.get_vlm_model().text_model.eval()
+            for params in self.get_vlm_model().text_model.parameters():
+                params.requires_grad = False
+        elif self.freeze_vision_encoder:
+            self.get_vlm_model().vision_model.eval()
+            for params in self.get_vlm_model().vision_model.parameters():
                 params.requires_grad = False
         else:
             # To avoid unused params issue with distributed training
@@ -170,11 +179,12 @@ class SmolVLMWithExpertModel(nn.Module):
     def train(self, mode: bool = True):
         super().train(mode)
 
-        if self.freeze_vision_encoder:
-            self.get_vlm_model().vision_model.eval()
-
-        if self.train_expert_only:
+        if self.freeze_text_model and self.freeze_vision_encoder:
             self.vlm.eval()
+        elif self.freeze_text_model:
+            self.get_vlm_model().text_model.eval()
+        elif self.freeze_vision_encoder:
+            self.get_vlm_model().vision_model.eval()
 
     def embed_image(self, image: torch.Tensor):
         patch_attention_mask = None
