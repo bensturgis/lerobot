@@ -5,15 +5,14 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from dm_control import mujoco
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from torch import Tensor, nn
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.common.policies.flow_matching.ode_solver import ODESolver
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
-from lerobot.configs.default import ActionSeqVisConfig
+from lerobot.policies.common.flow_matching.ode_solver import ODESolver
+from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
+from lerobot.visualizer.configuration_visualizer import ActionSeqVisConfig
 
 from .visualizer import FlowMatchingVisualizer
 
@@ -135,45 +134,45 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
 
         plt.close(fig)
 
-    def _project_world_point_to_pixels(
-        self,
-        model: mujoco.MjModel,
-        data: mujoco.MjData,
-        point_world: np.ndarray,
-        camera_name: str,
-        img_width: int,
-        img_height: int
-    ):
-        """
-        Project a single 3-D point from the world frame into pixel coordinates.
-        """
-        # Get the camera extrinsics
-        cam_id = mujoco.mj_name2id(
-            model._model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
-        )
-        cam_pos = data.cam_xpos[cam_id]
-        cam_mat = data.cam_xmat[cam_id].reshape(3, 3)
+    # def _project_world_point_to_pixels(
+    #     self,
+    #     model: mujoco.MjModel,
+    #     data: mujoco.MjData,
+    #     point_world: np.ndarray,
+    #     camera_name: str,
+    #     img_width: int,
+    #     img_height: int
+    # ):
+    #     """
+    #     Project a single 3-D point from the world frame into pixel coordinates.
+    #     """
+    #     # Get the camera extrinsics
+    #     cam_id = mujoco.mj_name2id(
+    #         model._model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
+    #     )
+    #     cam_pos = data.cam_xpos[cam_id]
+    #     cam_mat = data.cam_xmat[cam_id].reshape(3, 3)
 
-        # Convert point from world to camera coordinates
-        p_cam = cam_mat.T @ (point_world - cam_pos)
+    #     # Convert point from world to camera coordinates
+    #     p_cam = cam_mat.T @ (point_world - cam_pos)
 
-        # Everything in front of the camera has negative z in MuJoCo
-        if p_cam[2] >= 0:
-            raise ValueError("Point is behind the camera")
+    #     # Everything in front of the camera has negative z in MuJoCo
+    #     if p_cam[2] >= 0:
+    #         raise ValueError("Point is behind the camera")
 
-        # Get the camera intrinsics
-        fovy_deg = model.cam_fovy[cam_id]
-        fovy_rad = np.deg2rad(fovy_deg)
-        f = 0.5 * img_height / np.tan(0.5 * fovy_rad)
+    #     # Get the camera intrinsics
+    #     fovy_deg = model.cam_fovy[cam_id]
+    #     fovy_rad = np.deg2rad(fovy_deg)
+    #     f = 0.5 * img_height / np.tan(0.5 * fovy_rad)
 
-        # Get the image centre
-        cx, cy = img_width * 0.5, img_height * 0.5
+    #     # Get the image centre
+    #     cx, cy = img_width * 0.5, img_height * 0.5
 
-        # Perspective projection
-        u = ( p_cam[0] / -p_cam[2] ) * f + cx
-        v = (-p_cam[1] / -p_cam[2] ) * f + cy
+    #     # Perspective projection
+    #     u = ( p_cam[0] / -p_cam[2] ) * f + cx
+    #     v = (-p_cam[1] / -p_cam[2] ) * f + cy
 
-        return u, v
+    #     return u, v
     
     def _draw_waypoints(self, env: gym.Env, waypoints: List[np.ndarray], ax: Axes):
         # Prepare a colormap over the trajectory length

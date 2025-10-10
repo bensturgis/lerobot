@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import logging
 from typing import Any, TypedDict
@@ -40,6 +40,7 @@ from lerobot.policies.sac.configuration_sac import SACConfig
 from lerobot.policies.sac.reward_model.configuration_classifier import RewardClassifierConfig
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.tdmpc.configuration_tdmpc import TDMPCConfig
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.vqbet.configuration_vqbet import VQBeTConfig
 from lerobot.processor import PolicyAction, PolicyProcessorPipeline
 from lerobot.processor.converters import (
@@ -48,7 +49,6 @@ from lerobot.processor.converters import (
     transition_to_batch,
     transition_to_policy_action,
 )
-from lerobot.uncertainty.uncertainty_adapters.factory import make_uncertainty_adapter
 from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
     ScoringMetricConfig,
     UncertaintySamplerConfig,
@@ -423,7 +423,7 @@ def make_uncertainty_sampler(
     scorer_artifacts: ScorerArtifacts,
 ) -> UncertaintySampler:
     # Initialize the uncertainty adapter
-    uncertainty_adapter = make_uncertainty_adapter(
+    uncertainty_adapter = make_flow_matching_adapter(
         model=model,
         policy_config=policy_config
     )
@@ -488,6 +488,7 @@ def make_uncertainty_sampler(
     else:
         raise ValueError(f"Unknown uncertainty sampler {uncertainty_sampler_config.type}.")
 
+
 def make_uncertainty_scoring_metric(
     config: ScoringMetricConfig,
     uncertainty_sampler: UncertaintySampler | None = None,
@@ -516,3 +517,33 @@ def make_uncertainty_scoring_metric(
         return TerminalVelNorm(config=config)
     else:
         raise ValueError(f"Unknown scoring metric type: {config.metric_type}.")
+
+
+def make_flow_matching_adapter(model: nn.Module, policy_config: PreTrainedConfig) -> BaseFlowMatchingAdapter:
+    if policy_config.type == "flow_matching":
+        from lerobot.policies.flow_matching.flow_matching_adapter import FlowMatchingAdapter
+
+        return FlowMatchingAdapter(config=policy_config, model=model)
+    elif policy_config.type == "smolvla":
+        from lerobot.policies.smolvla.smolvla_adapter import SmolVLAAdapter
+
+        return SmolVLAAdapter(config=policy_config, model=model)
+    else:
+        raise ValueError(f"No flow matching adapter available for policy type '{policy_config.type}'.")
+
+
+def make_flow_matching_adapter_from_policy(policy: PreTrainedPolicy) -> BaseFlowMatchingAdapter:
+    if policy.name == "flow_matching":
+        from lerobot.policies.flow_matching.flow_matching_adapter import FlowMatchingAdapter
+
+        return FlowMatchingAdapter(config=policy.config, model=policy.flow_matching)
+    elif policy.name == "smolvla":
+        from lerobot.policies.smolvla.smolvla_adapter import SmolVLAAdapter
+
+        return SmolVLAAdapter(config=policy.config, model=policy.model)
+    else:
+        raise ValueError(
+            f"Cannot build flow matching adapter for policy type {policy.name}. "
+            "This factory only knows how to extract the underlying flow matching model from "
+            "a FlowMatchingPolicy via policy.flow_matching and SmolVLAPolicy via policy.model."
+        )

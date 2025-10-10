@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -8,31 +8,28 @@ import torch
 from matplotlib.figure import Figure
 from torch import Tensor
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
-from lerobot.common.policies.flow_matching.ode_solver import (
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
+from lerobot.policies.common.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
     ODESolver,
     make_sampling_time_grid,
     select_ode_states,
 )
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
-from lerobot.configs.default import FlowVisConfig
+from lerobot.visualizer.configuration_visualizer import FlowVisConfig
 
-from .visualizer import FlowMatchingVisualizer
 from .utils import add_actions, compute_axis_limits
+from .visualizer import FlowMatchingVisualizer
 
 
 class FlowVisualizer(FlowMatchingVisualizer):
     """
-    Visualizer for plotting flow trajectories through the learned velocity field.
+    Visualizer for plotting flow trajectories using the learned velocity function.
     """
     def __init__(
         self,
-        cfg: FlowVisConfig,
-        flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: FlowMatchingConditionalUnet1d,
+        config: FlowVisConfig,
+        model: BaseFlowMatchingAdapter,
         output_root: Optional[Union[Path, str]],
         save: bool = True,
         create_gif: bool = True,
@@ -40,63 +37,47 @@ class FlowVisualizer(FlowMatchingVisualizer):
     ):
         """
         Args:
-            cfg: Visualizer-specific settings.
+            config: Visualizer-specific settings.
         """
         super().__init__(
-            flow_matching_cfg=flow_matching_cfg,
-            velocity_model=velocity_model,
+            model=model,
             save=save,
             output_root=output_root,
             create_gif=create_gif,
             verbose=verbose,
         )
-        if not isinstance(cfg.action_dims, (list, tuple)) or len(cfg.action_dims) not in (2, 3):
+        self.device = model.device
+        self.dtype = model.dtype
+        if not isinstance(config.action_dims, (list, tuple)) or len(config.action_dims) not in (2, 3):
             raise ValueError(
                 "'action_dims' must be a list or tuple of length 2 or 3, "
-                f"but got {cfg.action_dims}"
+                f"but got {config.action_dims}"
             )
 
-        if cfg.axis_limits is not None and len(cfg.action_dims) != len(cfg.axis_limits):
+        if config.axis_limits is not None and len(config.action_dims) != len(config.axis_limits):
             raise ValueError(
-                f"'axis_limits' length ({len(cfg.axis_limits)}) must match 'action_dims' length "
-                f"({len(cfg.action_dims)})."
+                f"'axis_limits' length ({len(config.axis_limits)}) must match 'action_dims' length "
+                f"({len(config.action_dims)})."
             )
 
-        self.action_dims = cfg.action_dims
-        self.action_dim_names = cfg.action_dim_names
-        self.axis_limits = cfg.axis_limits
+        self.action_dims = config.action_dims
+        self.action_dim_names = config.action_dim_names
+        self.axis_limits = config.axis_limits
         # Visualize all action steps by default
-        if cfg.action_steps is None:
-            self.action_steps = list(range(self.flow_matching_cfg.horizon))
+        if config.action_steps is None:
+            self.action_steps = list(range(self.model.horizon))
         else:
-            self.action_steps = cfg.action_steps
-        self.num_paths = cfg.num_paths
-        self.show = cfg.show
+            self.action_steps = config.action_steps
+        self.num_paths = config.num_paths
+        self.show = config.show
         self.gif_name_base = "flow_animation"
         self.vis_type = "flows"
 
-    def _prepare_global_cond(self, global_cond: Tensor) -> Tensor:
-        """
-        Prepare the global conditioning vector for the velocity model.
-        Ensures it has shape (1, cond_dim).
-        """
-        if global_cond.dim() == 1:  # shape = (cond_dim,)
-            global_cond = global_cond.unsqueeze(0)  # (1, cond_dim)
-        elif global_cond.dim() == 2 and global_cond.size(0) == 1:  # shape = (1, cond_dim)
-            pass
-        else:
-            raise ValueError(
-                f"Expected global_cond to contain exactly one feature vector "
-                f"(shape (cond_dim,) or (1, cond_dim)), but got shape {tuple(global_cond.shape)}"
-            )
-        
-        return global_cond
-
     def _make_sampling_grid(
-        self, 
-        ode_solver: ODESolver,
+        self,
         vel_eval_times: Optional[Tensor],
-        device: torch.device
+        device: torch.device,
+        dtype: torch.dtype,
     ) -> Tuple[Tensor, Tensor]:
         """
         Create the grid containing the times at which the velocities will be evaluated and plotted
@@ -112,12 +93,13 @@ class FlowVisualizer(FlowMatchingVisualizer):
         vel_eval_times = torch.unique(vel_eval_times)
         vel_eval_times, _ = torch.sort(vel_eval_times)
 
-        method = self.flow_matching_cfg.ode_solver_method
+        method = self.model.ode_solver_config["solver_method"]
         if method in FIXED_STEP_SOLVERS:
             sampling_time_grid = make_sampling_time_grid(
-                step_size=self.flow_matching_cfg.ode_step_size,
+                step_size=self.model.ode_solver_config["step_size"],
                 extra_times=vel_eval_times,
                 device=device,
+                dtype=dtype,
             )
         elif method in ADAPTIVE_SOLVERS:
             sampling_time_grid = vel_eval_times
@@ -129,22 +111,17 @@ class FlowVisualizer(FlowMatchingVisualizer):
         return vel_eval_times, sampling_time_grid
 
     def _compute_vector_field(
-        self, velocity_model: FlowMatchingConditionalUnet1d, global_cond: Tensor, paths: Tensor, eval_times: Tensor, 
+        self, velocity_fn: Callable[[Tensor, Tensor], Tensor], paths: Tensor, eval_times: Tensor,
     ) -> Tensor:
         """
         Compute the model's velocity vectors along each trajectory.
         """
         # Compute velocity at each position
         vector_field = torch.empty_like(paths)
-        for p in range(self.num_paths):
-            path = paths[p]
+        for s in range(paths.shape[1]):
             with torch.no_grad():
-                path_velocities = velocity_model(
-                    path,
-                    eval_times,
-                    global_cond.repeat(len(eval_times), 1)
-                )
-            vector_field[p] = path_velocities
+                v_s = velocity_fn(x_t=paths[:, s], t=eval_times[s] )
+            vector_field[:, s] = v_s
 
         return vector_field
 
@@ -225,49 +202,46 @@ class FlowVisualizer(FlowMatchingVisualizer):
             self._create_gif()
 
     def visualize(
-        self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
     ):
         """
         Visualize flow trajectories for specified action steps and dimensions.
 
         Args:
-            global_cond: Single conditioning feature vector for the velocity model.
-                Shape [cond_dim,] or [1, cond_dim].
+            observation: Info about the environment used to create the conditioning for
+                the flow matching model.
             generator: PyTorch random number generator.
         """
         self.run_dir = self._update_run_dir()
 
-        device = get_device_from_parameters(self.velocity_model)
-        dtype = get_dtype_from_parameters(self.velocity_model)
-
-        global_cond = self._prepare_global_cond(global_cond)       
-        
         # Initialize ODE solver
-        ode_solver = ODESolver(self.velocity_model)
-        
-        # Sample noise from prior
-        noise_sample = torch.randn(
-            size=(self.num_paths, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
-            dtype=dtype,
-            device=device,
+        ode_solver = ODESolver()
+
+        # Build the velocity function conditioned on the current observation
+        conditioning = self.model.prepare_conditioning(observation, self.num_paths)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
+
+        # Sample noise vectors from prior
+        noise_sample = self.model.sample_prior(
+            num_samples=self.num_paths,
             generator=generator
         )
-        
+
         # Create time grid for solving the ODE
         vel_eval_times, sampling_time_grid = self._make_sampling_grid(
-            ode_solver=ode_solver,
             vel_eval_times=None,
-            device=device,
+            device=self.device,
+            dtype=self.dtype,
         )
 
         # Sample paths from the ODE
         ode_states = ode_solver.sample(
             x_0=noise_sample,
-            global_cond=global_cond.repeat(self.num_paths, 1),
-            step_size=self.flow_matching_cfg.ode_step_size,
-            method=self.flow_matching_cfg.ode_solver_method,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
+            velocity_fn=velocity_fn,
+            method=self.model.ode_solver_config["solver_method"],
+            step_size=self.model.ode_solver_config["step_size"],
+            atol=self.model.ode_solver_config["atol"],
+            rtol=self.model.ode_solver_config["rtol"],
             time_grid=sampling_time_grid,
             return_intermediate_states=True,
         ) # Shape: (timesteps, num_paths, horizon, action_dim)
@@ -282,21 +256,20 @@ class FlowVisualizer(FlowMatchingVisualizer):
             requested_times=vel_eval_times,
         )
         paths = eval_ode_states.transpose(0, 1) # Shape: (num_paths, timesteps, horizon, action_dim)
-        
+
         # Compute velocity at each position
         vector_field = self._compute_vector_field(
-            velocity_model=self.velocity_model,
-            global_cond=global_cond,
+            velocity_fn=velocity_fn,
             paths=paths,
             eval_times=vel_eval_times,
         )
         vector_field_dict = {
             "Velocities": vector_field
         }
-        
+
         # Select the specific action step and dimensions
         path_positions = paths[..., self.action_dims]
-        
+
         self._render_action_steps(
             path_positions=path_positions,
             vector_fields=vector_field_dict,
@@ -313,46 +286,36 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
     def visualize_velocity_difference(
         self,
-        scorer_velocity_model: FlowMatchingConditionalUnet1d,
-        sampler_global_cond: Tensor,
-        scorer_global_cond: Tensor,
+        sampler_velocity_fn: Callable[[Tensor, Tensor], Tensor],
+        scorer_velocity_fn: Callable[[Tensor, Tensor], Tensor],
         velocity_eval_times: Optional[Tensor] = None,
         generator: Optional[torch.Generator] = None
     ):
         self.run_dir = self._update_run_dir()
 
-        device = get_device_from_parameters(self.velocity_model)
-        dtype = get_dtype_from_parameters(self.velocity_model)
-
-        sampler_global_cond = self._prepare_global_cond(sampler_global_cond)
-        scorer_global_cond = self._prepare_global_cond(scorer_global_cond)
-
         # Initialize ODE solver
-        sampler_ode_solver = ODESolver(self.velocity_model)
-        scorer_ode_solver = ODESolver(scorer_velocity_model)
+        sampler_ode_solver = ODESolver()
+        scorer_ode_solver = ODESolver()
 
         # Sample noise from prior
-        noise_sample = torch.randn(
-            size=(self.num_paths, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
-            dtype=dtype,
-            device=device,
+        noise_sample = self.model.sample_prior(
+            num_samples=self.num_paths,
             generator=generator
         )
-        
+
         # Create time grid for solving the ODE
         velocity_eval_times, sampling_time_grid = self._make_sampling_grid(
-            ode_solver=sampler_ode_solver,
             vel_eval_times=velocity_eval_times,
-            device=device,
+            device=self.device,
         )
 
         # Sample paths from the ODE
         sampler_ode_states = sampler_ode_solver.sample(
             x_0=noise_sample,
-            global_cond=sampler_global_cond.repeat(self.num_paths, 1),
-            method=self.flow_matching_cfg.ode_solver_method,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
+            velocity_fn=sampler_velocity_fn,
+            method=self.model.ode_solver_config["solver_method"],
+            atol=self.model.ode_solver_config["atol"],
+            rtol=self.model.ode_solver_config["rtol"],
             time_grid=sampling_time_grid,
             return_intermediate_states=True,
         ) # Shape: (timesteps, num_paths, horizon, action_dim)
@@ -367,27 +330,25 @@ class FlowVisualizer(FlowMatchingVisualizer):
             requested_times=velocity_eval_times,
         )
         paths = eval_ode_states.transpose(0, 1) # Shape: (num_paths, timesteps, horizon, action_dim)
-        
+
         # Sample actions from the scorer model
         scorer_actions = scorer_ode_solver.sample(
             x_0=noise_sample,
-            global_cond=scorer_global_cond.repeat(self.num_paths, 1),
-            method=self.flow_matching_cfg.ode_solver_method,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
-            step_size=self.flow_matching_cfg.ode_step_size,
+            velocity_fn=scorer_velocity_fn,
+            method=self.model.ode_solver_config["solver_method"],
+            step_size=self.model.ode_solver_config["step_size"],
+            atol=self.model.ode_solver_config["atol"],
+            rtol=self.model.ode_solver_config["rtol"],
         )
 
         # Compute velocity at each position for sampler and scorer
         sampler_vector_field = self._compute_vector_field(
-            velocity_model=self.velocity_model,
-            global_cond=sampler_global_cond,
+            velocity_fn=sampler_velocity_fn,
             paths=paths,
             eval_times=velocity_eval_times,
         )
         scorer_vector_field = self._compute_vector_field(
-            velocity_model=scorer_velocity_model,
-            global_cond=scorer_global_cond,
+            velocity_fn=scorer_velocity_fn,
             paths=paths,
             eval_times=velocity_eval_times,
         )
@@ -395,7 +356,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             "Sampler Velocities": sampler_vector_field,
             "Scorer Velocities": scorer_vector_field
         }
-        
+
         # Select the specific action step and dimensions
         path_positions = paths[..., self.action_dims]
 
@@ -505,7 +466,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
 
         # Title
         ax.set_title(
-            f"Flows of Action Step {action_step+1} (Horizon: {self.flow_matching_cfg.horizon})",
+            f"Flows of Action Step {action_step+1} (Horizon: {self.model.horizon})",
             fontsize=16
         )
         # Presentation
@@ -523,7 +484,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             plt.ion()
 
         return fig
-    
+
     def get_figure_filename(self, **kwargs) -> str:
         """Get the figure filename for the current action step."""
         if "action_step" not in kwargs:

@@ -3,9 +3,9 @@ from typing import Callable, Optional, Tuple
 import torch
 from torch import Tensor
 
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.factory import make_uncertainty_scoring_metric
 
-from ..uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 from .configuration_uncertainty_sampler import (
     ComposedSequenceSamplerConfig,
 )
@@ -25,7 +25,7 @@ class ComposedSequenceSampler(UncertaintySampler):
     def __init__(
         self,
         config: ComposedSequenceSamplerConfig,
-        model: UncertaintyModelAdapter,
+        model: BaseFlowMatchingAdapter,
     ):
         """
         Initializes the composed sequence sampler.

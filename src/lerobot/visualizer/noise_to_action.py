@@ -8,29 +8,26 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from torch import Tensor
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
-from lerobot.common.policies.flow_matching.ode_solver import (
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
+from lerobot.policies.common.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
     ODESolver,
     make_sampling_time_grid,
     select_ode_states,
 )
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
-from lerobot.configs.default import NoiseToActionVisConfig
 
-from .visualizer import FlowMatchingVisualizer
+from .configuration_visualizer import NoiseToActionVisConfig
 from .utils import add_actions, compute_axis_limits
+from .visualizer import FlowMatchingVisualizer
 
 
 class NoiseToActionVisualizer(FlowMatchingVisualizer):
-    """Visualizer that the transformation of an initial noise into an action sequence."""
+    """Visualizer for the transformation of an initial noise into an action sequence."""
     def __init__(
         self,
-        cfg: NoiseToActionVisConfig,
-        flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: FlowMatchingConditionalUnet1d,
+        config: NoiseToActionVisConfig,
+        model: BaseFlowMatchingAdapter,
         output_root: Optional[Union[Path, str]],
         save: bool = True,
         create_gif: bool = True,
@@ -38,43 +35,44 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
     ):
         """
         Args:
-            cfg: Visualizer-specific settings.
+            config: Visualizer-specific settings.
         """
         super().__init__(
-            flow_matching_cfg=flow_matching_cfg,
-            velocity_model=velocity_model,
+            model=model,
             save=save,
             output_root=output_root,
             create_gif=create_gif,
             verbose=verbose,
         )
-        self.device = get_device_from_parameters(self.velocity_model)
-        self.dtype = get_dtype_from_parameters(self.velocity_model)
-        if len(cfg.action_dims) != 2:
+        self.device = model.device
+        self.dtype = model.dtype
+        if len(config.action_dims) != 2:
             raise ValueError(
                 "The noise-to-action visualization supports 2D only, "
-                f"(got action_dims = {cfg.action_dims}."
+                f"(got action_dims = {config.action_dims}."
             )
-        self.horizon = flow_matching_cfg.horizon
-        self.action_dims = cfg.action_dims
-        self.axis_limits = cfg.axis_limits
-        self.action_dim_names = cfg.action_dim_names
-        self.num_samples = cfg.num_samples
-        self.show = cfg.show
+
+        self.horizon = self.model.horizon
+        self.action_dims = config.action_dims
+        self.axis_limits = config.axis_limits
+        self.action_dim_names = config.action_dim_names
+        self.num_samples = config.num_samples
+        self.show = config.show
         self.gif_name_base = "noise_to_action_animation"
         self.vis_type = "noise_to_action"
 
         # Initialize ODE solver
-        self.ode_solver = ODESolver(self.velocity_model)
+        self.ode_solver = ODESolver()
 
         # Create time grid for solving the ODE including the times where the noisy actions get visualized
-        self.ode_eval_times = torch.as_tensor(cfg.ode_eval_times, device=self.device, dtype=self.dtype)
-        ode_solver_method = self.flow_matching_cfg.ode_solver_method
+        self.ode_eval_times = torch.as_tensor(config.ode_eval_times, device=self.device, dtype=self.dtype)
+        ode_solver_method = self.model.ode_solver_config["solver_method"]
         if ode_solver_method in FIXED_STEP_SOLVERS:
             self.sampling_time_grid = make_sampling_time_grid(
-                step_size=self.flow_matching_cfg.ode_step_size,
+                step_size=self.model.ode_solver_config["step_size"],
                 extra_times=self.ode_eval_times,
                 device=self.device,
+                dtype=self.dtype,
             )
         elif ode_solver_method in ADAPTIVE_SOLVERS:
             self.sampling_time_grid = self.ode_eval_times
@@ -186,41 +184,42 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
             plt.close(fig)
 
     def visualize(
-        self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
     ):
         """
         Visualize noise to action transformation for the specified action dimensions.
 
         Args:
-            global_cond: Single conditioning feature vector for the velocity model.
-                Shape [cond_dim,] or [1, cond_dim].
+            observation: Info about the environment used to create the conditioning for
+                the flow matching model.
             generator: PyTorch random number generator.
         """
         was_interactive = plt.isinteractive()
         plt.ioff()
 
         self.run_dir = self._update_run_dir()
-        
-        # Sample noise from prior
-        action_dim = self.flow_matching_cfg.action_feature.shape[0]
-        noise_sample = torch.randn(
-            size=(self.num_samples, self.flow_matching_cfg.horizon, action_dim),
-            dtype=self.dtype,
-            device=self.device,
+
+        # Build the velocity function conditioned on the current observation
+        conditioning = self.model.prepare_conditioning(observation, self.num_samples)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
+
+        # Sample noise vectors from prior
+        noise_sample = self.model.sample_prior(
+            num_samples=self.num_samples,
             generator=generator
         )
-        
+
         # Sample paths from the ODE
         ode_states = self.ode_solver.sample(
             x_0=noise_sample,
-            global_cond=global_cond.repeat(self.num_samples, 1),
-            step_size=self.flow_matching_cfg.ode_step_size,
-            method=self.flow_matching_cfg.ode_solver_method,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
+            velocity_fn=velocity_fn,
+            method=self.model.ode_solver_config["solver_method"],
+            step_size=self.model.ode_solver_config["step_size"],
+            atol=self.model.ode_solver_config["atol"],
+            rtol=self.model.ode_solver_config["rtol"],
             time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
-        ) # Shape: (timesteps, num_paths, horizon, action_dim)
+        ) # Shape: (timesteps, num_samples, horizon, action_dim)
 
         # Extract the noisy action to visualize
         ode_eval_states, self.ode_eval_times = select_ode_states(
@@ -229,11 +228,10 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
             requested_times=self.ode_eval_times,
         )
         ode_eval_states = ode_eval_states.transpose(0, 1) # Shape: (num_samples, timesteps, horizon, action_dim)
-        
-        horizon = ode_eval_states.shape[2]
+
         # step_labels = ("t", *[f"t+{k}" for k in range(1, horizon)])
         cmap = cm.get_cmap('plasma')
-        colors = cmap(torch.arange(horizon) / (horizon - 1))
+        colors = cmap(torch.arange(self.horizon) / (self.horizon - 1))
         noisy_action_overlay = [
             {
                 "label": "Noisy Actions",
@@ -243,7 +241,7 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
         ]
         cbar_kwargs = {
             "cmap": cmap,
-            "horizon": horizon,
+            "horizon": self.horizon,
         }
         self.plot_noise_to_action_overlays(
             action_overlays=noisy_action_overlay,

@@ -68,7 +68,7 @@ class SmolVLAConfig(PreTrainedConfig):
 
     # Finetuning settings
     freeze_vision_encoder: bool = False
-    freeze_text_model: bool = True
+    freeze_text_model: bool = False
     train_state_proj: bool = True
 
     # Training presets

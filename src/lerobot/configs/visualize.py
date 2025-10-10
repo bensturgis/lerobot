@@ -3,16 +3,16 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs
+from lerobot import envs
 from lerobot.configs import parser
-from lerobot.configs.default import (
+from lerobot.configs.default import VisConfig
+from lerobot.configs.policies import PreTrainedConfig
+from lerobot.visualizer.configuration_visualizer import (
     ActionSeqVisConfig,
     FlowVisConfig,
     NoiseToActionVisConfig,
     VectorFieldVisConfig,
-    VisConfig,
 )
-from lerobot.configs.policies import PreTrainedConfig
 
 
 @dataclass
@@ -29,7 +29,7 @@ class VisualizePipelineConfig:
     vis_types: list[str] = field(
         default_factory=lambda: ["action_seq", "flows", "vector_field"]
     )
-    
+
     seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None
@@ -37,7 +37,7 @@ class VisualizePipelineConfig:
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
 
-    # Optional custom start state for PushT-v0: 
+    # Optional custom start state for PushT-v0:
     # [agent_x, agent_y, block_x, block_y, block_theta]
     start_state: list[float] | None = None
 
@@ -89,7 +89,7 @@ class VisualizePipelineConfig:
                     f"Unknown visualization type '{v}'. "
                     f"Allowed: {sorted(allowed_vis)}"
                 )
-            
+
         active_action_dims = {
             vis_type: tuple(getattr(self, vis_type).action_dims)
             for vis_type in ("flows", "vector_field", "noise_to_action")

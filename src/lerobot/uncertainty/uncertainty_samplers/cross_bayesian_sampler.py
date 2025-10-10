@@ -3,9 +3,9 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.factory import make_uncertainty_scoring_metric
 
-from ..uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 from ..uncertainty_scoring.laplace_utils.posterior_builder import sample_adapter_from_posterior
 from ..uncertainty_scoring.scorer_artifacts import ScorerArtifacts
 from .configuration_uncertainty_sampler import (
@@ -24,7 +24,7 @@ class CrossBayesianSampler(UncertaintySampler):
     def __init__(
         self,
         config: CrossBayesianSamplerConfig,
-        sampler_model: UncertaintyModelAdapter,
+        sampler_model: BaseFlowMatchingAdapter,
         scorer_artifacts: ScorerArtifacts,
     ):
         """

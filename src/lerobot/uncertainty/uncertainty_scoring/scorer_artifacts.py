@@ -8,12 +8,12 @@ from laplace import Laplace
 from lerobot import envs
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
     FiperDataRecorderConfig,
 )
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.processor import PolicyProcessorPipeline
-from lerobot.uncertainty.uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 
 from ..uncertainty_samplers.configuration_uncertainty_sampler import UncertaintySamplerConfig
 from .ensemble_utils.factory import build_ensemble_model
@@ -29,7 +29,7 @@ class ScorerArtifacts:
         ensemble_adapter: Model adapter used when scorer_type='ensemble'.
         laplace_posterior: Laplace posterior used when scorer_type='laplace'.
     """
-    ensemble_adapter: Optional[UncertaintyModelAdapter] = None
+    ensemble_adapter: Optional[BaseFlowMatchingAdapter] = None
     laplace_posterior: Optional[Laplace] = None
 
 def build_scorer_artifacts_for_uncertainty_sampler(
