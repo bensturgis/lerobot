@@ -1,0 +1,39 @@
+env:
+  type: libero
+  task: libero_10
+  task_ids: [0]
+
+policy:
+  type: flow_matching
+  device: cuda
+
+vis:
+  num_rollouts: 1
+  action_dim_names: [
+    "ee_pos_x", "ee_pos_y", "ee_pos_z", "ee_rot_x",
+    "ee_rot_y", "ee_rot_z", "gripper_open"
+  ]
+
+vector_field:
+  action_dims: [0, 1]
+  action_steps: [15]
+  grid_size: 20
+  min_action: -2
+  max_action: 2
+
+flows:
+  num_paths: 5
+  action_dims: [0, 1]
+  axis_limits: [[-1.5, 1.5], [-1.5, 1.5]]
+
+cross_bayesian_sampler:
+  ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_02/checkpoints/015000/pretrained_model
+  num_action_samples: 25
+  scoring_metric:
+    metric_type: mode_distance
+    velocity_eval_times: [0.0, 0.1, 0.2]
+
+show: False
+seed: 58
+
+# python src/lerobot/scripts/uncertainty/visualize_cross_bayesian_sampler.py --config=configs/flow_matching/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned/checkpoints/015000/pretrained_model

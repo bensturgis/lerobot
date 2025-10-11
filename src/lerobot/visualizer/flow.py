@@ -46,8 +46,6 @@ class FlowVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        self.device = model.device
-        self.dtype = model.dtype
         if not isinstance(config.action_dims, (list, tuple)) or len(config.action_dims) not in (2, 3):
             raise ValueError(
                 "'action_dims' must be a list or tuple of length 2 or 3, "
@@ -212,6 +210,9 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 the flow matching model.
             generator: PyTorch random number generator.
         """
+        device = self.model.device
+        dtype = self.model.dtype
+
         self.run_dir = self._update_run_dir()
 
         # Initialize ODE solver
@@ -230,8 +231,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Create time grid for solving the ODE
         vel_eval_times, sampling_time_grid = self._make_sampling_grid(
             vel_eval_times=None,
-            device=self.device,
-            dtype=self.dtype,
+            device=device,
+            dtype=dtype,
         )
 
         # Sample paths from the ODE
@@ -291,6 +292,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
         velocity_eval_times: Optional[Tensor] = None,
         generator: Optional[torch.Generator] = None
     ):
+        device = self.model.device
+
         self.run_dir = self._update_run_dir()
 
         # Initialize ODE solver
@@ -306,7 +309,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Create time grid for solving the ODE
         velocity_eval_times, sampling_time_grid = self._make_sampling_grid(
             vel_eval_times=velocity_eval_times,
-            device=self.device,
+            device=device,
         )
 
         # Sample paths from the ODE

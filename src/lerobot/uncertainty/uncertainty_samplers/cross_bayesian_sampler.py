@@ -61,6 +61,7 @@ class CrossBayesianSampler(UncertaintySampler):
             raise ValueError("laplace_posterior is required for scorer_type='laplace'.")
         elif config.scorer_type not in {"ensemble", "laplace"}:
             raise ValueError(f"Unknown scorer_type: {config.scorer_type!r}")
+        self.scorer_model = None
 
         # Sampler-specific settings
         self.config = config
@@ -108,17 +109,17 @@ class CrossBayesianSampler(UncertaintySampler):
 
         if self.config.scorer_type == "laplace":
             # Draw flow matching model from the Laplace posterior
-            scorer_model = sample_adapter_from_posterior(
+            self.scorer_model = sample_adapter_from_posterior(
                 laplace_posterior=self.laplace_posterior,
                 uncertainty_adapter=self.model,
                 generator=generator
             )
         else:
-            scorer_model = self.ensemble_adapter
+            self.scorer_model = self.ensemble_adapter
 
         # Build the conditioned velocity function of the scorer
-        scorer_conditioning = scorer_model.prepare_conditioning(observation, self.num_action_samples)
-        scorer_velocity_fn = scorer_model.make_velocity_fn(conditioning=scorer_conditioning)
+        scorer_conditioning = self.scorer_model.prepare_conditioning(observation, self.num_action_samples)
+        scorer_velocity_fn = self.scorer_model.make_velocity_fn(conditioning=scorer_conditioning)
 
         # Compute uncertainty based on selected metric
         if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
@@ -137,12 +138,13 @@ class CrossBayesianSampler(UncertaintySampler):
             raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
 
         # Average uncertainty scores and store for logging
-        self.latest_uncertainty = uncertainty_scores.mean().item()
+        self.uncertainty = uncertainty_scores.mean().item()
 
         # Pick one action sequence at random
-        actions, _ = self.rand_pick_action(action_candidates=ode_states[-1])
+        self.action_candidates = ode_states[-1]
+        actions, _ = self.rand_pick_action(action_candidates=self.action_candidates)
 
-        return actions.to(device="cpu", dtype=torch.float32), self.latest_uncertainty
+        return actions.to(device="cpu", dtype=torch.float32), self.uncertainty
 
     def reset(self):
         """

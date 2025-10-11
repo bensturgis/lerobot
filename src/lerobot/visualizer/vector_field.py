@@ -38,8 +38,6 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        self.device = model.device
-        self.dtype = model.dtype
         if len(config.action_dims) not in (2, 3):
             raise ValueError(
                 "The vector-field visualisation supports 2D and 3D only, "
@@ -48,10 +46,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
 
         self.action_dims = config.action_dims
         self.action_dim_names = config.action_dim_names
-        if config.action_steps is None:
-            self.action_steps = list(range(self.model.horizon))
-        else:
-            self.action_steps = config.action_steps
+        self.action_steps = config.action_steps
         self.min_action = config.min_action
         self.max_action = config.max_action
         self.grid_size = config.grid_size
@@ -72,6 +67,9 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                 the flow matching model.
             generator: PyTorch random number generator.
         """
+        device = self.model.device
+        dtype = self.model.dtype
+
         self.run_dir = self._update_run_dir()
 
         # Initialize ODE solver
@@ -126,19 +124,21 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_grid, y_grid, z_grid = np.meshgrid(axis_lin, axis_lin, axis_lin, indexing="xy")
             x_dim, y_dim, z_dim = self.action_dims
 
+        if self.action_steps is None:
+            self.action_steps = list(range(self.model.horizon))
         action_steps_idx = torch.randint(
             low=0,
             high=len(self.action_steps),
             size=(1,),
             generator=generator,
-            device=self.device,
+            device=device,
         ).item()
         action_step = self.action_steps[action_steps_idx]
         positions = action_data["Base Action"].repeat(x_grid.size, 1, 1)
-        positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=self.dtype, device=self.device)
-        positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=self.dtype, device=self.device)
+        positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
+        positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)
         if len(self.action_dims) == 3:
-            positions[:, action_step, z_dim] = torch.tensor(z_grid.ravel(), dtype=self.dtype, device=self.device)
+            positions[:, action_step, z_dim] = torch.tensor(z_grid.ravel(), dtype=dtype, device=device)
 
         # Build a condition vector tensor whose batch size is the number of grid points
         num_grid_points = positions.shape[0]
@@ -150,7 +150,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         # Compute the max velocity norm over the timesteps for coloring
         max_velocity_norm = float('-inf')
         for time in reversed(self.time_grid):
-            time = torch.tensor(time, device=self.device, dtype=self.dtype)
+            time = torch.tensor(time, device=device, dtype=dtype)
             with torch.no_grad():
                 velocities = velocity_fn(x_t=positions, t=time)
             norms = torch.norm(velocities[:, action_step, self.action_dims], dim=1)
@@ -161,7 +161,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
 
         for time in self.time_grid:
             # Compute velocity at grid points and current time as given by flow matching velocity model
-            time = torch.tensor(time, device=self.device, dtype=self.dtype)
+            time = torch.tensor(time, device=device, dtype=dtype)
             with torch.no_grad():
                 velocities = velocity_fn(x_t=positions, t=time)
 
@@ -175,7 +175,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm,
-                    mean_uncertainty=kwargs.get("mean_uncertainty")
+                    uncertainty=kwargs.get("uncertainty")
                 )
             else:
                 fig = self._create_vector_field_plot_3d(
@@ -189,7 +189,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm,
-                    mean_uncertainty=kwargs.get("mean_uncertainty")
+                    uncertainty=kwargs.get("uncertainty")
                 )
 
             if visualize_actions:
@@ -226,7 +226,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
-        mean_uncertainty: Optional[float] = None,
+        uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
         Draw a 3D quiver plot for the vector field of a three action dimensions in a single
@@ -281,10 +281,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         ax.set_ylabel(y_label, fontsize=14, labelpad=8)
         ax.set_zlabel(z_label, fontsize=14, labelpad=8)
 
-        if mean_uncertainty:
+        if uncertainty:
             ax.text2D(
                 0.02, 0.98,
-                f"Mean Uncertainty: {mean_uncertainty:.2f}",
+                f"Mean Uncertainty: {uncertainty:.2f}",
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",
@@ -315,7 +315,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
-        mean_uncertainty: Optional[float] = None,
+        uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
         Draw a 2D quiver plot for the vector field of a two action dimensions in a single
@@ -373,10 +373,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         ax.set_xlabel(x_label, fontsize=14)
         ax.set_ylabel(y_label, fontsize=14)
 
-        if mean_uncertainty:
+        if uncertainty:
             ax.text(
                 0.02, 0.98,
-                f"Mean uncertainty: {mean_uncertainty:.2f}",
+                f"Mean uncertainty: {uncertainty:.2f}",
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",

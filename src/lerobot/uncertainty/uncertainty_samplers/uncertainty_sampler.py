@@ -44,8 +44,9 @@ class UncertaintySampler(ABC):
         self.dtype = model.dtype
         self.cond_vf_config = model.cond_vf_config
 
-        # Store latest sampled action sequences and the uncertainty score for logging
-        self.latest_uncertainty: Optional[float] = None
+        # Store latest sampled action sequences and the uncertainty score for logging and visualization
+        self.action_candidates: Optional[Tensor] = None
+        self.uncertainty: Optional[float] = None
 
         # Build time grid for sampling according to ODE solver method and scoring metric
         self.ode_solver_config = model.ode_solver_config

@@ -46,8 +46,6 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             create_gif=create_gif,
             verbose=verbose,
         )
-        self.device = model.device
-        self.dtype = model.dtype
         self.num_action_seq = config.num_action_seq
         self.postprocessor = postprocessor
         self.show = config.show
@@ -105,16 +103,20 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         actions = self.postprocessor(actions)
 
         # Plotting of action sequences depends on environment
-        if type(env).__name__ == "AlohaEnv":
+        if env.spec is None:
+            env_namespace = env._namespace
+        else:
+            env_namespace = env.spec.namespace
+        if env_namespace == "gym_aloha":
             fig = self._create_aloha_action_seq_image(env=env, actions=actions.cpu())
-        elif type(env).__name__ == "PushtEnv":
+        elif env_namespace == "gym_pusht":
             frame = env.render()
             fig = self._create_pusht_action_seq_image(frame=frame, actions=actions.cpu())
-        elif type(env).__name__ == "LiberoEnv":
+        elif env_namespace == "gym_libero":
             fig = self._create_libero_action_seq_image(env=env, actions=actions.cpu())
         else:
             raise ValueError(
-                f"ActionSeqVisualizer does not support environment with namespace '{env.spec.namespace}'."
+                f"ActionSeqVisualizer does not support environment with namespace '{env_namespace}'."
             )
 
         if self.show:

@@ -159,12 +159,13 @@ class EntropySampler(UncertaintySampler):
         total_entropy = entropy_gaussian + entropy_path
 
         # Store sampled action sequences and uncerainty for logging
-        self.latest_uncertainty = total_entropy
+        self.uncertainty = total_entropy
 
         # Pick one action sequence at random
-        actions, _ = self.rand_pick_action(action_candidates=ode_states[-1])
+        self.action_candidates = ode_states[-1]
+        actions, _ = self.rand_pick_action(action_candidates=self.action_candidates)
 
-        return actions.to(device="cpu", dtype=torch.float32), self.latest_uncertainty
+        return actions.to(device="cpu", dtype=torch.float32), self.uncertainty
 
     def reset(self):
         """

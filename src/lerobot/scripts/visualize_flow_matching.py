@@ -37,7 +37,7 @@ from lerobot.policies.factory import (
     make_pre_post_processors,
 )
 from lerobot.policies.pretrained import PreTrainedPolicy
-from lerobot.utils.io_utils import write_video
+from lerobot.utils.io_utils import get_task_dir, write_video
 from lerobot.utils.live_window import LiveWindow
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import get_safe_torch_device, init_logging
@@ -48,32 +48,6 @@ from lerobot.visualizer import (
     NoiseToActionVisualizer,
     VectorFieldVisualizer,
 )
-
-
-def get_task_group_dir(
-    out_root: Path,
-    task_group: str,
-):
-    """
-    Return the output directory for a given task group.
-    """
-    if "libero" in task_group:
-        return out_root / task_group
-    return out_root
-
-
-def get_task_dir(
-    out_root: Path,
-    task_group: str,
-    task_id: int,
-) -> Path:
-    """
-    Return the output directory for a given task.
-    """
-    task_group_dir = get_task_group_dir(out_root, task_group)
-    if "libero" in task_group:
-        return task_group_dir / f"task{task_id:02d}"
-    return task_group_dir
 
 
 @parser.wrap()
@@ -97,6 +71,7 @@ def main(config: VisualizePipelineConfig):
     logging.info("Creating environment")
     envs = make_single_env(config.env)
 
+    logging.info("Creating policy")
     policy: PreTrainedPolicy = make_policy(
         config.policy,
         env_cfg=config.env,
@@ -164,7 +139,7 @@ def main(config: VisualizePipelineConfig):
             )
             ep_dir = task_dir / f"rollout_{episode:03d}"
 
-            # Prepare visualisers
+            # Prepare visualizers
             visualizers: list[FlowMatchingVisualizer] = []
             if "action_seq" in config.vis_types:
                 visualizers.append(
@@ -247,8 +222,6 @@ def main(config: VisualizePipelineConfig):
                     break
 
             logging.info(f"Finished in {time.time() - start_time:.1f}s")
-
-            env.close()
 
             # Close the live visualization
             if config.show:

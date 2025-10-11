@@ -71,7 +71,7 @@ class VisualizePipelineConfig:
         if not self.output_dir:
             now = dt.datetime.now()
             vis_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
-            self.output_dir = Path("outputs/visualizations") / vis_dir
+            self.output_dir = Path("outputs/flow_matching_visualizations") / vis_dir
 
         self.validate()
 
