@@ -28,6 +28,7 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.visualize import VisualizePipelineConfig
+from lerobot.constants import ACTION
 from lerobot.envs.factory import make_single_env
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import (
@@ -169,9 +170,8 @@ def main(config: VisualizePipelineConfig):
                 visualizers.append(
                     ActionSeqVisualizer(
                         config=config.action_seq,
-                        flow_matching_config=policy.config,
-                        velocity_model=policy.flow_matching.unet,
-                        unnormalize_outputs=policy.unnormalize_outputs,
+                        model=flow_matching_adapter,
+                        postprocessor=postprocessor,
                         output_root=ep_dir,
                     )
                 )
@@ -224,13 +224,17 @@ def main(config: VisualizePipelineConfig):
                 observation = preprocessor(observation)
 
                 # Decide whether a new sequence will be generated
-                new_action_gen = len(policy._queues["action"]) == 0
+                new_action_gen = len(policy._queues[ACTION]) == 0
 
                 with torch.no_grad():
                     action = policy.select_action(observation)
                 action = postprocessor(action)
 
                 if new_action_gen and (config.vis.start_step is None or step_idx >= config.vis.start_step):
+                    for k in policy._queues:
+                        if k != ACTION:
+                            observation[k] = torch.stack(list(policy._queues[k]), dim=1)
+
                     for visualizer in visualizers:
                         visualizer.visualize(observation=observation, env=env, generator=generator)
 

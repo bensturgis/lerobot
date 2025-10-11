@@ -1,5 +1,5 @@
 # Choose from "action_seq", "noise_to_action", "flows" and "vector_field"
-vis_types: [noise_to_action]
+vis_types: [action_seq]
 show: False
 seed: 40
 
