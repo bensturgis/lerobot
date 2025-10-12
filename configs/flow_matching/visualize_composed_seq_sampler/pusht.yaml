@@ -19,10 +19,10 @@ noise_to_action:
 
 composed_sequence_sampler:
     scoring_metric:
-      metric_type: inter_vel_diff
+      metric_type: mode_distance
     num_action_samples: 20
 
 show: False
 seed: 6
 
-# python lerobot/scripts/flow_matching/visualize_composed_seq_uncertainty_estimation.py --config=configs/flow_matching/visualize_composed_seq/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
+# python src/lerobot/scripts/uncertainty/visualize_composed_seq_sampler.py --config=configs/flow_matching/visualize_composed_seq_sampler/pusht.yaml --policy.path=outputs/train/flow_matching/pusht/checkpoints/last/pretrained_model_migrated

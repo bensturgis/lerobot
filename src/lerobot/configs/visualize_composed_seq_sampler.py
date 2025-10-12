@@ -3,25 +3,26 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs
-from lerobot.common.policies.flow_matching.uncertainty.configuration_uncertainty_sampler import (
+from lerobot import envs
+from lerobot.configs import parser
+from lerobot.configs.default import DatasetConfig, VisConfig
+from lerobot.configs.policies import PreTrainedConfig
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
     ComposedSequenceSamplerConfig,
 )
-from lerobot.configs import parser
-from lerobot.configs.default import (
+from lerobot.visualizer.configuration_visualizer import (
     ActionSeqVisConfig,
     NoiseToActionVisConfig,
     VectorFieldVisConfig,
-    VisConfig,
 )
-from lerobot.configs.policies import PreTrainedConfig
 
 
 @dataclass
-class VisualizeComposedSeqPipelineConfig:
+class VisualizeComposedSeqSamplerPipelineConfig:
     env: envs.EnvConfig
     policy: PreTrainedConfig | None = None
     composed_sequence_sampler: ComposedSequenceSamplerConfig = field(default_factory=ComposedSequenceSamplerConfig)
+    dataset: DatasetConfig | None = None
     vis: VisConfig = field(default_factory=VisConfig)
     action_seq: ActionSeqVisConfig = field(default_factory=ActionSeqVisConfig)
     vector_field: VectorFieldVisConfig = field(default_factory=VectorFieldVisConfig)
@@ -30,7 +31,7 @@ class VisualizeComposedSeqPipelineConfig:
     seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None
-    
+
     # `show` enables live visualization of the first environment during evaluation
     show: bool = False
 
@@ -70,7 +71,7 @@ class VisualizeComposedSeqPipelineConfig:
         if not self.output_dir:
             now = dt.datetime.now()
             vis_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
-            self.output_dir = Path("outputs/composed_seq_visualizations") / vis_dir
+            self.output_dir = Path("outputs/composed_seq_sampler_visualizations") / vis_dir
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

@@ -46,7 +46,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
 
         self.action_dims = config.action_dims
         self.action_dim_names = config.action_dim_names
-        self.action_steps = config.action_steps
+        self.action_steps = config.action_steps or []
         self.min_action = config.min_action
         self.max_action = config.max_action
         self.grid_size = config.grid_size
@@ -284,7 +284,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         if uncertainty:
             ax.text2D(
                 0.02, 0.98,
-                f"Mean Uncertainty: {uncertainty:.2f}",
+                f"Uncertainty: {uncertainty:.2f}",
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",
@@ -376,7 +376,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         if uncertainty:
             ax.text(
                 0.02, 0.98,
-                f"Mean uncertainty: {uncertainty:.2f}",
+                f"Uncertainty: {uncertainty:.2f}",
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",

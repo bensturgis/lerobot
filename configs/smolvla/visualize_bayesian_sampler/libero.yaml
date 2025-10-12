@@ -4,7 +4,7 @@ env:
   task_ids: [0]
 
 policy:
-  type: flow_matching
+  type: smolvla
   device: cuda
 
 vis:

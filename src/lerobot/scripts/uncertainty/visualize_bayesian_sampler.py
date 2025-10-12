@@ -26,7 +26,7 @@ from torch import Tensor
 from tqdm import tqdm, trange
 
 from lerobot.configs import parser
-from lerobot.configs.visualize_ensemble import VisualizeBayesianSamplerPipelineConfig
+from lerobot.configs.visualize_bayesian_sampler import VisualizeBayesianSamplerPipelineConfig
 from lerobot.constants import ACTION
 from lerobot.envs.factory import make_single_env
 from lerobot.envs.utils import add_envs_task, preprocess_observation
@@ -36,6 +36,9 @@ from lerobot.policies.factory import (
     make_flow_matching_adapter_from_policy,
     make_policy,
     make_pre_post_processors,
+)
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
+    UncertaintySamplerConfig,
 )
 from lerobot.uncertainty.uncertainty_samplers.uncertainty_sampler import UncertaintySampler
 from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import (
@@ -63,6 +66,11 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
     else:
         rollout_seeds = None
 
+    # Plug in the cross-bayesian sampler config into the uncertainty sampler config
+    uncertainty_sampler_config = UncertaintySamplerConfig()
+    uncertainty_sampler_config.type = "cross_bayesian"
+    uncertainty_sampler_config.cross_bayesian_sampler = config.cross_bayesian_sampler
+
     allowed_policies = {"flow_matching", "smolvla"}
     if config.policy.type not in allowed_policies:
         raise ValueError(
@@ -80,6 +88,8 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
     ).to(device)
     policy.eval()
 
+    sampler_model = make_flow_matching_adapter_from_policy(policy=policy)
+
     # Build preprocessing/postprocessing pipelines for observations/actions
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=config.policy,
@@ -90,7 +100,7 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
 
     # Prepare scorer artifacts for cross-bayesian uncertainty sampler
     scorer_artifacts = build_scorer_artifacts_for_uncertainty_sampler(
-        uncertainty_sampler_cfg=config.uncertainty_sampler,
+        uncertainty_sampler_cfg=uncertainty_sampler_config,
         policy_cfg=config.policy,
         env_cfg=config.env,
         dataset_cfg=config.dataset,
@@ -100,19 +110,17 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
 
     # Initialize and extract the cross-bayesian sampler
     policy.init_uncertainty_sampler(
-        config=config.uncertainty_sampler,
+        config=uncertainty_sampler_config,
         scorer_artifacts=scorer_artifacts
     )
     cross_bayesian_sampler: UncertaintySampler = policy.uncertainty_sampler
 
-    sampler_model = make_flow_matching_adapter_from_policy(policy=policy)
-
     num_rollouts = config.vis.num_rollouts
-    progbar = trange(
+    episode_progbar = trange(
         num_rollouts,
         desc=f"Visualizing for {num_rollouts} episodes."
     )
-    for ep in progbar:
+    for ep in episode_progbar:
         # Flatten envs into list of (task_group, task_id, env)
         tasks = [(tg, tid, env) for tg, group in envs.items() for tid, env in group.items()]
         for task_group, task_id, env in tasks:
@@ -197,11 +205,11 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
             start_time = time.time()
 
             action_generation_iter = 0
-            progbar = trange(
+            step_progbar = trange(
                 max_vis_steps,
                 desc=f"[Episode {ep+1}/{num_rollouts}]: Running rollout with at most {max_vis_steps} steps"
             )
-            for step_idx in progbar:
+            for step_idx in step_progbar:
                 # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
                 observation = preprocess_observation(observation)
 
@@ -219,6 +227,9 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                 if new_action_gen and (config.vis.start_step is None or step_idx >= config.vis.start_step):
                     action_generation_iter += 1
                     tqdm.write(f"-----------------------Action Generation Iteration {action_generation_iter}---------------------")
+
+                    # Clear action data dictionary
+                    action_data.clear()
 
                     for k in policy._queues:
                         if k != ACTION:
@@ -288,7 +299,7 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                             observation=observation,
                             visualize_actions=True,
                             actions=action_data,
-                            mean_uncertainty=uncertainty,
+                            uncertainty=uncertainty,
                             generator=generator
                         )
 
