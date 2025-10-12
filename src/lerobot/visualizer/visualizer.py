@@ -1,19 +1,19 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
-from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 
 from .utils import make_gif, make_run_dir, next_available_name
 
 
 class FlowMatchingVisualizer(ABC):
     """
-    Abstract base class for flow matching visualizer.
+    Abstract base class for visualizing flow matching characteristics.
     """
     vis_type: str = "base"
     index_runs: bool = True
@@ -21,8 +21,7 @@ class FlowMatchingVisualizer(ABC):
 
     def __init__(
         self,
-        flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: nn.Module,
+        model: BaseFlowMatchingAdapter,
         save: bool,
         output_root: Optional[Path],
         create_gif: bool,
@@ -30,16 +29,15 @@ class FlowMatchingVisualizer(ABC):
     ):
         """
         Args:
-            flow_matching_cfg: Configuration object for Flow Matching settings.
-            velocity_model: The learned flow matching velocity model.
+            model: A unified flow matching adapter that wraps a flow-matching model and exposes a common
+                interface for the visualizer.
             show: If True, display the plots.
             save: If True, save the plots to disk.
             output_root: Optional output directory for saving figures.
             create_gif: If True, create a GIF from the saved figures.
             verbose: If True, print status messages.
         """
-        self.flow_matching_cfg = flow_matching_cfg
-        self.velocity_model = velocity_model
+        self.model = model
         self.save = save
         self.output_root = Path(output_root) if output_root else Path("outputs/visualizations")
         self.create_gif = create_gif
@@ -47,16 +45,16 @@ class FlowMatchingVisualizer(ABC):
 
     @abstractmethod
     def visualize(
-        self, global_cond: Tensor, generator: Optional[torch.Generator], **kwargs
+        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator], **kwargs
     ):
         """
         Run the visualization using the provided conditioning vector.
 
         Args:
-            global_cond: Single conditioning feature vector for the velocity model.
-            Shape [cond_dim,] or [1, cond_dim].
+            observation: Info about the environment used to create the conditioning for
+                the flow matching model.
             generator: PyTorch random number generator.
-            **kwargs: Visualiser-specific keyword arguments.
+            **kwargs: Visualizer-specific keyword arguments.
         """
         pass
 
@@ -76,7 +74,7 @@ class FlowMatchingVisualizer(ABC):
     ) -> Path:
         """
         Create a new, empty folder and return its path.
-        """       
+        """
         if vis_type_dir_name is None:
             vis_type_dir = self.output_root / self.vis_type
         else:
@@ -84,7 +82,7 @@ class FlowMatchingVisualizer(ABC):
         self.run_dir = make_run_dir(base_dir=vis_type_dir, indexed=self.index_runs)
 
         return self.run_dir
-    
+
     def _save_figure(
         self,
         fig: plt.Figure,

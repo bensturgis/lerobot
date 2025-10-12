@@ -162,6 +162,7 @@ class LiberoEnv(gym.Env):
         self._env = self._make_envs_task(task_suite, self.task_id)
         default_steps = 500
         self._max_episode_steps = TASK_SUITE_MAX_STEPS.get(task_suite_name, default_steps)
+        self._namespace = "gym_libero"
 
         images = {}
         for cam in self.camera_name:

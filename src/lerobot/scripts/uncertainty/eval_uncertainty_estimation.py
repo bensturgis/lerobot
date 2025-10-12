@@ -48,7 +48,7 @@ from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import (
     ScorerArtifacts,
     build_scorer_artifacts_for_uncertainty_sampler,
 )
-from lerobot.utils.io_utils import save_episode_video
+from lerobot.utils.io_utils import get_task_dir, get_task_group_dir, save_episode_video
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import get_safe_torch_device, init_logging
 
@@ -237,7 +237,7 @@ def rollout(
         action = postprocessor(action)
 
         if new_action_gen:
-            uncertainty = policy.uncertainty_sampler.latest_uncertainty
+            uncertainty = policy.uncertainty_sampler.uncertainty
             ep_uncertainties.append(uncertainty)
 
         # Apply the next action
@@ -285,32 +285,6 @@ def build_env_for_domain(cfg: EnvConfig, domain: Literal["id", "ood"]) -> Dict[s
     else:
         raise ValueError(f"Unknown eval domain '{domain}'. Expected 'id' or 'ood'.")
     return make_single_env(cfg)
-
-
-def get_task_group_dir(
-    out_root: Path,
-    task_group: str,
-):
-    """
-    Return the output directory for a given task group.
-    """
-    if "libero" in task_group:
-        return out_root / task_group
-    return out_root
-
-
-def get_task_dir(
-    out_root: Path,
-    task_group: str,
-    task_id: int,
-) -> Path:
-    """
-    Return the output directory for a given task.
-    """
-    task_group_dir = get_task_group_dir(out_root, task_group)
-    if "libero" in task_group:
-        return task_group_dir / f"task{task_id:02d}"
-    return task_group_dir
 
 
 def get_task_title(

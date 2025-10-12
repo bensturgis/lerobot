@@ -199,7 +199,7 @@ def main(cfg: VisualizeComposedSeqPipelineConfig):
                 new_ode_states = composed_seq_sampler.prev_ode_states
                 new_selected_action_idx = composed_seq_sampler.prev_selected_action_idx
                 new_global_cond = composed_seq_sampler.prev_global_cond[0]
-                uncertainty = composed_seq_sampler.latest_uncertainty
+                uncertainty = composed_seq_sampler.uncertainty
                 
                 # Compose actions
                 if prev_ode_states is not None:

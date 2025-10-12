@@ -12,10 +12,10 @@ from lerobot.policies.smolvla.modeling_smolvla import (
     make_att_2d_masks,
 )
 
-from .uncertainty_adapter import UncertaintyModelAdapter
+from ..common.flow_matching.adapter import BaseFlowMatchingAdapter
 
 
-class SmolVLAUncertaintyAdapter(UncertaintyModelAdapter):
+class SmolVLAAdapter(BaseFlowMatchingAdapter):
     def __init__(self, config: SmolVLAConfig, model: VLAFlowMatching):
         super().__init__(model=model, config=config)
 

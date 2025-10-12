@@ -1,7 +1,5 @@
 env:
   type: pusht
-  ood:
-    enabled: true
 
 policy:
   type: flow_matching
@@ -15,11 +13,12 @@ vector_field:
   action_dims: [0, 1]
   action_steps: [15]
 
-ensemble_sampler:
-  scorer_model_path: outputs/train/flow_matching_pusht_02/checkpoints/last/pretrained_model
+cross_bayesian_sampler:
+  ensemble_model_path: outputs/train/flow_matching/pusht_02/checkpoints/last/pretrained_model_migrated
   num_action_samples: 25
-  scoring_metric: mode_distance
-  velocity_eval_times: [0.0, 0.1, 0.2]
+  scoring_metric:
+    metric_type: mode_distance
+    velocity_eval_times: [0.0, 0.1, 0.2]
 
 show: False
 seed: 15

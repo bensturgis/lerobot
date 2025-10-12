@@ -1,19 +1,19 @@
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
+import mujoco
 import numpy as np
 import torch
-from dm_control import mujoco
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
-from torch import Tensor, nn
+from torch import Tensor
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.common.policies.flow_matching.ode_solver import ODESolver
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
-from lerobot.configs.default import ActionSeqVisConfig
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
+from lerobot.policies.common.flow_matching.ode_solver import ODESolver
+from lerobot.processor import PolicyAction, PolicyProcessorPipeline
+from lerobot.visualizer.configuration_visualizer import ActionSeqVisConfig
 
 from .visualizer import FlowMatchingVisualizer
 
@@ -25,10 +25,9 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
     """
     def __init__(
         self,
-        cfg: ActionSeqVisConfig,
-        flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: nn.Module,
-        unnormalize_outputs: nn.Module,
+        config: ActionSeqVisConfig,
+        model: BaseFlowMatchingAdapter,
+        postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction],
         output_root: Optional[Union[Path, str]],
         save: bool = True,
         create_gif: bool = False,
@@ -36,26 +35,25 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
     ):
         """
         Args:
-            unnormalize_outputs: Module to map model outputs from normalized space
-                back to original action coordinates.
+            postprocessor: A pipeline that processes the raw policy actions into the format expected
+                by the environment
             num_action_seq: Number of action sequences to plot.
         """
         super().__init__(
-            flow_matching_cfg=flow_matching_cfg,
-            velocity_model=velocity_model,
+            model=model,
             save=save,
             output_root=output_root,
             create_gif=create_gif,
             verbose=verbose,
         )
-        self.num_action_seq = cfg.num_action_seq
-        self.unnormalize_outputs = unnormalize_outputs
-        self.show = cfg.show
+        self.num_action_seq = config.num_action_seq
+        self.postprocessor = postprocessor
+        self.show = config.show
         self.index_runs = False
         self.vis_type = "action_seq"
-        
+
     def visualize(
-        self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
     ):
         """
         Visualize a batch of action sequences onto the current frame.
@@ -73,61 +71,54 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
                 "but it was not provided."
             )
         env: gym.Env = kwargs["env"]
-        
-        if global_cond.dim() == 1: # shape = (cond_dim,)
-            global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
-        elif global_cond.dim() == 2 and global_cond.size(0) == 1: # shape = (1, cond_dim)
-            pass
-        else:
-            raise ValueError(
-                f"Expected global_cond to contain exactly one feature vector "
-                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
-            )
-        
+
         dir_name = kwargs.get("dir_name")
         self.run_dir = self._update_run_dir(vis_type_dir_name=dir_name)
 
-        device = get_device_from_parameters(self.velocity_model)
-        dtype = get_dtype_from_parameters(self.velocity_model)
-        
         # Initialize ODE solver
-        ode_solver = ODESolver(self.velocity_model)
-        
-        # Sample noise from prior
-        noise_sample = torch.randn(
-            size=(self.num_action_seq, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
-            dtype=dtype,
-            device=device,
-            generator=generator,
+        ode_solver = ODESolver()
+
+        # Build the velocity function conditioned on the current observation
+        conditioning = self.model.prepare_conditioning(observation, self.num_action_seq)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
+
+        # Sample noise vectors from prior
+        noise_sample = self.model.sample_prior(
+            num_samples=self.num_action_seq,
+            generator=generator
         )
 
         # Sample a batch of action sequences
         actions = ode_solver.sample(
             x_0=noise_sample,
-            global_cond=global_cond.repeat(self.num_action_seq, 1),
-            step_size=self.flow_matching_cfg.ode_step_size,
-            method=self.flow_matching_cfg.ode_solver_method,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
+            velocity_fn=velocity_fn,
+            method=self.model.ode_solver_config["solver_method"],
+            step_size=self.model.ode_solver_config["step_size"],
+            atol=self.model.ode_solver_config["atol"],
+            rtol=self.model.ode_solver_config["rtol"],
         )
 
         # Convert the model-predicted actions from the network’s normalised space
         # back into world coordinates
-        actions = self.unnormalize_outputs({"action": actions})["action"]
+        actions = self.postprocessor(actions)
 
         # Plotting of action sequences depends on environment
-        if env.spec.namespace == "gym_aloha":
+        if env.spec is None:
+            env_namespace = env._namespace
+        else:
+            env_namespace = env.spec.namespace
+        if env_namespace == "gym_aloha":
             fig = self._create_aloha_action_seq_image(env=env, actions=actions.cpu())
-        elif env.spec.namespace == "gym_pusht":
+        elif env_namespace == "gym_pusht":
             frame = env.render()
             fig = self._create_pusht_action_seq_image(frame=frame, actions=actions.cpu())
-        elif env.spec.namespace == "gym_libero":
+        elif env_namespace == "gym_libero":
             fig = self._create_libero_action_seq_image(env=env, actions=actions.cpu())
         else:
             raise ValueError(
-                f"ActionSeqVisualizer does not support environment with namespace '{env.spec.namespace}'."
+                f"ActionSeqVisualizer does not support environment with namespace '{env_namespace}'."
             )
-        
+
         if self.show:
             plt.show(block=True)
         if self.save:
@@ -137,8 +128,8 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
 
     def _project_world_point_to_pixels(
         self,
-        model: mujoco.MjModel,
-        data: mujoco.MjData,
+        mj_model: mujoco.MjModel,
+        mj_data: mujoco.MjData,
         point_world: np.ndarray,
         camera_name: str,
         img_width: int,
@@ -149,10 +140,10 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         """
         # Get the camera extrinsics
         cam_id = mujoco.mj_name2id(
-            model._model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
+            mj_model._model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
         )
-        cam_pos = data.cam_xpos[cam_id]
-        cam_mat = data.cam_xmat[cam_id].reshape(3, 3)
+        cam_pos = mj_data.cam_xpos[cam_id]
+        cam_mat = mj_data.cam_xmat[cam_id].reshape(3, 3)
 
         # Convert point from world to camera coordinates
         p_cam = cam_mat.T @ (point_world - cam_pos)
@@ -162,7 +153,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             raise ValueError("Point is behind the camera")
 
         # Get the camera intrinsics
-        fovy_deg = model.cam_fovy[cam_id]
+        fovy_deg = mj_model.cam_fovy[cam_id]
         fovy_rad = np.deg2rad(fovy_deg)
         f = 0.5 * img_height / np.tan(0.5 * fovy_rad)
 
@@ -170,24 +161,30 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         cx, cy = img_width * 0.5, img_height * 0.5
 
         # Perspective projection
-        u = ( p_cam[0] / -p_cam[2] ) * f + cx
-        v = (-p_cam[1] / -p_cam[2] ) * f + cy
+        u = (-p_cam[0] / -p_cam[2]) * f + cx
+        v = (-p_cam[1] / -p_cam[2]) * f + cy
 
         return u, v
-    
-    def _draw_waypoints(self, env: gym.Env, waypoints: List[np.ndarray], ax: Axes):
+
+    def _draw_waypoints(
+        self,
+        mj_model: mujoco.MjModel,
+        mj_data: mujoco.MjData,
+        waypoints: List[np.ndarray],
+        ax: Axes
+    ):
         # Prepare a colormap over the trajectory length
-        norm = plt.Normalize(0, self.flow_matching_cfg.horizon - 1)
+        norm = plt.Normalize(0, self.model.horizon - 1)
         cmap = plt.get_cmap("turbo")
-        
+
         pixel_points: List[Tuple[float, float]] = []
         for point_3d in waypoints:
             try:
                 u_px, v_px = self._project_world_point_to_pixels(
-                    env.unwrapped.sim.model,
-                    env.unwrapped.sim.data,
+                    mj_model,
+                    mj_data,
                     point_3d,
-                    camera_name="frontview",
+                    camera_name="agentview",
                     img_width=256,
                     img_height=256
                 )
@@ -199,7 +196,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         if len(pixel_points) < 2:
             # Cannot form a line segment with fewer than 2 points
             return
-        
+
         # Build line segments between consecutive projected points
         segments = [
             [pixel_points[i], pixel_points[i + 1]]
@@ -214,7 +211,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         )
 
         # Color each segment by its timestep index
-        line_collection.set_array(np.arange(self.flow_matching_cfg.horizon - 1))
+        line_collection.set_array(np.arange(self.model.horizon - 1))
         ax.add_collection(line_collection)
 
         # Mark the final waypoint with a filled circle
@@ -235,7 +232,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         """
         was_interactive = plt.isinteractive()
         plt.ioff()
-        
+
         # Access the underlying MuJoCo physics wrapper
         physics = env.unwrapped._env.physics
 
@@ -259,9 +256,9 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             seq_waypoints_right: List[np.ndarray] = []
             action_seq = actions[seq_idx].cpu().numpy()
 
-            for action_step in range(self.flow_matching_cfg.horizon):
+            for action_step in range(self.model.horizon):
                 env.step(action_seq[action_step])
-        
+
                 # After stepping, get fingertip positions for left arm
                 left_fingertip_left = physics.data.body("vx300s_left/left_finger_link").xpos
                 left_fingertip_right = physics.data.body("vx300s_left/right_finger_link").xpos
@@ -273,13 +270,13 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
                 right_fingertip_right = physics.data.body("vx300s_right/right_finger_link").xpos
                 midpoint_right = 0.5 * (right_fingertip_left + right_fingertip_right)
                 seq_waypoints_right.append(np.array(midpoint_right))
-                
+
             all_waypoints_left.append(seq_waypoints_left)
             all_waypoints_right.append(seq_waypoints_right)
 
         physics.set_state(initial_state)
         physics.forward()
-        
+
         # Create a Matplotlib figure and axis with the same extents as the image
         fig, ax = plt.subplots(figsize=(6.4, 4.8), dpi=100)
         ax.imshow(frame)
@@ -290,8 +287,9 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
 
         # For each sequence, project 3D waypoints to pixel coords and draw
         for waypoints_left, waypoints_right in zip(all_waypoints_left, all_waypoints_right, strict=False):
-            self._draw_waypoints(env=env, waypoints=waypoints_left, ax=ax)
-            self._draw_waypoints(env=env, waypoints=waypoints_right, ax=ax)           
+            mj_model, mj_data = env.unwrapped._env.physics.model, env.unwrapped._env.physics.data
+            self._draw_waypoints(mj_model=mj_model, mj_data=mj_data, waypoints=waypoints_left, ax=ax)
+            self._draw_waypoints(mj_model=mj_model, mj_data=mj_data, waypoints=waypoints_right, ax=ax)
 
         plt.tight_layout(pad=0)
 
@@ -307,42 +305,45 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         was_interactive = plt.isinteractive()
         plt.ioff()
 
+        libero_env = env._env # OffScreenRenderEnv (LIBERO wrapper)
+        base_env = libero_env.env # RoboSuite BaseEnv
+
         # Save the initial MuJoCo state (qpos + qvel) so we can restore later
-        initial_state = env.unwrapped.get_sim_state()
+        initial_state = libero_env.get_sim_state()
 
         # Render the current camera image (RGB), using the "top" camera
-        frame = env.unwrapped.render(camera_name="frontview")
+        frame = env.render()
 
         # Tell the LIBERO/robosuite wrapper to ignore the “episode done” flag,
         # so we can keep stepping through from the same sim state without triggering a reset.
-        env.unwrapped.env.ignore_done = True
+        base_env.ignore_done = True
 
         # Prepare to store 3D waypoints for each action sequence
         all_waypoints: List[List[np.ndarray]] = []
 
         for seq_idx in range(actions.shape[0]):
             # Restore the saved state before simulating this sequence
-            env.unwrapped.set_state(initial_state)
-            env.unwrapped.sim.forward()
-            env.unwrapped.check_success()
-            env.unwrapped.post_process()
-            env.unwrapped.update_observables(force=True)
-            
+            libero_env.set_state(initial_state)
+            base_env.sim.forward()
+            libero_env.check_success()
+            base_env._post_process()
+            base_env._update_observables(force=True)
+
             seq_waypoints: List[np.ndarray] = []
 
             action_seq = actions[seq_idx].cpu().numpy()
-            for action_step in range(self.flow_matching_cfg.horizon):
-                obs, _, _, _, _ = env.unwrapped.step(action_seq[action_step])
-                end_effector_pos = obs["agent_pos"][:3]
+            for action_step in range(self.model.horizon):
+                obs, _, _, _ = libero_env.step(action_seq[action_step])
+                end_effector_pos = obs["robot0_eef_pos"]
                 seq_waypoints.append(end_effector_pos)
 
             all_waypoints.append(seq_waypoints)
 
-        env.unwrapped.set_state(initial_state)
-        env.unwrapped.sim.forward()
-        env.unwrapped.check_success()
-        env.unwrapped.post_process()
-        env.unwrapped.update_observables(force=True)
+        libero_env.set_state(initial_state)
+        base_env.sim.forward()
+        libero_env.check_success()
+        base_env._post_process()
+        base_env._update_observables(force=True)
 
         # Create a Matplotlib figure and axis with the same extents as the image
         fig, ax = plt.subplots(figsize=(2.56, 2.56), dpi=100)
@@ -354,7 +355,8 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
 
         # For each sequence, project 3D waypoints to pixel coords and draw
         for waypoints in all_waypoints:
-            self._draw_waypoints(env=env, waypoints=waypoints, ax=ax)
+            mj_model, mj_data = env._env.sim.model, env._env.sim.data
+            self._draw_waypoints(mj_model=mj_model, mj_data=mj_data, waypoints=waypoints, ax=ax)
 
         plt.tight_layout(pad=0)
 
@@ -380,16 +382,16 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         ax.set_ylim(0, 512)
         ax.set_aspect("equal")
         ax.axis("off")
-    
+
         # Prepare a colormap over the trajectory length
-        norm = plt.Normalize(0, self.flow_matching_cfg.horizon - 1)
+        norm = plt.Normalize(0, self.model.horizon - 1)
         cmap = plt.get_cmap("turbo")
-    
+
         # Draw each action sequence as a colourful line strip
         for action_seq in actions:
             segments = [
                 [tuple(action_seq[i]), tuple(action_seq[i+1])]
-                for i in range(self.flow_matching_cfg.horizon - 1)
+                for i in range(self.model.horizon - 1)
             ]
             lc = LineCollection(
                 segments,
@@ -400,7 +402,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             )
             # Assign each segment its action step index as the “value”
             # for the colour mapping
-            lc.set_array(np.arange(self.flow_matching_cfg.horizon - 1))
+            lc.set_array(np.arange(self.model.horizon - 1))
             ax.add_collection(lc)
 
             # Mark the final action target with a filled circle
@@ -416,7 +418,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
             plt.ion()
 
         return fig
-    
+
     def get_figure_filename(self, **kwargs) -> str:
         """Get the figure filename of the current rollout step."""
         action_seq_idx = 1

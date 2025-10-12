@@ -1,19 +1,17 @@
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import Tensor
 
-from lerobot.common.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.common.policies.flow_matching.modelling_flow_matching import FlowMatchingConditionalUnet1d
-from lerobot.common.policies.flow_matching.ode_solver import ODESolver
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
-from lerobot.configs.default import VectorFieldVisConfig
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
+from lerobot.policies.common.flow_matching.ode_solver import ODESolver
 
-from .visualizer import FlowMatchingVisualizer
+from .configuration_visualizer import VectorFieldVisConfig
 from .utils import add_actions
+from .visualizer import FlowMatchingVisualizer
 
 
 class VectorFieldVisualizer(FlowMatchingVisualizer):
@@ -22,9 +20,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
     """
     def __init__(
         self,
-        cfg: VectorFieldVisConfig,
-        flow_matching_cfg: FlowMatchingConfig,
-        velocity_model: FlowMatchingConditionalUnet1d,
+        config: VectorFieldVisConfig,
+        model: BaseFlowMatchingAdapter,
         output_root: Optional[Union[Path, str]],
         save: bool = True,
         create_gif: bool = True,
@@ -32,66 +29,52 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
     ):
         """
         Args:
-            cfg: Visualizer-specific settings.
+            config: Visualizer-specific settings.
         """
         super().__init__(
-            flow_matching_cfg=flow_matching_cfg,
-            velocity_model=velocity_model,
+            model=model,
             save=save,
             output_root=output_root,
             create_gif=create_gif,
             verbose=verbose,
         )
-        if len(cfg.action_dims) not in (2, 3):
+        if len(config.action_dims) not in (2, 3):
             raise ValueError(
                 "The vector-field visualisation supports 2D and 3D only, "
-                f"(got action_dims = {cfg.action_dims}."
+                f"(got action_dims = {config.action_dims}."
             )
 
-        self.action_dims = cfg.action_dims
-        self.action_dim_names = cfg.action_dim_names
-        if cfg.action_steps is None:
-            self.action_steps = list(range(self.flow_matching_cfg.horizon))
-        else:
-            self.action_steps = cfg.action_steps
-        self.min_action = cfg.min_action
-        self.max_action = cfg.max_action
-        self.grid_size = cfg.grid_size
+        self.action_dims = config.action_dims
+        self.action_dim_names = config.action_dim_names
+        self.action_steps = config.action_steps
+        self.min_action = config.min_action
+        self.max_action = config.max_action
+        self.grid_size = config.grid_size
         # Default time_grid is list [0.05, 0.1, ..., 1.0]
-        self.time_grid = list(np.linspace(0, 1, 21)) if cfg.time_grid is None else cfg.time_grid
-        self.show = cfg.show
+        self.time_grid = list(np.linspace(0, 1, 21)) if config.time_grid is None else config.time_grid
+        self.show = config.show
         self.gif_name_base = "vector_field_animation"
         self.vis_type = "vector_field"
-    
+
     def visualize(
-        self, global_cond: Tensor, generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
     ):
         """
         Visualize the 2D action vector field produced by a flow matching policy at a given time.
 
         Args:
-            global_cond: Single conditioning feature vector for the velocity model.
-                Shape [cond_dim,] or [1, cond_dim].
+            observation: Info about the environment used to create the conditioning for
+                the flow matching model.
             generator: PyTorch random number generator.
         """
-        if global_cond.dim() == 1: # shape = (cond_dim,)
-            global_cond = global_cond.unsqueeze(0)     # (1, cond_dim)
-        elif global_cond.dim() == 2 and global_cond.size(0) == 1: # shape = (1, cond_dim)
-            pass
-        else:
-            raise ValueError(
-                f"Expected global_cond to contain exactly one feature vector "
-                f"(shape (cond_dim,) or (1,cond_dim)), but got shape {tuple(global_cond.shape)}"
-            )
-        
+        device = self.model.device
+        dtype = self.model.dtype
+
         self.run_dir = self._update_run_dir()
-        
-        device = get_device_from_parameters(self.velocity_model)
-        dtype = get_dtype_from_parameters(self.velocity_model)
 
         # Initialize ODE solver
-        ode_solver = ODESolver(self.velocity_model)
-        
+        ode_solver = ODESolver()
+
         visualize_actions: bool = kwargs.get("visualize_actions", True)
         action_data = kwargs.get("actions", {})
         if visualize_actions and not action_data:
@@ -101,29 +84,31 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             # Only sample a single action sequence to create the vector field
             num_samples = 1
 
+        # Build the velocity function conditioned on the current observation
+        conditioning = self.model.prepare_conditioning(observation, num_samples)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
+
         # Sample noise vectors from prior
-        noise_sample = torch.randn(
-            size=(num_samples, self.flow_matching_cfg.horizon, self.flow_matching_cfg.action_feature.shape[0]),
-            dtype=dtype,
-            device=device,
-            generator=generator,
+        noise_sample = self.model.sample_prior(
+            num_samples=num_samples,
+            generator=generator
         )
 
         # Sample action sequences
         action_samples = ode_solver.sample(
             x_0=noise_sample,
-            global_cond=global_cond.repeat(num_samples, 1),
-            step_size=self.flow_matching_cfg.ode_step_size,
-            method=self.flow_matching_cfg.ode_solver_method,
-            atol=self.flow_matching_cfg.atol,
-            rtol=self.flow_matching_cfg.rtol,
+            velocity_fn=velocity_fn,
+            method=self.model.ode_solver_config["solver_method"],
+            step_size=self.model.ode_solver_config["step_size"],
+            atol=self.model.ode_solver_config["atol"],
+            rtol=self.model.ode_solver_config["rtol"],
         )
 
         action_data_colors: List[str] = []
         if visualize_actions and not action_data:
             action_data["action_samples"] = action_samples[1:]
             action_data_colors = ["red"]
-        
+
         if "Base Action" not in action_data:
             action_data["Base Action"] = action_samples[0].unsqueeze(0)
             action_data_colors.append("cyan")
@@ -139,6 +124,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_grid, y_grid, z_grid = np.meshgrid(axis_lin, axis_lin, axis_lin, indexing="xy")
             x_dim, y_dim, z_dim = self.action_dims
 
+        if self.action_steps is None:
+            self.action_steps = list(range(self.model.horizon))
         action_steps_idx = torch.randint(
             low=0,
             high=len(self.action_steps),
@@ -155,14 +142,17 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
 
         # Build a condition vector tensor whose batch size is the number of grid points
         num_grid_points = positions.shape[0]
-        global_cond_batch = global_cond.repeat(num_grid_points, 1)
-        
+
+        # Rebuild the velocity function conditioned on the current observation
+        conditioning = self.model.prepare_conditioning(observation, num_grid_points)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
+
         # Compute the max velocity norm over the timesteps for coloring
         max_velocity_norm = float('-inf')
         for time in reversed(self.time_grid):
-            time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
+            time = torch.tensor(time, device=device, dtype=dtype)
             with torch.no_grad():
-                velocities = self.velocity_model(positions, time_batch, global_cond_batch)
+                velocities = velocity_fn(x_t=positions, t=time)
             norms = torch.norm(velocities[:, action_step, self.action_dims], dim=1)
             cur_max_velocity_norm = norms.max().item()
             if cur_max_velocity_norm <= max_velocity_norm:
@@ -170,22 +160,22 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             max_velocity_norm = cur_max_velocity_norm
 
         for time in self.time_grid:
-            time_batch = torch.full((num_grid_points,), time, device=device, dtype=dtype)
             # Compute velocity at grid points and current time as given by flow matching velocity model
+            time = torch.tensor(time, device=device, dtype=dtype)
             with torch.no_grad():
-                velocities = self.velocity_model(positions, time_batch, global_cond_batch)
+                velocities = velocity_fn(x_t=positions, t=time)
 
             if len(self.action_dims) == 2:
                 fig = self._create_vector_field_plot_2d(
                     x_positions=x_grid.reshape(-1),
                     y_positions=y_grid.reshape(-1),
-                    x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
-                    y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
+                    x_velocities=velocities[:, action_step, x_dim].detach().cpu().numpy(),
+                    y_velocities=velocities[:, action_step, y_dim].detach().cpu().numpy(),
                     limits=(self.min_action, self.max_action),
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm,
-                    mean_uncertainty=kwargs.get("mean_uncertainty")
+                    uncertainty=kwargs.get("uncertainty")
                 )
             else:
                 fig = self._create_vector_field_plot_3d(
@@ -199,7 +189,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm,
-                    mean_uncertainty=kwargs.get("mean_uncertainty")
+                    uncertainty=kwargs.get("uncertainty")
                 )
 
             if visualize_actions:
@@ -208,7 +198,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_data=action_data,
                     action_step=action_step,
                     action_dims=self.action_dims,
-                    colors=action_data_colors,                   
+                    colors=action_data_colors,
                 )
 
             # Legend
@@ -223,7 +213,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
 
         if self.create_gif:
             self._create_gif()
-    
+
     def _create_vector_field_plot_3d(
         self,
         x_positions: np.ndarray,
@@ -236,7 +226,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
-        mean_uncertainty: Optional[float] = None,
+        uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
         Draw a 3D quiver plot for the vector field of a three action dimensions in a single
@@ -291,10 +281,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         ax.set_ylabel(y_label, fontsize=14, labelpad=8)
         ax.set_zlabel(z_label, fontsize=14, labelpad=8)
 
-        if mean_uncertainty:
+        if uncertainty:
             ax.text2D(
                 0.02, 0.98,
-                f"Mean Uncertainty: {mean_uncertainty:.2f}",
+                f"Mean Uncertainty: {uncertainty:.2f}",
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",
@@ -314,7 +304,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             plt.ion()
 
         return fig
-    
+
     def _create_vector_field_plot_2d(
         self,
         x_positions: np.ndarray,
@@ -325,7 +315,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
-        mean_uncertainty: Optional[float] = None,
+        uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
         Draw a 2D quiver plot for the vector field of a two action dimensions in a single
@@ -338,7 +328,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         norms = np.sqrt(
             x_velocities**2 + y_velocities**2
         )
-        
+
         # Create quiver plot
         fig, ax = plt.subplots(figsize=(12, 10))
         fig.canvas.manager.set_window_title("Visualization of Vector Field")
@@ -364,7 +354,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         # Presentation
         # cbar.ax.tick_params(labelsize=28)
         # cbar.set_ticks(np.arange(0.0, 2.01, 0.5))
-        
+
         # Title
         ax.set_title(
             f"Vector Field of Action Step {action_step+1} at t={time:.2f}",
@@ -383,10 +373,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         ax.set_xlabel(x_label, fontsize=14)
         ax.set_ylabel(y_label, fontsize=14)
 
-        if mean_uncertainty:
+        if uncertainty:
             ax.text(
                 0.02, 0.98,
-                f"Mean uncertainty: {mean_uncertainty:.2f}",
+                f"Mean uncertainty: {uncertainty:.2f}",
                 transform=ax.transAxes,
                 fontsize=12,
                 verticalalignment="top",
@@ -408,12 +398,12 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         # )
         ax.grid(True)
         plt.tight_layout()
-        
+
         if was_interactive:
             plt.ion()
 
         return fig
-    
+
     def get_figure_filename(self, **kwargs) -> str:
         """Get the figure filename for the current evaluation time."""
         if "time" not in kwargs:

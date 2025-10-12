@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 import torch
 from torch import Tensor
@@ -8,10 +8,10 @@ from torch import Tensor
 from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
 
-from .uncertainty_adapter import UncertaintyModelAdapter
+from ..common.flow_matching.adapter import BaseFlowMatchingAdapter
 
 
-class FlowMatchingUncertaintyAdapter(UncertaintyModelAdapter):
+class FlowMatchingAdapter(BaseFlowMatchingAdapter):
     def __init__(self, config: FlowMatchingConfig, model: FlowMatchingModel):
         super().__init__(model=model, config=config)
 

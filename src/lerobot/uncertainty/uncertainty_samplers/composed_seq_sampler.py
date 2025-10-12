@@ -3,9 +3,9 @@ from typing import Callable, Optional, Tuple
 import torch
 from torch import Tensor
 
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.factory import make_uncertainty_scoring_metric
 
-from ..uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 from .configuration_uncertainty_sampler import (
     ComposedSequenceSamplerConfig,
 )
@@ -25,7 +25,7 @@ class ComposedSequenceSampler(UncertaintySampler):
     def __init__(
         self,
         config: ComposedSequenceSamplerConfig,
-        model: UncertaintyModelAdapter,
+        model: BaseFlowMatchingAdapter,
     ):
         """
         Initializes the composed sequence sampler.
@@ -110,7 +110,7 @@ class ComposedSequenceSampler(UncertaintySampler):
 
         # If no previous trajectory is stored, return placeholder uncertainties
         if self.prev_selected_action_idx is None:
-            self.latest_uncertainty = float('-inf')
+            self.uncertainty = float('-inf')
         else:
             # Compose full ODE states from stored previous and new action generation
             composed_ode_states = compose_ode_states(
@@ -146,16 +146,17 @@ class ComposedSequenceSampler(UncertaintySampler):
                 raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
 
             # Average uncertainty scores and store for logging
-            self.latest_uncertainty = uncertainty_scores.mean().item()
+            self.uncertainty = uncertainty_scores.mean().item()
 
         # Store velocity function and ODE states from the previous action sampling step
         self.prev_velocity_fn = velocity_fn
         self.prev_ode_states = new_ode_states
 
         # Pick one action sequence at random
-        actions, self.prev_selected_action_idx = self.rand_pick_action(action_candidates=new_ode_states[-1])
+        self.action_candidates = new_ode_states[-1]
+        actions, self.prev_selected_action_idx = self.rand_pick_action(action_candidates=self.action_candidates)
 
-        return actions.to(device="cpu", dtype=torch.float32), self.latest_uncertainty
+        return actions.to(device="cpu", dtype=torch.float32), self.uncertainty
 
     def reset(self):
         """

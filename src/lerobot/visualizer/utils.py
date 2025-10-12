@@ -10,7 +10,7 @@ def make_run_dir(base_dir: Path, indexed: bool):
     """
     Create new folder for the current visualization iteration during a rollout.
     """
-    base_dir.mkdir(parents=True, exist_ok=True)            
+    base_dir.mkdir(parents=True, exist_ok=True)
     if indexed:
         run_idx = 1
         while (base_dir / f"{run_idx:03d}").exists():
@@ -20,7 +20,7 @@ def make_run_dir(base_dir: Path, indexed: bool):
         return run_dir
     else:
         return base_dir
-    
+
 def make_gif(
     frames_dir: Path, out_path: Path, duration: float = 0.2
 ) -> Path:
@@ -36,7 +36,6 @@ def make_gif(
     # Save the GIF
     imageio.mimsave(str(out_path), frames, duration=duration)
 
-    
 def next_available_name(base_dir: Path, file_name_base: str, ext: str) -> str:
     """Get the next available file name for some base name in the base_dir."""
     run_idx = 1
@@ -61,7 +60,7 @@ def add_actions(
     """
     if len(colors) == 0:
         colors = ["red", "orange", "green", "purple", "magenta", "brown"]
-    
+
     if text_kwargs is None:
         text_kwargs = {}
 

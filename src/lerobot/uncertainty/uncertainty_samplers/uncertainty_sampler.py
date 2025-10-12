@@ -4,14 +4,13 @@ from typing import Dict, Optional, Sequence, Tuple
 import torch
 from torch import Tensor
 
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.common.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
     ODESolver,
     make_sampling_time_grid,
 )
-
-from ..uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 
 
 class UncertaintySampler(ABC):
@@ -21,14 +20,14 @@ class UncertaintySampler(ABC):
     """
     def __init__(
         self,
-        model: UncertaintyModelAdapter,
+        model: BaseFlowMatchingAdapter,
         num_action_samples: int,
         extra_sampling_times: Optional[Sequence[float]] = None,
     ):
         """
         Args:
-            model: A unified adapter that wraps a flow-matching model and exposes a common interface
-                for the uncertainty sampler.
+            model: A unified flow matching adapter that wraps a flow-matching model and exposes a common
+                interface for the uncertainty sampler.
             num_action_samples: How many action sequences to sample and use for uncertainty estimation.
             extra_sampling_times: Extra times at which the sampling ODE should be evaluated.
         """
@@ -45,8 +44,9 @@ class UncertaintySampler(ABC):
         self.dtype = model.dtype
         self.cond_vf_config = model.cond_vf_config
 
-        # Store latest sampled action sequences and the uncertainty score for logging
-        self.latest_uncertainty: Optional[float] = None
+        # Store latest sampled action sequences and the uncertainty score for logging and visualization
+        self.action_candidates: Optional[Tensor] = None
+        self.uncertainty: Optional[float] = None
 
         # Build time grid for sampling according to ODE solver method and scoring metric
         self.ode_solver_config = model.ode_solver_config

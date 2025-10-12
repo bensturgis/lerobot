@@ -144,3 +144,29 @@ def deserialize_json_into_object(fpath: Path, obj: T) -> T:
     # Perform the in-place/recursive deserialization
     updated_obj = _deserialize(obj, data)
     return updated_obj
+
+
+def get_task_group_dir(
+    out_root: Path,
+    task_group: str,
+):
+    """
+    Return the output directory for a given task group.
+    """
+    if "libero" in task_group:
+        return out_root / task_group
+    return out_root
+
+
+def get_task_dir(
+    out_root: Path,
+    task_group: str,
+    task_id: int,
+) -> Path:
+    """
+    Return the output directory for a given task.
+    """
+    task_group_dir = get_task_group_dir(out_root, task_group)
+    if "libero" in task_group:
+        return task_group_dir / f"task{task_id:02d}"
+    return task_group_dir

@@ -14,9 +14,9 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import filter_libero_episodes, patch_dataset_episode_boundaries
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.processor import PolicyProcessorPipeline
-from lerobot.uncertainty.uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 from lerobot.utils.utils import format_big_number, get_safe_torch_device
 
 from .laplace_wrappers.factory import make_laplace_wrapper
@@ -86,9 +86,9 @@ def create_laplace_calib_loader(
 
 def sample_adapter_from_posterior(
     laplace_posterior: BaseLaplace,
-    uncertainty_adapter: UncertaintyModelAdapter,
+    uncertainty_adapter: BaseFlowMatchingAdapter,
     generator: Optional[torch.Generator] = None,
-) -> UncertaintyModelAdapter:
+) -> BaseFlowMatchingAdapter:
     """
     Draw one weight sample from a fitted Laplace posterior and return a cloned
     uncertainty adapter whose underlying model uses those sampled weights.

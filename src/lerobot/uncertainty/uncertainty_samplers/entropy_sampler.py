@@ -4,12 +4,12 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.common.flow_matching.conditional_probability_path import (
     OTCondProbPath,
     VPDiffusionCondProbPath,
 )
 
-from ..uncertainty_adapters.uncertainty_adapter import UncertaintyModelAdapter
 from .configuration_uncertainty_sampler import EntropySamplerConfig
 from .uncertainty_sampler import UncertaintySampler
 
@@ -23,7 +23,7 @@ class EntropySampler(UncertaintySampler):
     def __init__(
         self,
         config: EntropySamplerConfig,
-        model: UncertaintyModelAdapter,
+        model: BaseFlowMatchingAdapter,
     ):
         """
         Initializes the entropy sampler.
@@ -159,12 +159,13 @@ class EntropySampler(UncertaintySampler):
         total_entropy = entropy_gaussian + entropy_path
 
         # Store sampled action sequences and uncerainty for logging
-        self.latest_uncertainty = total_entropy
+        self.uncertainty = total_entropy
 
         # Pick one action sequence at random
-        actions, _ = self.rand_pick_action(action_candidates=ode_states[-1])
+        self.action_candidates = ode_states[-1]
+        actions, _ = self.rand_pick_action(action_candidates=self.action_candidates)
 
-        return actions.to(device="cpu", dtype=torch.float32), self.latest_uncertainty
+        return actions.to(device="cpu", dtype=torch.float32), self.uncertainty
 
     def reset(self):
         """

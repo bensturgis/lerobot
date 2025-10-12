@@ -10,7 +10,7 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 
-class UncertaintyModelAdapter(ABC):
+class BaseFlowMatchingAdapter(ABC):
     def __init__(self, model: nn.Module, config: PreTrainedConfig):
         self.model = model
         self.config = config
