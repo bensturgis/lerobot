@@ -7,12 +7,13 @@ env:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-filtered
+  repo_id: bensturgis/smolvla-pusht
 
 output_dir: outputs/train/smolvla/pusht
 batch_size: 64
 steps: 200000
-eval_freq: 20000
+eval_freq: 5000
+val_ratio: 0.05
 save_freq: 20000
 seed: 42
 wandb:
