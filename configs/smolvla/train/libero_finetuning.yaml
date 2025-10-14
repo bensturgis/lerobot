@@ -11,7 +11,7 @@ dataset:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-filtered-finetuned-unfreezed-vision-02
+  repo_id: bensturgis/smolvla-libero-filtered-finetuned-unfreezed-vision-horizon-50
 
 env:
   type: libero
@@ -21,14 +21,14 @@ eval:
   batch_size: 1
   n_episodes: 5
 
-output_dir: outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_02
+output_dir: outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50
 steps: 100000
 batch_size: 48
 eval_freq: 5000
 save_freq: 5000
 val_ratio: 0.05
-seed: 69719699
+seed: 7213
 wandb:
   enable: true
 
-# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero_finetuning.yaml --policy.path=outputs/train/smolvla/libero_filtered_base_unfreezed_vision/checkpoints/040000/pretrained_model --policy.repo_id=bensturgis/smolvla-libero-filtered-finetuned-unfreezed-vision-02
+# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero_finetuning.yaml --policy.path=outputs/train/smolvla/libero_filtered_base_unfreezed_vision_horizon_50/checkpoints/020000/pretrained_model --policy.repo_id=bensturgis/smolvla-libero-filtered-finetuned-unfreezed-vision-horizon-50
