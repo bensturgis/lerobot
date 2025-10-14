@@ -16,7 +16,7 @@ vis:
 
 vector_field:
   action_dims: [1, 2]
-  action_steps: [5, 10, 15, 20, 25, 30, 35, 40, 45, 49]
+  # action_steps: [5, 10, 15, 20, 25, 30, 35, 40, 45, 49]
   grid_size: 20
   min_action: -2
   max_action: 2

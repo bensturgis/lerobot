@@ -59,6 +59,139 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
     def visualize(
         self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
     ):
+        device = self.model.device
+        dtype = self.model.dtype
+
+        self.run_dir = self._update_run_dir()
+
+        # Initialize ODE solver
+        ode_solver = ODESolver()
+
+        visualize_actions: bool = kwargs.get("visualize_actions", True)
+        action_data = kwargs.get("actions", {})
+        if visualize_actions and not action_data:
+            # If no actions for visualization were passed in, sample some
+            num_samples = 50 if len(self.action_dims) == 2 else 100
+        else:
+            # Only sample a single action sequence to create the vector field
+            num_samples = 1
+
+        # Conditioning for sampling
+        conditioning = self.model.prepare_conditioning(observation, num_samples)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
+
+        # Sample noise vectors from prior
+        noise_sample = self.model.sample_prior(
+            num_samples=num_samples,
+            generator=generator
+        )
+
+        # Sample action sequences
+        action_samples = ode_solver.sample(
+            x_0=noise_sample,
+            velocity_fn=velocity_fn,
+            method=self.model.ode_solver_config["solver_method"],
+            step_size=self.model.ode_solver_config["step_size"],
+            atol=self.model.ode_solver_config["atol"],
+            rtol=self.model.ode_solver_config["rtol"],
+        )
+
+        action_data_colors: List[str] = []
+        if visualize_actions and not action_data:
+            action_data["action_samples"] = action_samples[1:]
+            action_data_colors = ["red"]
+
+        if "Base Action" not in action_data:
+            action_data["Base Action"] = action_samples[0].unsqueeze(0)
+            action_data_colors.append("cyan")
+
+        # Build a 1-D lin-space once and reuse it for every axis we need
+        axis_lin = np.linspace(self.min_action, self.max_action, self.grid_size)
+
+        # Create the grids
+        if len(self.action_dims) == 2:
+            x_grid, y_grid = np.meshgrid(axis_lin, axis_lin, indexing="xy")
+            x_dim, y_dim = self.action_dims
+        else:
+            x_grid, y_grid, z_grid = np.meshgrid(axis_lin, axis_lin, axis_lin, indexing="xy")
+            x_dim, y_dim, z_dim = self.action_dims
+
+        if self.action_steps is None or len(self.action_steps) == 0:
+            self.action_steps = list(range(self.model.horizon))
+
+        # Template positions
+        positions = action_data["Base Action"].repeat(x_grid.size, 1, 1)
+
+        # Rebuild the velocity function conditioned for correct grid batch size
+        num_grid_points = positions.shape[0]
+        conditioning = self.model.prepare_conditioning(observation, num_grid_points)
+        velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
+
+        # Fixed time t=0
+        time = torch.tensor(0.0, device=device, dtype=dtype)
+
+        for action_step in self.action_steps:
+            positions[:, action_step, x_dim] = torch.tensor(x_grid.ravel(), dtype=dtype, device=device)
+            positions[:, action_step, y_dim] = torch.tensor(y_grid.ravel(), dtype=dtype, device=device)
+            if len(self.action_dims) == 3:
+                positions[:, action_step, z_dim] = torch.tensor(z_grid.ravel(), dtype=dtype, device=device)
+
+            with torch.no_grad():
+                velocities = velocity_fn(x_t=positions, t=time)
+            max_velocity_norm = torch.norm(velocities[:, action_step, self.action_dims], dim=1).max().item()
+
+            if len(self.action_dims) == 2:
+                fig = self._create_vector_field_plot_2d(
+                    x_positions=x_grid.reshape(-1),
+                    y_positions=y_grid.reshape(-1),
+                    x_velocities=velocities[:, action_step, x_dim].detach().cpu().numpy(),
+                    y_velocities=velocities[:, action_step, y_dim].detach().cpu().numpy(),
+                    limits=(self.min_action, self.max_action),
+                    action_step=action_step,
+                    time=time,
+                    max_velocity_norm=max_velocity_norm,
+                    uncertainty=kwargs.get("uncertainty"),
+                )
+            else:
+                fig = self._create_vector_field_plot_3d(
+                    x_positions=x_grid.reshape(-1),
+                    y_positions=y_grid.reshape(-1),
+                    z_positions=z_grid.reshape(-1),
+                    x_velocities=velocities[:, action_step, x_dim].cpu().numpy(),
+                    y_velocities=velocities[:, action_step, y_dim].cpu().numpy(),
+                    z_velocities=velocities[:, action_step, z_dim].cpu().numpy(),
+                    limits=(self.min_action, self.max_action),
+                    action_step=action_step,
+                    time=time,
+                    max_velocity_norm=max_velocity_norm,
+                    uncertainty=kwargs.get("uncertainty"),
+                )
+
+            if visualize_actions:
+                add_actions(
+                    ax=fig.axes[0],
+                    action_data=action_data,
+                    action_step=action_step,
+                    action_dims=self.action_dims,
+                    colors=action_data_colors,
+                )
+
+            fig.axes[0].legend()
+
+            if self.show:
+                plt.show(block=True)
+            if self.save:
+                # Save using the step index to avoid overwriting
+                self._save_figure(fig, action_step=action_step, time=time)
+
+            plt.close(fig)
+
+        if self.create_gif:
+            self._create_gif()
+
+    def visualize_vector_field_over_time(
+        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
+    ):
         """
         Visualize the 2D action vector field produced by a flow matching policy at a given time.
 
@@ -140,10 +273,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         if len(self.action_dims) == 3:
             positions[:, action_step, z_dim] = torch.tensor(z_grid.ravel(), dtype=dtype, device=device)
 
-        # Build a condition vector tensor whose batch size is the number of grid points
+        # Rebuild the velocity function conditioned for correct grid batch size
         num_grid_points = positions.shape[0]
-
-        # Rebuild the velocity function conditioned on the current observation
         conditioning = self.model.prepare_conditioning(observation, num_grid_points)
         velocity_fn = self.model.make_velocity_fn(conditioning=conditioning)
 
@@ -207,7 +338,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             if self.show:
                 plt.show(block=True)
             if self.save:
-                self._save_figure(fig, time=time)
+                self._save_figure(fig, action_step=action_step, time=time)
 
             plt.close(fig)
 
@@ -411,5 +542,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                 "`time` must be provided to get filename of vector field figure."
             )
         time = kwargs["time"]
-
-        return f"vector_field_{int(time * 100):03d}.png"
+        if "action_step" not in kwargs:
+            raise ValueError(
+                "`action_step` must be provided to get filename of vector field figure."
+            )
+        action_step = kwargs["action_step"]
+        
+        return f"vector_field_action_{action_step+1:02d}_time_{int(time * 100):03d}.png"
