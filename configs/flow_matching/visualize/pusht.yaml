@@ -1,5 +1,5 @@
 # Choose from "action_seq", "flows", "noise_to_action" and "vector_field"
-vis_types: [action_seq]
+vis_types: [flows]
 show: False
 
 env:
@@ -16,7 +16,7 @@ vis:
   action_dim_names: ["pos_x", "pos_y"]
 
 flows:
-  action_dims: [1, 2]
+  action_dims: [0, 1]
   axis_limits: [[-1, 1], [-1, 1]]
 
 noise_to_action:
@@ -25,7 +25,7 @@ noise_to_action:
   num_samples: 1
 
 vector_field:
-  action_dims: [1, 2]
+  action_dims: [0, 1]
   # grid_size: 20
 
 # python src/lerobot/scripts/visualize_flow_matching.py --config=configs/flow_matching/visualize/pusht.yaml --policy.path=outputs/train/flow_matching/pusht/checkpoints/last/pretrained_model_migrated
