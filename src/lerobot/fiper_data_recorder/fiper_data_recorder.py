@@ -1,21 +1,18 @@
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import torch
 from torch import Tensor
 from torch.distributions import Independent, Normal
 
-from lerobot.common.policies.utils import get_device_from_parameters, get_dtype_from_parameters
-
-from ...common.flow_matching.conditional_probability_path import (
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
+from lerobot.policies.common.flow_matching.conditional_probability_path import (
     OTCondProbPath,
     VPDiffusionCondProbPath,
 )
-from ..configuration_flow_matching import FlowMatchingConfig
-from ..modelling_flow_matching import FlowMatchingModel
-from ...common.flow_matching.ode_solver import (
+from lerobot.policies.common.flow_matching.ode_solver import (
     ADAPTIVE_SOLVERS,
     FIXED_STEP_SOLVERS,
     ODESolver,
@@ -23,13 +20,16 @@ from ...common.flow_matching.ode_solver import (
     make_sampling_time_grid,
     select_ode_states,
 )
-from ..uncertainty.utils.laplace_utils import draw_laplace_flow_matching_model
-from ..uncertainty.utils.sampler_utils import (
+from lerobot.uncertainty.uncertainty_samplers.utils import (
     compose_ode_states,
     select_and_expand_ode_states,
     splice_noise_with_prev,
 )
-from ..uncertainty.utils.scorer_artifacts import ScorerArtifacts
+from lerobot.uncertainty.uncertainty_scoring.laplace_utils.posterior_builder import (
+    sample_adapter_from_posterior,
+)
+from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import ScorerArtifacts
+
 from .configuration_fiper_data_recorder import FiperDataRecorderConfig
 
 
@@ -42,46 +42,48 @@ class FiperDataRecorder:
     def __init__(
         self,
         config: FiperDataRecorderConfig,
-        flow_matching_config: FlowMatchingConfig,
-        flow_matching_model: FlowMatchingModel,
+        flow_matching_adapter: BaseFlowMatchingAdapter,
         scorer_artifacts: ScorerArtifacts,
     ):
         self.config = config
-        self.flow_matching_config = flow_matching_config
-        self.flow_matching_model = flow_matching_model
-        self.ode_solver = ODESolver(velocity_model=self.flow_matching_model.unet)
+        self.flow_matching_adapter = flow_matching_adapter
+        self.ode_solver = ODESolver()
 
-        self.horizon = self.flow_matching_config.horizon
-        self.action_dim = self.flow_matching_config.action_feature.shape[0]
-        self.device = get_device_from_parameters(self.flow_matching_model)
-        self.dtype = get_dtype_from_parameters(self.flow_matching_model)
+        self.horizon = flow_matching_adapter.horizon
+        self.n_action_steps = flow_matching_adapter.n_action_steps
+        self.n_obs_steps = flow_matching_adapter.n_obs_steps
+        self.action_dim = flow_matching_adapter.action_dim
+        self.device = flow_matching_adapter.device
+        self.dtype = flow_matching_adapter.dtype
 
         # Extract scorer artifacts
-        self.ensemble_model = scorer_artifacts.ensemble_model
+        self.ensemble_adapter = scorer_artifacts.ensemble_adapter
         self.laplace_posterior = scorer_artifacts.laplace_posterior
-        if self.ensemble_model is None:
+        if self.ensemble_adapter is None:
             raise ValueError("Ensemble model is required for FIPER data recording.")
         elif self.laplace_posterior is None:
             raise ValueError("Laplace posterior is required for FIPER data recording.")
-        
+
         # Build time grid for sampling according to ODE solver method and scoring metric
         extra_times = []
         if self.config.ode_eval_times is not None:
             extra_times = [t for t in self.config.ode_eval_times if 0.0 < t < 1.0]
-        if self.flow_matching_config.ode_solver_method in FIXED_STEP_SOLVERS:
+        self.ode_solver_config = flow_matching_adapter.ode_solver_config
+        if self.ode_solver_config["solver_method"] in FIXED_STEP_SOLVERS:
             self.sampling_time_grid = make_sampling_time_grid(
-                step_size=self.flow_matching_config.ode_step_size,
+                step_size=self.ode_solver_config["step_size"],
                 extra_times=extra_times,
-                device=self.device
+                device=self.device,
+                dtype=self.dtype
             )
-        elif self.flow_matching_config.ode_solver_method in ADAPTIVE_SOLVERS:
+        elif self.ode_solver_config["solver_method"] in ADAPTIVE_SOLVERS:
             self.sampling_time_grid = torch.tensor(
                 [0.0, *extra_times, 1.0],
                 device=self.device, dtype=self.dtype
             )
         else:
-            raise ValueError(f"Unknown ODE solver method: {self.flow_matching_config.ode_solver_method}.")
-        
+            raise ValueError(f"Unknown ODE solver method: {self.ode_solver_config['solver_method']}.")
+
         # Noise distribution is an isotropic Gaussian
         self.gaussian_log_density = Independent(
             Normal(
@@ -90,42 +92,38 @@ class FiperDataRecorder:
             ),
             reinterpreted_batch_ndims=2
         ).log_prob
-        
+
         # Build time grid for likelihood estimation based on ODE solver method
         self.lik_estimation_time_grid = make_lik_estimation_time_grid(
             ode_solver_method=self.config.likelihood_ode_solver_cfg.method,
-            device=self.device,    
+            device=self.device,
+            dtype=self.dtype,
         )
 
         # Select conditional probability path for computing the intermediate velocity difference scaling factors
-        self.cond_vf_type = self.flow_matching_config.cond_vf_type
-        if self.cond_vf_type == "vp":
+        self.cond_vf_config = flow_matching_adapter.cond_vf_config
+        if self.cond_vf_config["type"] == "vp":
             self.cond_prob_path = VPDiffusionCondProbPath(
-                beta_min=self.flow_matching_config.beta_min,
-                beta_max=self.flow_matching_config.beta_max,
+                beta_min=self.cond_vf_config["beta_min"],
+                beta_max=self.cond_vf_config["beta_max"],
             )
-        elif self.cond_vf_type == "ot":
-            self.cond_prob_path = OTCondProbPath()
+        elif self.cond_vf_config["type"] == "ot":
+            self.cond_prob_path = OTCondProbPath(self.cond_vf_config["sigma_min"])
         else:
             raise ValueError(
-                f"Unknown conditional vector field type {self.cond_vf_type}."
+                f"Unknown conditional vector field type {self.cond_vf_config['type']}."
             )
-        
-        # Store the ODE states and conditioning vectors from the previous action
-        # sequence generation
-        self.prev_ode_states: Optional[Tensor] = None
-        self.prev_global_cond: Optional[Tensor] = None
+
+        # Store the velocity function and ODE states from the previous action sequence generation
+        self.prev_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_ode_states: Tensor | None = None
 
         # Index of the selected action sequence from the previous actions batch
         self.prev_selected_action_idx: Optional[int] = None
 
-        # Store scorer flow matching model from the previous action sequence generation
-        self.prev_laplace_model: Optional[FlowMatchingModel] = None
-        
-        # Store the conditioning vectors of the ensemble and laplace model from the
-        # previous action sequence generation
-        self.prev_ensemble_global_cond: Optional[Tensor] = None
-        self.prev_laplace_global_cond: Optional[Tensor] = None
+        # Store the velocity function of the ensemble and laplace model from the previous action sequence generation
+        self.prev_ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
 
         # Store data from action generation steps across rollout
         self.rollout_data: List[Dict[str, Any]] = []
@@ -134,9 +132,8 @@ class FiperDataRecorder:
         self,
         action_samples: Tensor,
         composed_action_samples: Optional[Tensor],
-        laplace_model: FlowMatchingModel,
-        ensemble_global_cond: Tensor,
-        laplace_global_cond: Tensor,
+        laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor],
+        ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor],
     ) -> Dict[str, Union[np.ndarray, Tensor]]:
         """
         Evaluate terminal velocities at configured times for ensemble/laplace on the
@@ -152,24 +149,22 @@ class FiperDataRecorder:
         composed_ensemble_terminal_vels: List[Tensor] = []
         composed_laplace_terminal_vels: List[Tensor] = []
         for time in self.config.terminal_vel_eval_times:
-            time_batch = torch.full(
-                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
-            )
-            ensemble_terminal_vels.append(self.ensemble_model.unet(
-                action_samples, time_batch, ensemble_global_cond
+            time_tensor = torch.tensor(time, device=self.device, dtype=self.dtype)
+            ensemble_terminal_vels.append(ensemble_velocity_fn(
+                x_t=action_samples, t=time_tensor,
             ))
-            laplace_terminal_vels.append(laplace_model.unet(
-                action_samples, time_batch, laplace_global_cond
+            laplace_terminal_vels.append(laplace_velocity_fn(
+                x_t=action_samples, t=time_tensor
             ))
             if self.prev_selected_action_idx is not None:
-                composed_terminal_vels.append(self.flow_matching_model.unet(
-                    composed_action_samples, time_batch, self.prev_global_cond
+                composed_terminal_vels.append(self.prev_velocity_fn(
+                    x_t=composed_action_samples, t=time_tensor
                 ))
-                composed_ensemble_terminal_vels.append(self.ensemble_model.unet(
-                    composed_action_samples, time_batch, self.prev_ensemble_global_cond
+                composed_ensemble_terminal_vels.append(self.prev_ensemble_velocity_fn(
+                    x_t=composed_action_samples, t=time_tensor
                 ))
-                composed_laplace_terminal_vels.append(self.prev_laplace_model.unet(
-                    composed_action_samples, time_batch, self.prev_laplace_global_cond
+                composed_laplace_terminal_vels.append(self.prev_laplace_velocity_fn(
+                    x_t=composed_action_samples, t=time_tensor
                 ))
             else:
                 composed_terminal_vels.append(
@@ -191,18 +186,16 @@ class FiperDataRecorder:
         }
 
     def compute_log_likelihood(
-        self, 
-        action_samples: Tensor, 
-        flow_matching_model: FlowMatchingModel, 
-        global_cond: Tensor,
+        self,
+        action_samples: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Tensor:
         """Compute log-likelihood of sampled action sequences."""
-        scorer_ode_solver = ODESolver(flow_matching_model.unet)
-        _, log_probs = scorer_ode_solver.sample_with_log_likelihood(
+        _, log_probs = self.ode_solver.sample_with_log_likelihood(
             x_init=action_samples,
             time_grid=self.lik_estimation_time_grid,
-            global_cond=global_cond,
+            velocity_fn=velocity_fn,
             log_p_0=self.gaussian_log_density,
             method=self.config.likelihood_ode_solver_cfg.method,
             atol=self.config.likelihood_ode_solver_cfg.atol,
@@ -212,14 +205,13 @@ class FiperDataRecorder:
         )
 
         return log_probs
-    
+
     def record_log_likelihoods(
         self,
         action_samples: Tensor,
         composed_action_samples: Optional[Tensor],
-        laplace_model: FlowMatchingModel,
-        ensemble_global_cond: Tensor,
-        laplace_global_cond: Tensor,
+        laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor],
+        ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor],
         generator: Optional[torch.Generator] = None
     ) -> Dict[str, Tensor]:
         """
@@ -230,22 +222,19 @@ class FiperDataRecorder:
         # Compute log-likelihood of sampled action sequences under ensemble and laplace model
         ensemble_log_likelihood = self.compute_log_likelihood(
             action_samples=action_samples,
-            flow_matching_model=self.ensemble_model,
-            global_cond=ensemble_global_cond,
+            velocity_fn=ensemble_velocity_fn,
             generator=generator,
         )
         laplace_log_likelihood = self.compute_log_likelihood(
             action_samples=action_samples,
-            flow_matching_model=laplace_model,
-            global_cond=laplace_global_cond,
+            velocity_fn=laplace_velocity_fn,
             generator=generator,
         )
         # Compute log-likelihood of composed action sequence under sampler model
         if self.prev_selected_action_idx is not None:
             composed_log_likelihood = self.compute_log_likelihood(
                 action_samples=composed_action_samples,
-                flow_matching_model=self.flow_matching_model,
-                global_cond=self.prev_global_cond,
+                velocity_fn=self.prev_velocity_fn,
                 generator=generator,
             )
         else:
@@ -254,20 +243,18 @@ class FiperDataRecorder:
         if self.prev_selected_action_idx is not None:
             composed_ensemble_log_likelihood = self.compute_log_likelihood(
                 action_samples=composed_action_samples,
-                flow_matching_model=self.ensemble_model,
-                global_cond=self.prev_ensemble_global_cond,
+                velocity_fn=self.prev_ensemble_velocity_fn,
                 generator=generator,
             )
             composed_laplace_log_likelihood = self.compute_log_likelihood(
                 action_samples=composed_action_samples,
-                flow_matching_model=self.prev_laplace_model,
-                global_cond=self.prev_laplace_global_cond,
+                velocity_fn=self.prev_laplace_velocity_fn,
                 generator=generator,
             )
         else:
             composed_ensemble_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
             composed_laplace_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
-        
+
         return {
             "ensemble_log_likelihood": ensemble_log_likelihood.cpu(),
             "laplace_log_likelihood": laplace_log_likelihood.cpu(),
@@ -275,15 +262,14 @@ class FiperDataRecorder:
             "composed_ensemble_log_likelihood": composed_ensemble_log_likelihood.cpu(),
             "composed_laplace_log_likelihood": composed_laplace_log_likelihood.cpu(),
         }
-    
+
     def record_inter_vel_diffs(
         self,
         ode_states: Tensor,
         composed_ode_states: Optional[Tensor],
-        laplace_model: FlowMatchingModel,
-        global_cond: Tensor,
-        ensemble_global_cond: Tensor,
-        laplace_global_cond: Tensor,
+        velocity_fn: Callable[[Tensor, Tensor], Tensor],
+        laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor],
+        ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor],
     ) -> Dict[str, Union[np.ndarray, Tensor]]:
         """
         Select intermediate ODE states at configured times and evaluate velocities for
@@ -321,32 +307,30 @@ class FiperDataRecorder:
         vel_diff_scaling_factors: List[float] = []
         for timestep, time in enumerate(self.config.ode_eval_times):
             ode_state = selected_ode_states[timestep]
-            time_batch = torch.full(
-                (self.config.num_uncertainty_sequences,), time, device=self.device, dtype=self.dtype
-            )
+            time_tensor = torch.tensor(time, device=self.device, dtype=self.dtype)
             sampler_vels.append(
-                self.flow_matching_model.unet(ode_state, time_batch, global_cond)
+                velocity_fn(x_t=ode_state, t=time_tensor)
             )
             ensemble_vels.append(
-                self.ensemble_model.unet(ode_state, time_batch, ensemble_global_cond)
+                ensemble_velocity_fn(x_t=ode_state, t=time_tensor)
             )
             laplace_vels.append(
-                laplace_model.unet(ode_state, time_batch, laplace_global_cond)
+                laplace_velocity_fn(x_t=ode_state, t=time_tensor)
             )
             if self.prev_selected_action_idx is not None:
                 prev_ode_state = selected_prev_ode_states[timestep]
                 composed_ode_state = selected_composed_ode_states[timestep]
                 prev_sampler_vels.append(
-                    self.flow_matching_model.unet(prev_ode_state, time_batch, self.prev_global_cond)
+                    self.prev_velocity_fn(x_t=prev_ode_state, t=time_tensor)
                 )
                 composed_sampler_vels.append(
-                    self.flow_matching_model.unet(composed_ode_state, time_batch, self.prev_global_cond)
+                    self.prev_velocity_fn(x_t=composed_ode_state, t=time_tensor)
                 )
                 composed_ensemble_vels.append(
-                    self.ensemble_model.unet(composed_ode_state, time_batch, self.prev_ensemble_global_cond)
+                    self.prev_ensemble_velocity_fn(x_t=composed_ode_state, t=time_tensor)
                 )
                 composed_laplace_vels.append(
-                    self.prev_laplace_model.unet(composed_ode_state, time_batch, self.prev_laplace_global_cond)
+                    self.prev_laplace_velocity_fn(x_t=composed_ode_state, t=time_tensor)
                 )
             else:
                 prev_sampler_vels.append(
@@ -385,15 +369,8 @@ class FiperDataRecorder:
         intermediate artifacts needed for uncertainty estimation.
 
         Args:
-            observation: Info about the environment used to create the conditioning vector for
-                the flow matching model. It has to contain the following items:
-                {
-                "observation.state": (B, n_obs_steps, state_dim)
-
-                "observation.images": (B, n_obs_steps, num_cameras, C, H, W)
-                    AND/OR
-                "observation.environment_state": (B, environment_dim)
-                }
+            observation: Info about the environment used to create the conditioning for
+                the flow matching model.
             generator: PyTorch random number generator.
 
         Returns:
@@ -401,49 +378,49 @@ class FiperDataRecorder:
               Shape: (horizon, action_dim).
         """
         step_data: Dict[str, Any] = {}
-        
+
         # Draw flow matching model from the Laplace posterior
-        laplace_model = draw_laplace_flow_matching_model(
+        laplace_adapter = sample_adapter_from_posterior(
             laplace_posterior=self.laplace_posterior,
-            flow_matching_model=self.flow_matching_model,
+            uncertainty_adapter=self.flow_matching_adapter,
             generator=generator
         )
 
-        # Encode image features and concatenate them all together along with the state vector
-        # to create the flow matching conditioning vectors for the sampler and scorer models
-        global_cond = self.flow_matching_model.prepare_global_conditioning(observation)
-        ensemble_global_cond = self.ensemble_model.prepare_global_conditioning(observation)
-        laplace_global_cond = laplace_model.prepare_global_conditioning(observation)
-        step_data["obs_embedding"] = global_cond.squeeze(0).cpu()
-        
-        # Broadcast conditioning to match the number of action samples
-        global_cond = global_cond.expand(self.config.num_uncertainty_sequences, -1)
-        ensemble_global_cond = ensemble_global_cond.expand(self.config.num_uncertainty_sequences, -1)
-        laplace_global_cond = laplace_global_cond.expand(self.config.num_uncertainty_sequences, -1)
+        # Build the velocity function for sampler and scorer model conditioned on the current observation
+        conditioning = self.flow_matching_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
+        velocity_fn = self.flow_matching_adapter.make_velocity_fn(conditioning=conditioning)
+        step_data["obs_embedding"] = conditioning
+
+        ensemble_conditioning = self.ensemble_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
+        ensemble_velocity_fn = self.ensemble_adapter.make_velocity_fn(conditioning=ensemble_conditioning)
+
+        laplace_conditioning = laplace_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
+        laplace_velocity_fn = laplace_adapter.make_velocity_fn(conditioning=laplace_conditioning)
 
         # Sample noise priors
-        noise_sample = torch.randn(
-            size=(self.config.num_uncertainty_sequences, self.horizon, self.action_dim),
-            dtype=self.dtype,
-            device=self.device,
+        noise_sample = self.flow_matching_adapter.sample_prior(
+            num_samples=self.config.num_uncertainty_sequences,
             generator=generator,
         )
+
         if self.prev_selected_action_idx is not None:
             # Reuse overlapping segment of noise from the previously selected trajectory
             # so that the newly sampled noise remains consistent with already executed actions
             noise_sample = splice_noise_with_prev(
                 new_noise_sample=noise_sample,
                 prev_noise_sample=self.prev_ode_states[0, self.prev_selected_action_idx],
-                flow_matching_cfg=self.flow_matching_config
+                horizon=self.horizon,
+                n_action_steps=self.n_action_steps,
+                n_obs_steps=self.n_obs_steps
             )
 
         # Solve ODE forward from noise to sample action sequences
         ode_states = self.ode_solver.sample(
             x_0=noise_sample,
-            global_cond=global_cond,
-            method=self.flow_matching_config.ode_solver_method,
-            atol=self.flow_matching_config.atol,
-            rtol=self.flow_matching_config.rtol,
+            velocity_fn=velocity_fn,
+            method=self.ode_solver_config["solver_method"],
+            atol=self.ode_solver_config["atol"],
+            rtol=self.ode_solver_config["rtol"],
             time_grid=self.sampling_time_grid,
             return_intermediate_states=True,
         )
@@ -457,7 +434,9 @@ class FiperDataRecorder:
                     :, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :
                 ],
                 new_ode_states=ode_states,
-                flow_matching_cfg=self.flow_matching_config,
+                horizon=self.horizon,
+                n_action_steps=self.n_action_steps,
+                n_obs_steps=self.n_obs_steps
             )
             composed_action_samples = composed_ode_states[-1] # (num_uncertainty_sequences, horizon, action_dim)
         else:
@@ -469,9 +448,8 @@ class FiperDataRecorder:
             terminal_vels_data = self.record_terminal_vels(
                 action_samples=action_candidates,
                 composed_action_samples=composed_action_samples,
-                laplace_model=laplace_model,
-                ensemble_global_cond=ensemble_global_cond,
-                laplace_global_cond=laplace_global_cond,
+                laplace_velocity_fn=laplace_velocity_fn,
+                ensemble_velocity_fn=ensemble_velocity_fn,
             )
             step_data.update(terminal_vels_data)
 
@@ -480,9 +458,8 @@ class FiperDataRecorder:
             log_likelihood_data = self.record_log_likelihoods(
                 action_samples=action_candidates,
                 composed_action_samples=composed_action_samples,
-                laplace_model=laplace_model,
-                ensemble_global_cond=ensemble_global_cond,
-                laplace_global_cond=laplace_global_cond,
+                laplace_velocity_fn=laplace_velocity_fn,
+                ensemble_velocity_fn=ensemble_velocity_fn,
                 generator=generator,
             )
             step_data.update(log_likelihood_data)
@@ -492,10 +469,9 @@ class FiperDataRecorder:
             inter_vel_diff_data = self.record_inter_vel_diffs(
                 ode_states=ode_states,
                 composed_ode_states=composed_ode_states,
-                laplace_model=laplace_model,
-                global_cond=global_cond,
-                ensemble_global_cond=ensemble_global_cond,
-                laplace_global_cond=laplace_global_cond,
+                velocity_fn=velocity_fn,
+                laplace_velocity_fn=laplace_velocity_fn,
+                ensemble_velocity_fn=ensemble_velocity_fn,
             )
             step_data.update(inter_vel_diff_data)
 
@@ -509,31 +485,29 @@ class FiperDataRecorder:
         ).item()
         action_sample = action_candidates[action_selection_idx : action_selection_idx+1]  # (1, horizon, action_dim)
 
-        # Store conditioning vectors, ODE states and selected action index from the previous sampling step
-        self.prev_global_cond = global_cond
+        # Store velocity functions, ODE states and selected action index from the previous sampling step
+        self.prev_velocity_fn = velocity_fn
         self.prev_ode_states = ode_states
         self.prev_selected_action_idx = action_selection_idx
-        self.prev_laplace_model = laplace_model
-        self.prev_ensemble_global_cond = ensemble_global_cond
-        self.prev_laplace_global_cond = laplace_global_cond
+        self.prev_laplace_velocity_fn = laplace_velocity_fn
+        self.prev_ensemble_velocity_fn = ensemble_velocity_fn
 
         # Store data from this action generation step
         self.rollout_data.append(step_data)
 
         return action_sample
-    
+
     def reset(self):
         """
         Reset internal state to prepare for a new rollout.
         """
-        # Clear stored conditioning vector, ODE states and selected action sequence from previous step
-        self.prev_global_cond: Optional[Tensor] = None
+        # Clear stored velocity functions, ODE states and selected action sequence from previous step
+        self.prev_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
         self.prev_ode_states: Optional[Tensor] = None
         self.prev_selected_action_idx: Optional[int] = None
+        self.prev_laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
 
-        # Reset the previous laplace model
-        self.prev_laplace_model: Optional[FlowMatchingModel] = None
-        
         # Clear recorded rollout data
         self.rollout_data.clear()
 
@@ -555,7 +529,12 @@ class FiperDataRecorder:
 
         success_flag = "s" if episode_metadata["successful"] else "f"
 
-        output_path = output_dir / f"episode_{success_flag}_{episode_idx:04d}.pkl"
+        filename = f"episode_{success_flag}_{episode_idx:04d}"
+        task = episode_metadata["task"]
+        task_id = episode_metadata.get("task_id")
+        if "libero" in task and task_id is not None:
+            filename += f"_task{task_id:02d}"
+        output_path = output_dir / (filename + ".pkl")
 
         data = {
             "metadata": episode_metadata,

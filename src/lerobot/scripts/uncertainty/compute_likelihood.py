@@ -20,8 +20,8 @@ from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.utils import cycle
-from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.policies.common.flow_matching.ode_solver import ODESolver
+from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingPolicy
 from lerobot.policies.utils import get_device_from_parameters, get_dtype_from_parameters
 
 
@@ -148,7 +148,7 @@ def main():
         "-p", "--pretrained-fm-path",
         type=str,
         required=True,
-        help="Path to a pretrained flow‐matching policy checkpoint file.",
+        help="Path to a pretrained flow-matching policy checkpoint file.",
     )
 
     args = parser.parse_args()

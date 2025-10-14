@@ -10,21 +10,19 @@ import numpy as np
 import torch
 from tqdm import trange
 
-from lerobot.common.envs.factory import make_single_env
-from lerobot.common.envs.utils import preprocess_observation
-from lerobot.common.policies.factory import make_flow_matching_visualizers, make_policy
-from lerobot.common.policies.flow_matching.uncertainty.utils.laplace_utils import (
-    create_laplace_flow_matching_calib_loader,
-    draw_laplace_flow_matching_model,
+from lerobot.configs import parser
+from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
+from lerobot.envs.factory import make_single_env
+from lerobot.envs.utils import preprocess_observation
+from lerobot.policies.factory import make_policy
+from lerobot.uncertainty.uncertainty_scoring.laplace_utils.posterior_builder import (
     get_laplace_posterior,
     make_laplace_path,
 )
-from lerobot.common.utils.io_utils import write_video
-from lerobot.common.utils.live_window import LiveWindow
-from lerobot.common.utils.random_utils import set_seed
-from lerobot.common.utils.utils import get_safe_torch_device, init_logging
-from lerobot.configs import parser
-from lerobot.configs.visualize_laplace import VisualizeLaplacePipelineConfig
+from lerobot.utils.io_utils import write_video
+from lerobot.utils.live_window import LiveWindow
+from lerobot.utils.random_utils import set_seed
+from lerobot.utils.utils import get_safe_torch_device, init_logging
 
 
 def capture_pusht_state(env: gym.Env) -> Dict[str, np.ndarray]:
@@ -64,10 +62,10 @@ def rollout(
     env_states: Optional[List[Any]] = None
 ) -> list[Any]:
     device = get_safe_torch_device(cfg.policy.device, log=True)
-    
+
     observation, _ = env.reset(seed=seed)
     env.unwrapped._last_action = None
-    
+
     # Callback for visualization.
     def render_frame(env: gym.Env) -> np.ndarray:
         rgb_frame = env.render()
@@ -76,9 +74,9 @@ def rollout(
         # Live visualization
         if cfg.show:
             live_view.enqueue_frame(rgb_frame[..., ::-1])
-        
+
         return rgb_frame
-    
+
     # Cache frames for creating video
     video_frames: list[np.ndarray] = []
     # Chache environment states
@@ -108,25 +106,25 @@ def rollout(
     progbar = trange(
         max_vis_steps,
         desc=f"Running rollout with at most {max_vis_steps} steps"
-    )   
+    )
     for step_idx in progbar:
         if env_states is None:
             state_history.append(capture_pusht_state(env))
-        
+
         if env_states is not None:
             if step_idx >= len(env_states):
                 break
             if step_idx > 0:
                 observation = restore_pusht_state(env, env_states[step_idx])
-        
+
         # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
         observation = preprocess_observation(observation)
         observation = {
             key: observation[key].to(device, non_blocking=device.type == "cuda") for key in observation
         }
-        
+
         # Decide whether a new sequence will be generated
-        new_action_gen = len(policy._queues["action"]) == 0       
+        new_action_gen = len(policy._queues["action"]) == 0
 
         with torch.no_grad():
             action = policy.select_action(observation)
@@ -143,7 +141,7 @@ def rollout(
             global_cond = policy.flow_matching.prepare_global_conditioning(batch)
 
             for visualizer in visualizers:
-                visualizer.visualize(global_cond=global_cond, env=env)                
+                visualizer.visualize(global_cond=global_cond, env=env)
 
         # Apply the next action
         observation, _, terminated, _, _ = env.step(action[0].cpu().numpy())
@@ -171,11 +169,11 @@ def rollout(
     return state_history
 
 @parser.wrap()
-def main(cfg: VisualizeLaplacePipelineConfig): 
+def main(cfg: VisualizeLaplacePipelineConfig):
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
-    
+
     logging.info("Loading policy")
     if cfg.policy.type != "flow_matching":
         raise ValueError(
@@ -206,7 +204,7 @@ def main(cfg: VisualizeLaplacePipelineConfig):
         )
     else:
         laplace_calib_loader = None
-    
+
     # Get the fitted Laplace posterior
     laplace_posterior = get_laplace_posterior(
         cfg=cfg.uncertainty_sampler.active_config,

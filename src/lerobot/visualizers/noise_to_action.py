@@ -84,7 +84,7 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
     def plot_noise_to_action_overlays(
         self,
         action_overlays: Sequence[Dict[str, Any]],
-        mean_uncertainty: Optional[str] = None,
+        uncertainty: Optional[str] = None,
         cbar_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
@@ -147,10 +147,10 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
             ax.set_xlabel(labels[0], fontsize=14)
             ax.set_ylabel(labels[1], fontsize=14)
 
-            if mean_uncertainty:
+            if uncertainty:
                 ax.text(
                     0.02, 0.98,
-                    f"Mean Uncertainty: {mean_uncertainty:.2f}",
+                    f"Uncertainty: {uncertainty:.2f}",
                     transform=ax.transAxes,
                     fontsize=12,
                     verticalalignment="top",
@@ -246,7 +246,7 @@ class NoiseToActionVisualizer(FlowMatchingVisualizer):
         self.plot_noise_to_action_overlays(
             action_overlays=noisy_action_overlay,
             cbar_kwargs=cbar_kwargs,
-            mean_uncertainty=kwargs.get("mean_uncertainty")
+            uncertainty=kwargs.get("uncertainty")
         )
 
         if self.create_gif:

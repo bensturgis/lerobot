@@ -16,12 +16,12 @@ from torch import Tensor, nn
 from tqdm import tqdm
 
 from lerobot.constants import ACTION, FINAL_FEATURE_MAP_MODULE, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
+from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
+    FiperDataRecorderConfig,
+)
 from lerobot.policies.common.flow_matching.conditional_probability_path import make_cond_prob_path
 from lerobot.policies.common.flow_matching.ode_solver import ODESolver
 from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
-from lerobot.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
-    FiperDataRecorderConfig,
-)
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import (
     get_device_from_parameters,
@@ -93,14 +93,17 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         """
         Constructs the FIPER data recorder based on the config.
         """
-        from lerobot.policies.flow_matching.fiper_data_recording.fiper_data_recorder import (
-            FiperDataRecorder,
+        from lerobot.fiper_data_recorder.fiper_data_recorder import FiperDataRecorder
+        from lerobot.policies.factory import make_flow_matching_adapter
+
+        flow_matching_adapter = make_flow_matching_adapter(
+            model=self.flow_matching,
+            policy_config=self.config
         )
 
         self.fiper_data_recorder = FiperDataRecorder(
             config=config,
-            flow_matching_config=self.config,
-            flow_matching_model=self.flow_matching,
+            flow_matching_adapter=flow_matching_adapter,
             scorer_artifacts=scorer_artifacts,
         )
 

@@ -71,8 +71,7 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
         # Sampler-specific settings
         self.config = config
 
-        # Store the velocity functions and ODE states from the previous action
-        # sequence generation
+        # Store the velocity functions and ODE states from the previous action sequence generation
         self.prev_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
         self.prev_ode_states: Tensor | None = None
         self.prev_scorer_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None

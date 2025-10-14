@@ -13,7 +13,7 @@ from torch import Tensor
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.common.flow_matching.ode_solver import ODESolver
 from lerobot.processor import PolicyAction, PolicyProcessorPipeline
-from lerobot.visualizer.configuration_visualizer import ActionSeqVisConfig
+from lerobot.visualizers.configuration_visualizer import ActionSeqVisConfig
 
 from .visualizer import FlowMatchingVisualizer
 

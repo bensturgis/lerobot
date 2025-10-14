@@ -3,13 +3,13 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lerobot.common import envs
-from lerobot.common.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
-    FiperDataRecorderConfig,
-)
+from lerobot import envs
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
+    FiperDataRecorderConfig,
+)
 
 
 @dataclass

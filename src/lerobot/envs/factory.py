@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
-from typing import Callable
+from typing import Callable, Dict, Literal
 
 import gymnasium as gym
 
@@ -132,3 +132,23 @@ def make_env(
     # normalize to {suite: {task_id: vec_env}} for consistency
     suite_name = cfg.type  # e.g., "pusht", "aloha"
     return {suite_name: {0: vec}}
+
+
+def build_env_for_domain(cfg: EnvConfig, domain: Literal["id", "ood"]) -> Dict[str, Dict[int, gym.Env]]:
+    """
+    Build a single environment mapping for the given evaluation domain.
+
+    Args:
+        cfg: Base environment configuration.
+        domain: "id" to create an in-distribution or "ood" to create an out-of-distribution environment.
+
+    Returns:
+        A mapping of the form {suite_name: {task_id: env}}, containing exactly one env.
+    """
+    if domain == "id":
+        cfg.ood.enabled = False
+    elif domain == "ood":
+        cfg.ood.enabled = True
+    else:
+        raise ValueError(f"Unknown eval domain '{domain}'. Expected 'id' or 'ood'.")
+    return make_single_env(cfg)

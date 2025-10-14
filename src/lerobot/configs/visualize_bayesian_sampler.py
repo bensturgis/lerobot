@@ -9,9 +9,8 @@ from lerobot.configs.default import DatasetConfig, VisConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
-    UncertaintySamplerConfig,
 )
-from lerobot.visualizer.configuration_visualizer import (
+from lerobot.visualizers.configuration_visualizer import (
     ActionSeqVisConfig,
     FlowVisConfig,
     VectorFieldVisConfig,
@@ -22,7 +21,6 @@ from lerobot.visualizer.configuration_visualizer import (
 class VisualizeBayesianSamplerPipelineConfig:
     env: envs.EnvConfig
     policy: PreTrainedConfig | None = None
-    uncertainty_sampler: UncertaintySamplerConfig | None = field(default_factory=UncertaintySamplerConfig)
     cross_bayesian_sampler: CrossBayesianSamplerConfig = field(default_factory=CrossBayesianSamplerConfig)
     dataset: DatasetConfig | None = None
     vis: VisConfig = field(default_factory=VisConfig)
@@ -56,11 +54,6 @@ class VisualizeBayesianSamplerPipelineConfig:
         if self.vector_field.action_dim_names is None:
             self.vector_field.action_dim_names = self.vis.action_dim_names
             self.flows.action_dim_names = self.vis.action_dim_names
-
-
-        # Plug in the cross-bayesian sampler config into the uncertainty sampler config
-        self.uncertainty_sampler.type = "cross_bayesian"
-        self.uncertainty_sampler.cross_bayesian_sampler = self.cross_bayesian_sampler
 
         if not self.job_name:
             if self.env is None:

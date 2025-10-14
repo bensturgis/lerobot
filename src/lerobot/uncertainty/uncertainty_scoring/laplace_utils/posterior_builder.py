@@ -42,9 +42,6 @@ def create_laplace_calib_loader(
         calib_fraction: Fraction of the full dataset to reserve for calibration (between 0 and 1).
         batch_size: Number of samples per batch in the returned DataLoader.
     """
-    # Check device is available
-    device = get_safe_torch_device(policy_cfg.device, log=True)
-
     # Extract a subset of the full train dataset for calibration
     dataset = make_dataset(dataset_cfg=dataset_cfg, policy_cfg=policy_cfg)
     dataset = patch_dataset_episode_boundaries(dataset=dataset)
@@ -144,6 +141,7 @@ def make_laplace_path(
     calib_fraction_pct = int(calib_fraction * 100)
     filename = f"laplace_{'_'.join(scope_abbreviations)}_frac{calib_fraction_pct}pct.bin"
     return Path(pretrained_path) / filename
+
 
 def get_laplace_posterior(
     policy: PreTrainedPolicy,
