@@ -49,7 +49,7 @@ from lerobot.utils.io_utils import get_task_dir, write_video
 from lerobot.utils.live_window import LiveWindow
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import get_safe_torch_device, init_logging
-from lerobot.visualizer import (
+from lerobot.visualizers import (
     ActionSeqVisualizer,
     NoiseToActionVisualizer,
     VectorFieldVisualizer,

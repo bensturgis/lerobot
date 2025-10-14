@@ -61,6 +61,9 @@ from torch import Tensor, nn
 from tqdm import tqdm
 
 from lerobot.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS, OBS_STATE
+from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
+    FiperDataRecorderConfig,
+)
 from lerobot.policies.common.aloha import (
     pi_aloha_decode_state,
     pi_aloha_encode_actions,
@@ -213,6 +216,28 @@ class SmolVLAPolicy(PreTrainedPolicy):
             scorer_artifacts=scorer_artifacts,
         )
 
+    def init_fiper_data_recorder(
+        self,
+        config: FiperDataRecorderConfig,
+        scorer_artifacts,
+    ):
+        """
+        Constructs the FIPER data recorder based on the config.
+        """
+        from lerobot.fiper_data_recorder.fiper_data_recorder import FiperDataRecorder
+        from lerobot.policies.factory import make_flow_matching_adapter
+
+        flow_matching_adapter = make_flow_matching_adapter(
+            model=self.model,
+            policy_config=self.config
+        )
+
+        self.fiper_data_recorder = FiperDataRecorder(
+            config=config,
+            flow_matching_adapter=flow_matching_adapter,
+            scorer_artifacts=scorer_artifacts,
+        )
+
     def reset(self):
         """This should be called whenever the environment is reset."""
         self._queues = {
@@ -221,6 +246,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
         if self.uncertainty_sampler is not None:
             self.uncertainty_sampler.reset()
+
+        if self.fiper_data_recorder is not None:
+            self.fiper_data_recorder.reset()
 
     def get_optim_params(self) -> dict:
         return self.parameters()
@@ -248,6 +276,16 @@ class SmolVLAPolicy(PreTrainedPolicy):
                 observation=batch,
             )
             tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty:.4f}")
+        elif not self.training and self.fiper_data_recorder is not None:
+            if batch_size != 1:
+                raise ValueError(
+                    f"Recording FIPER data requires batch size of 1, but got {batch_size}."
+                )
+
+            # Sample actions and record sampling data.
+            actions = self.fiper_data_recorder.conditional_sample_with_recording(
+                observation=batch,
+            )
         else:
             images, img_masks = self.model.prepare_images(batch)
             state = self.model.prepare_state(batch)

@@ -23,7 +23,7 @@ import time
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -34,8 +34,7 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
-from lerobot.envs.configs import EnvConfig
-from lerobot.envs.factory import make_single_env
+from lerobot.envs.factory import build_env_for_domain
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -265,26 +264,6 @@ def rollout(
     }
 
     return info
-
-
-def build_env_for_domain(cfg: EnvConfig, domain: Literal["id", "ood"]) -> Dict[str, Dict[int, gym.Env]]:
-    """
-    Build a single environment mapping for the given evaluation domain.
-
-    Args:
-        cfg: Base environment configuration.
-        domain: "id" to create an in-distribution or "ood" to create an out-of-distribution environment.
-
-    Returns:
-        A mapping of the form {suite_name: {task_id: env}}, containing exactly one env.
-    """
-    if domain == "id":
-        cfg.ood.enabled = False
-    elif domain == "ood":
-        cfg.ood.enabled = True
-    else:
-        raise ValueError(f"Unknown eval domain '{domain}'. Expected 'id' or 'ood'.")
-    return make_single_env(cfg)
 
 
 def get_task_title(

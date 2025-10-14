@@ -42,6 +42,9 @@ class FiperDataRecorderConfig:
     # Number of action sequences sampled per observation for uncertainty estimation
     num_uncertainty_sequences: int = 256
 
+    # Which environment domains to evaluate. Allowed values: "id" (in-distribution), "ood" (out-of-distribution).
+    domains: tuple[str] = ("id", "ood")
+
     # Scoring metrics to be recorded, choose from "mode_distance", "inter_vel_diff" and "likelihood"
     scoring_metrics: tuple = ("mode_distance", "inter_vel_diff", "likelihood")
 
@@ -49,7 +52,7 @@ class FiperDataRecorderConfig:
     ensemble_model_path: str | Path | None = None
 
     # Parameters for the Laplace approximation calibration dataloader
-    laplace_scope: str = "both"
+    laplace_scopes: list[str] | None = None
     calib_fraction: float = 1.0
     batch_size: int = 1
 

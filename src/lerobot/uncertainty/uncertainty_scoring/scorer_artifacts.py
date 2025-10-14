@@ -8,10 +8,10 @@ from laplace import Laplace
 from lerobot import envs
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
-from lerobot.policies.flow_matching.fiper_data_recording.configuration_fiper_data_recorder import (
+from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
     FiperDataRecorderConfig,
 )
+from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.processor import PolicyProcessorPipeline
 
@@ -85,9 +85,9 @@ def build_scorer_artifacts_for_fiper_recorder(
     laplace_posterior = get_laplace_posterior(
         policy=policy,
         preprocessor=preprocesser,
-        laplace_scope=fiper_data_recorder_cfg.laplace_scope,
+        laplace_scopes=fiper_data_recorder_cfg.laplace_scopes,
         calib_fraction=fiper_data_recorder_cfg.calib_fraction,
         batch_size=fiper_data_recorder_cfg.batch_size,
         dataset_cfg=dataset_cfg,
     )
-    return ScorerArtifacts(ensemble_model=ensemble_model, laplace_posterior=laplace_posterior)
+    return ScorerArtifacts(ensemble_adapter=ensemble_model, laplace_posterior=laplace_posterior)

@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -68,7 +68,7 @@ class CrossBayesianSampler(UncertaintySampler):
 
     def conditional_sample_with_uncertainty(
         self,
-        observation: dict[str, Tensor],
+        observation: Dict[str, Tensor],
         generator: Optional[torch.Generator] = None,
     ) -> Tuple[Tensor, float]:
         """

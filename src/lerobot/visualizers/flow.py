@@ -16,7 +16,7 @@ from lerobot.policies.common.flow_matching.ode_solver import (
     make_sampling_time_grid,
     select_ode_states,
 )
-from lerobot.visualizer.configuration_visualizer import FlowVisConfig
+from lerobot.visualizers.configuration_visualizer import FlowVisConfig
 
 from .utils import add_actions, compute_axis_limits
 from .visualizer import FlowMatchingVisualizer

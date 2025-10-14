@@ -10,7 +10,7 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
 )
-from lerobot.visualizer.configuration_visualizer import (
+from lerobot.visualizers.configuration_visualizer import (
     ActionSeqVisConfig,
     FlowVisConfig,
     VectorFieldVisConfig,

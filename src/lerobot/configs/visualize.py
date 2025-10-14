@@ -7,7 +7,7 @@ from lerobot import envs
 from lerobot.configs import parser
 from lerobot.configs.default import VisConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.visualizer.configuration_visualizer import (
+from lerobot.visualizers.configuration_visualizer import (
     ActionSeqVisConfig,
     FlowVisConfig,
     NoiseToActionVisConfig,
