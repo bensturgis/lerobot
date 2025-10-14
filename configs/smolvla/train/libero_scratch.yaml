@@ -1,32 +1,33 @@
 dataset:
   repo_id: HuggingFaceVLA/libero
   libero_tasks: {
-    libero_spatial: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    libero_object: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    libero_goal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    libero_10: [1, 2, 3, 5, 6]
+    libero_spatial: [],
+    libero_object: [],
+    libero_goal: [],
+    libero_10: [0, 4, 7, 8, 9]
   }
 
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-filtered-base-unfreezed-vision-horizon-50
+  repo_id: bensturgis/smolvla-libero-5-tasks-scratch
 
 env:
   type: libero
   task: libero_10
+  task_ids: [0, 4, 7, 8, 9]
 
 eval:
   batch_size: 1
   n_episodes: 5
 
-output_dir: outputs/train/smolvla/libero_filtered_base_unfreezed_vision_horizon_50
+output_dir: outputs/train/smolvla/libero_5_tasks_scratch
 steps: 200000
 batch_size: 48
 eval_freq: 10000
 val_ratio: 0.05
 save_freq: 10000
-seed: 532034291
+seed: 73821
 wandb:
   enable: true
 

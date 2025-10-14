@@ -28,7 +28,7 @@ class SmolVLAConfig(PreTrainedConfig):
     # Input / output structure.
     n_obs_steps: int = 1
     chunk_size: int = 50
-    n_action_steps: int = 1
+    n_action_steps: int = 20
 
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
