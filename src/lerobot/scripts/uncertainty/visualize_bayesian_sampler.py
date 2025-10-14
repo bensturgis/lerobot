@@ -220,14 +220,15 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                 # Decide whether a new sequence will be generated
                 new_action_gen = len(policy._queues["action"]) == 0
 
+                if new_action_gen and (config.vis.start_step is None or step_idx >= config.vis.start_step):
+                    action_generation_iter += 1
+                    tqdm.write(f"-----------------------Action Generation Iteration {action_generation_iter}---------------------")
+
                 with torch.no_grad():
                     action = policy.select_action(observation)
                 action = postprocessor(action)
 
                 if new_action_gen and (config.vis.start_step is None or step_idx >= config.vis.start_step):
-                    action_generation_iter += 1
-                    tqdm.write(f"-----------------------Action Generation Iteration {action_generation_iter}---------------------")
-
                     # Clear action data dictionary
                     action_data.clear()
 

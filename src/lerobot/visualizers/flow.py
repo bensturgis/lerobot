@@ -265,7 +265,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             eval_times=vel_eval_times,
         )
         vector_field_dict = {
-            "Velocities": vector_field
+            "Velocities": vector_field[..., self.action_dims]
         }
 
         # Select the specific action step and dimensions
@@ -356,8 +356,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
             eval_times=velocity_eval_times,
         )
         vector_fields = {
-            "Sampler Velocities": sampler_vector_field,
-            "Scorer Velocities": scorer_vector_field
+            "Sampler Velocities": sampler_vector_field[..., self.action_dims],
+            "Scorer Velocities": scorer_vector_field[..., self.action_dims]
         }
 
         # Select the specific action step and dimensions

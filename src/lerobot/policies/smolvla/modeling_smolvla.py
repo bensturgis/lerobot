@@ -278,6 +278,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
             )
             tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty:.4f}")
         elif not self.training and self.fiper_data_recorder is not None:
+            batch_size = batch["observation.state"].shape[0]
             if batch_size != 1:
                 raise ValueError(
                     f"Recording FIPER data requires batch size of 1, but got {batch_size}."

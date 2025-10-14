@@ -124,7 +124,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_grid, y_grid, z_grid = np.meshgrid(axis_lin, axis_lin, axis_lin, indexing="xy")
             x_dim, y_dim, z_dim = self.action_dims
 
-        if self.action_steps is None:
+        if len(self.action_steps) == 0:
             self.action_steps = list(range(self.model.horizon))
         action_steps_idx = torch.randint(
             low=0,
