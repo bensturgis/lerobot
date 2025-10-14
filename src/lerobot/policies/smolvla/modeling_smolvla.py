@@ -196,6 +196,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         self.model = VLAFlowMatching(config)
 
         self.uncertainty_sampler = None
+        self.fiper_data_recorder = None
 
         self.reset()
 

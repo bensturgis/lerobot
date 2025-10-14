@@ -134,10 +134,19 @@ def prepare_run_metadata(cfg: FiperDataRecordingPipelineConfig) -> Dict[str, Any
     """
     Prepare metadata dictionary for this data recording run.
     """
+    if cfg.policy.type == "flow_matching":
+        horizon = cfg.policy.horizon
+    elif cfg.policy.type == "smolvla":
+        horizon = cfg.policy.chunk_size
+    else:
+        raise ValueError(
+            f"Horizon cannot be determined for policy type '{cfg.policy.type}'. "
+            "Expected a policy of type 'flow_matching' or 'smolvla'."
+        )
     run_metadata = {
         "metadata": True,
         "task": cfg.env.task,
-        "action_prediction_horizon": cfg.policy.horizon,
+        "action_prediction_horizon": horizon,
         "action_execution_horizon": cfg.policy.n_action_steps,
         "action_batch_size": cfg.fiper_data_recorder.num_uncertainty_sequences,
     }
@@ -172,7 +181,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
         for domain in cfg.fiper_data_recorder.domains
     }
 
-    logging.info("Loading policy")
+    logging.info("Loading policy.")
     policy: PreTrainedPolicy = make_policy(
         cfg.policy,
         env_cfg=cfg.env,
