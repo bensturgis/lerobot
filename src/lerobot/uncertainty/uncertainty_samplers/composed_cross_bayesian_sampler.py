@@ -108,7 +108,7 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
             num_samples=self.num_action_samples,
             generator=generator,
         )
-        if self.prev_selected_action_idx is not None:
+        if self.prev_selected_action_idx is not None and self.scoring_metric.name == "inter_vel_diff":
             # Reuse overlapping segment of noise from the previously selected trajectory
             # so that the newly sampled noise remains consistent with already executed actions
             new_noise_sample = splice_noise_with_prev(

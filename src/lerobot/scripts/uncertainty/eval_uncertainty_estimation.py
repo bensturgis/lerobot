@@ -500,6 +500,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             # Flatten envs into list of (task_group, task_id, env)
             tasks = [(tg, tid, env) for tg, group in envs.items() for tid, env in group.items()]
             for task_group, task_id, env in tasks:
+                logging.info(f"Evaluating {task_group} | Task ID {task_id}")
                 # Evaluate uncertainty methods on this task instance
                 evaluate_methods_on_task_env(
                     cfg=cfg,

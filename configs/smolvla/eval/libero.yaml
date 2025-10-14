@@ -1,9 +1,10 @@
 env:
   type: libero
   task: libero_10
+  task_ids: [8]
 
 eval:
-  batch_size: 1
-  n_episodes: 10
+  batch_size: 5
+  n_episodes: 100
 
-# python src/lerobot/scripts/eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_02/checkpoints/005000/pretrained_model --policy.n_action_steps=8
+# python src/lerobot/scripts/eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50/checkpoints/005000/pretrained_model --policy.n_action_steps=8

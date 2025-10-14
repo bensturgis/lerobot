@@ -239,7 +239,6 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                     _, uncertainty = cross_bayesian_sampler.conditional_sample_with_uncertainty(
                         observation=observation, generator=generator
                     )
-                    tqdm.write(f"Cross ensemble sampler uncertainty: {uncertainty}")
 
                     # Extract the current scorer model
                     scorer_model: BaseFlowMatchingAdapter = cross_bayesian_sampler.scorer_model
