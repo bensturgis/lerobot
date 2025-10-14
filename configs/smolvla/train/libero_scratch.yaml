@@ -10,7 +10,7 @@ dataset:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-filtered-base-unfreezed-vision
+  repo_id: bensturgis/smolvla-libero-filtered-base-unfreezed-vision-horizon-50
 
 env:
   type: libero
@@ -20,13 +20,13 @@ eval:
   batch_size: 1
   n_episodes: 5
 
-output_dir: outputs/train/smolvla/libero_filtered_base_unfreezed_vision
+output_dir: outputs/train/smolvla/libero_filtered_base_unfreezed_vision_horizon_50
 steps: 200000
 batch_size: 48
 eval_freq: 10000
 val_ratio: 0.05
 save_freq: 10000
-seed: 3529831
+seed: 532034291
 wandb:
   enable: true
 

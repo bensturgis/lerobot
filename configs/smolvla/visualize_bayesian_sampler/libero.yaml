@@ -15,19 +15,19 @@ vis:
   ]
 
 vector_field:
-  action_dims: [0, 1]
-  action_steps: [15]
+  action_dims: [1, 2]
+  action_steps: [5, 10, 15, 20, 25, 30, 35, 40, 45, 49]
   grid_size: 20
   min_action: -2
   max_action: 2
 
 flows:
   num_paths: 5
-  action_dims: [0, 1]
+  action_dims: [1, 2]
   axis_limits: [[-1.5, 1.5], [-1.5, 1.5]]
 
 cross_bayesian_sampler:
-  ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_02/checkpoints/015000/pretrained_model
+  ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50/checkpoints/005000/pretrained_model
   num_action_samples: 25
   scoring_metric:
     metric_type: mode_distance
@@ -36,4 +36,4 @@ cross_bayesian_sampler:
 show: False
 seed: 58
 
-# python src/lerobot/scripts/uncertainty/visualize_cross_bayesian_sampler.py --config=configs/flow_matching/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned/checkpoints/015000/pretrained_model
+# python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/smolvla/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50_02/checkpoints/005000/pretrained_model
