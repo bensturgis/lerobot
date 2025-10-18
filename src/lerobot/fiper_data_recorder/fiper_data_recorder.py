@@ -20,11 +20,7 @@ from lerobot.policies.common.flow_matching.ode_solver import (
     make_sampling_time_grid,
     select_ode_states,
 )
-from lerobot.uncertainty.uncertainty_samplers.utils import (
-    compose_ode_states,
-    select_and_expand_ode_states,
-    splice_noise_with_prev,
-)
+from lerobot.uncertainty.uncertainty_samplers.utils import compose_ode_states
 from lerobot.uncertainty.uncertainty_scoring.laplace_utils.posterior_builder import (
     sample_adapter_from_posterior,
 )
@@ -282,28 +278,12 @@ class FiperDataRecorder:
             ode_states=ode_states,
             requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
         )
-        if self.prev_selected_action_idx is not None:
-            selected_prev_ode_states, _ = select_ode_states(
-                time_grid=self.sampling_time_grid,
-                ode_states=select_and_expand_ode_states(self.prev_ode_states, self.prev_selected_action_idx),
-                requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
-            )
-            selected_composed_ode_states, _ = select_ode_states(
-                time_grid=self.sampling_time_grid,
-                ode_states=composed_ode_states,
-                requested_times=torch.tensor(self.config.ode_eval_times, device=self.device, dtype=self.dtype)
-            )
 
         # Compute velocities at intermediate ODE states for sampler, ensemble and laplace model
         sampler_vels: List[Tensor] = []
         ensemble_vels: List[Tensor] = []
         laplace_vels: List[Tensor] = []
-        # Compute velocities at original and composed intermediate ODE states for sampler model
-        prev_sampler_vels: List[Tensor] = []
-        composed_sampler_vels: List[Tensor] = []
-        # Compute velocities at original and composed intermediate ODE states for ensemble and laplace model
-        composed_ensemble_vels: List[Tensor] = []
-        composed_laplace_vels: List[Tensor] = []
+
         vel_diff_scaling_factors: List[float] = []
         for timestep, time in enumerate(self.config.ode_eval_times):
             ode_state = selected_ode_states[timestep]
@@ -317,34 +297,6 @@ class FiperDataRecorder:
             laplace_vels.append(
                 laplace_velocity_fn(x_t=ode_state, t=time_tensor)
             )
-            if self.prev_selected_action_idx is not None:
-                prev_ode_state = selected_prev_ode_states[timestep]
-                composed_ode_state = selected_composed_ode_states[timestep]
-                prev_sampler_vels.append(
-                    self.prev_velocity_fn(x_t=prev_ode_state, t=time_tensor)
-                )
-                composed_sampler_vels.append(
-                    self.prev_velocity_fn(x_t=composed_ode_state, t=time_tensor)
-                )
-                composed_ensemble_vels.append(
-                    self.prev_ensemble_velocity_fn(x_t=composed_ode_state, t=time_tensor)
-                )
-                composed_laplace_vels.append(
-                    self.prev_laplace_velocity_fn(x_t=composed_ode_state, t=time_tensor)
-                )
-            else:
-                prev_sampler_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
-                composed_sampler_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
-                composed_ensemble_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
-                composed_laplace_vels.append(
-                    torch.full_like(ode_state, float('nan'))
-                )
             vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
 
         return {
@@ -352,10 +304,6 @@ class FiperDataRecorder:
             "velocities": torch.stack(sampler_vels, dim=0).cpu(),
             "ensemble_velocities": torch.stack(ensemble_vels, dim=0).cpu(),
             "laplace_velocities": torch.stack(laplace_vels, dim=0).cpu(),
-            "prev_velocities": torch.stack(prev_sampler_vels, dim=0).cpu(),
-            "composed_velocities": torch.stack(composed_sampler_vels, dim=0).cpu(),
-            "composed_ensemble_velocities": torch.stack(composed_ensemble_vels, dim=0).cpu(),
-            "composed_laplace_velocities": torch.stack(composed_laplace_vels, dim=0).cpu(),
             "vel_diff_scaling": np.asarray(vel_diff_scaling_factors),
         }
 
@@ -402,17 +350,6 @@ class FiperDataRecorder:
             num_samples=self.config.num_uncertainty_sequences,
             generator=generator,
         )
-
-        if self.prev_selected_action_idx is not None:
-            # Reuse overlapping segment of noise from the previously selected trajectory
-            # so that the newly sampled noise remains consistent with already executed actions
-            noise_sample = splice_noise_with_prev(
-                new_noise_sample=noise_sample,
-                prev_noise_sample=self.prev_ode_states[0, self.prev_selected_action_idx],
-                horizon=self.horizon,
-                n_action_steps=self.n_action_steps,
-                n_obs_steps=self.n_obs_steps
-            )
 
         # Solve ODE forward from noise to sample action sequences
         ode_states = self.ode_solver.sample(

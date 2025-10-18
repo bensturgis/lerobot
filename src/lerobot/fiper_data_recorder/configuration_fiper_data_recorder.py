@@ -61,8 +61,7 @@ class FiperDataRecorderConfig:
         default_factory=lambda: [round(i * 0.05, 2) for i in range(20)] + [1.0]
     )
 
-    # Times at which to evaluate the velocity of the sampled action sequence under a
-    # scorer model
+    # Times at which to evaluate the velocity of the sampled action sequence under a scorer model
     terminal_vel_eval_times: list[float] = field(
         default_factory=lambda: [round(i * 0.1, 1) for i in range(10)]
     )
