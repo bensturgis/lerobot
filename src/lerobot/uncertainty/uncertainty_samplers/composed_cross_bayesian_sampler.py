@@ -12,7 +12,7 @@ from .configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
 )
 from .uncertainty_sampler import UncertaintySampler
-from .utils import compose_ode_states, select_and_expand_ode_states, splice_noise_with_prev
+from .utils import compose_ode_states, select_and_expand_ode_states
 
 
 class ComposedCrossBayesianSampler(UncertaintySampler):
@@ -57,6 +57,11 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
             config=config.scoring_metric,
             uncertainty_sampler=self,
         )
+
+        if self.scoring_metric.name == "inter_vel_diff":
+            raise ValueError(
+                "Composed sequence cross-Bayesian sampler is not compatible with intermediate velocity difference score."
+            )
 
         self.ensemble_adapter = scorer_artifacts.ensemble_adapter
         self.laplace_posterior = scorer_artifacts.laplace_posterior
@@ -108,16 +113,6 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
             num_samples=self.num_action_samples,
             generator=generator,
         )
-        if self.prev_selected_action_idx is not None and self.scoring_metric.name == "inter_vel_diff":
-            # Reuse overlapping segment of noise from the previously selected trajectory
-            # so that the newly sampled noise remains consistent with already executed actions
-            new_noise_sample = splice_noise_with_prev(
-                new_noise_sample=new_noise_sample,
-                prev_noise_sample=self.prev_ode_states[0, self.prev_selected_action_idx],
-                horizon=self.horizon,
-                n_action_steps=self.n_action_steps,
-                n_obs_steps=self.n_obs_steps
-            )
 
         # Solve ODE forward from noise to sample action sequences
         new_ode_states = self.sampling_ode_solver.sample(

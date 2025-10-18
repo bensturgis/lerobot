@@ -92,7 +92,7 @@ class ScoringMetricConfig:
     """
     Scoring settings shared by all uncertainty samplers.
     """
-    metric_type: str = "likelihood"
+    metric_type: str = "mode_distance"
     likelihood_ode_solver_cfg: LikelihoodODESolverConfig = field(
         default_factory=LikelihoodODESolverConfig
     )
@@ -141,10 +141,10 @@ class ComposedCrossBayesianSamplerConfig:
 
         # Validate scoring metric
         validate_metric(
-            field_name="CrossEnsembleSamplerConfig.scoring_metric",
+            field_name="ComposedCrossBayesianSamplerConfig.scoring_metric",
             metric=self.scoring_metric.metric_type,
             allowed=(
-                "inter_vel_diff", "likelihood", "mode_distance", "terminal_vel_norm",
+                "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
@@ -173,10 +173,10 @@ class CrossBayesianSamplerConfig:
 
         # Validate scoring metric
         validate_metric(
-            field_name="CrossEnsembleSamplerConfig.scoring_metric",
+            field_name="CrossBayesianSamplerConfig.scoring_metric",
             metric=self.scoring_metric.metric_type,
             allowed=(
-                 "inter_vel_diff", "likelihood", "mode_distance", "terminal_vel_norm",
+                "inter_vel_diff", "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 
@@ -187,10 +187,10 @@ class ComposedSequenceSamplerConfig:
 
     def __post_init__(self):
         validate_metric(
-            field_name="CrossEnsembleSamplerConfig.scoring_metric",
+            field_name="ComposedSequenceSamplerConfig.scoring_metric",
             metric=self.scoring_metric.metric_type,
             allowed=(
-                 "inter_vel_diff", "likelihood", "mode_distance", "terminal_vel_norm",
+                "likelihood", "mode_distance", "terminal_vel_norm",
             ),
         )
 

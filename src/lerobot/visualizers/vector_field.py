@@ -150,6 +150,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     time=time,
                     max_velocity_norm=max_velocity_norm,
+                    arrow_scale=8,
                     uncertainty=kwargs.get("uncertainty"),
                 )
             else:
@@ -357,6 +358,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
+        arrow_lenght: float = 0.7,
         uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
@@ -446,6 +448,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         action_step: int,
         time: float,
         max_velocity_norm: float,
+        arrow_scale: float = 50.0,
         uncertainty: Optional[float] = None,
     ) -> plt.Figure:
         """
@@ -469,7 +472,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             x_velocities, y_velocities,
             norms, cmap='viridis',
             norm=plt.Normalize(vmin=0.0, vmax=max_velocity_norm),
-            angles='xy', scale=50,
+            angles='xy', scale=arrow_scale,
             scale_units='xy', width=0.005,
         )
 

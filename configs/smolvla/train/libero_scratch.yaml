@@ -10,7 +10,7 @@ dataset:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-5-tasks-scratch
+  repo_id: bensturgis/smolvla-libero-5-tasks-scratch-with-vision-02
 
 env:
   type: libero
@@ -21,13 +21,13 @@ eval:
   batch_size: 1
   n_episodes: 5
 
-output_dir: outputs/train/smolvla/libero_5_tasks_scratch
-steps: 200000
-batch_size: 48
+output_dir: outputs/train/smolvla/libero_5_tasks_scratch_with_vision_02
+steps: 100000
+batch_size: 15
 eval_freq: 10000
 val_ratio: 0.05
 save_freq: 10000
-seed: 73821
+seed: 180123899
 wandb:
   enable: true
 

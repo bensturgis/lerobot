@@ -16,7 +16,7 @@ def build_ensemble_model(
     """
     Load a pretrained ensemble flow-matching model from the given path.
     """
-    from lerobot.policies.factory import make_policy, make_flow_matching_adapter_from_policy
+    from lerobot.policies.factory import make_flow_matching_adapter_from_policy, make_policy
 
     device = get_safe_torch_device(policy_cfg.device)
     ensemble_model_config = copy.deepcopy(policy_cfg)

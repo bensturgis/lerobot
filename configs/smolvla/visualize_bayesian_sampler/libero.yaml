@@ -1,7 +1,7 @@
 env:
   type: libero
   task: libero_10
-  task_ids: [0]
+  task_ids: [5]
 
 policy:
   type: smolvla
@@ -27,13 +27,15 @@ flows:
   axis_limits: [[-1.5, 1.5], [-1.5, 1.5]]
 
 cross_bayesian_sampler:
+  # ensemble_model_path: outputs/train/smolvla/libero_5_tasks_scratch_02/checkpoints/020000/pretrained_model
   ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50/checkpoints/005000/pretrained_model
   num_action_samples: 25
   scoring_metric:
     metric_type: mode_distance
-    velocity_eval_times: [0.0, 0.1, 0.2]
+    velocity_eval_times: [0.0]
 
 show: False
 seed: 58
 
+# python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/smolvla/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_5_tasks_scratch/checkpoints/020000/pretrained_model
 # python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/smolvla/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50_02/checkpoints/005000/pretrained_model
