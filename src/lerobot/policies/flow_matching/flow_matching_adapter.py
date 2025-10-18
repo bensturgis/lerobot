@@ -57,3 +57,6 @@ class FlowMatchingAdapter(BaseFlowMatchingAdapter):
                 x_t, t.expand(batch_size), global_cond=conditioning["global_cond"]
             )
         return v_t
+
+    def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> Tensor:
+        return conditioning["global_cond"]

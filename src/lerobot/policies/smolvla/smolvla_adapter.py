@@ -94,3 +94,13 @@ class SmolVLAAdapter(BaseFlowMatchingAdapter):
             )
             return -v_s
         return v_t
+
+    def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> Tensor:
+        num_vlm_layers = len(self.model.vlm_with_expert.get_vlm_model().text_model.layers)
+        keys = conditioning["past_key_values"][(num_vlm_layers // 2) - 1]["key_states"]
+        values = conditioning["past_key_values"][(num_vlm_layers // 2) - 1]["value_states"]
+
+        batch_size = keys.shape[0]
+        flat_keys = keys.reshape(batch_size, -1)
+        flat_values = values.reshape(batch_size, -1)
+        return torch.cat([flat_keys, flat_values], dim=1)

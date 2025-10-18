@@ -389,7 +389,7 @@ class FiperDataRecorder:
         # Build the velocity function for sampler and scorer model conditioned on the current observation
         conditioning = self.flow_matching_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
         velocity_fn = self.flow_matching_adapter.make_velocity_fn(conditioning=conditioning)
-        step_data["obs_embedding"] = conditioning
+        step_data["obs_embedding"] = self.flow_matching_adapter.prepare_fiper_obs_embedding(conditioning=conditioning)
 
         ensemble_conditioning = self.ensemble_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
         ensemble_velocity_fn = self.ensemble_adapter.make_velocity_fn(conditioning=ensemble_conditioning)

@@ -87,3 +87,7 @@ class BaseFlowMatchingAdapter(ABC):
     @abstractmethod
     def make_velocity_fn(self, conditioning: Dict[str, Tensor]) -> Callable[[Tensor, Tensor], Tensor]:
         raise NotImplementedError
+
+    @abstractmethod
+    def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> Tensor:
+        raise NotImplementedError
