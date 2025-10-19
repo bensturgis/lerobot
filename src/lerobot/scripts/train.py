@@ -311,6 +311,9 @@ def train(cfg: TrainPipelineConfig):
         ds_meta=full_dataset.meta,
     )
 
+    if cfg.reinitialize_selected_layers:
+        policy.reinitialize_selected_layers()
+
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
     if not (cfg.resume and cfg.policy.pretrained_path):

@@ -254,6 +254,70 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def get_optim_params(self) -> dict:
         return self.parameters()
 
+    def reinitialize_selected_layers(self) -> list[nn.Parameter]:
+        reinitialized_params = []
+
+        for module in [
+            self.model.action_out_proj, self.model.action_time_mlp_in, self.model.action_time_mlp_out, self.model.state_proj
+        ]:
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+            for p in module.parameters():
+                reinitialized_params.append(p)
+
+        # Action expert last transformer layers
+        action_expert = self.model.vlm_with_expert.lm_expert
+        for layer in action_expert.layers[-2:]:
+            for proj in ("q_proj","k_proj","v_proj","o_proj"):
+                module = getattr(layer.self_attn, proj)
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+                for p in getattr(layer.self_attn, proj).parameters():
+                    reinitialized_params.append(p)
+            for module in layer.mlp.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.xavier_uniform_(module.weight)
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
+                    for p in module.parameters():
+                        reinitialized_params.append(p)
+
+        # Vision connector
+        connector = self.model.vlm_with_expert.get_vlm_model().connector
+        for module in connector.modules():
+            if isinstance(module, torch.nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        for p in connector.parameters():
+            reinitialized_params.append(p)
+
+        # Vision encoder last transformer layers
+        vision_model = self.model.vlm_with_expert.get_vlm_model().vision_model
+        layers = vision_model.encoder.layers
+        for layer in layers[-2:]:
+            for proj in ("q_proj","k_proj","v_proj", "out_proj"):
+                module = getattr(layer.self_attn, proj)
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+                for p in getattr(layer.self_attn, proj).parameters():
+                    reinitialized_params.append(p)
+            for module in layer.mlp.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.xavier_uniform_(module.weight)
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
+                    for p in module.parameters():
+                        reinitialized_params.append(p)
+
+        for i, p in enumerate(reinitialized_params):
+            assert p.requires_grad, f"Parameter {i} ({p.shape}) has requires_grad=False"
+
+        return reinitialized_params
+
     def _get_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
         # TODO: Check if this for loop is needed.
         # Context: In fact, self.queues contains only ACTION field, and in inference, we don't have action in the batch
