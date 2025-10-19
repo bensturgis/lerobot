@@ -22,6 +22,7 @@ from transformers import (
     AutoModelForImageTextToText,
     AutoProcessor,
     SmolVLMForConditionalGeneration,
+    SmolVLMVisionTransformer
 )
 
 
@@ -63,6 +64,7 @@ class SmolVLMWithExpertModel(nn.Module):
         self,
         model_id: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
         load_vlm_weights: bool = True,
+        reset_vision_model: bool = True,
         freeze_vision_encoder: bool = False,
         freeze_text_model: bool = False,
         attention_mode: str = "self_attn",
@@ -86,6 +88,8 @@ class SmolVLMWithExpertModel(nn.Module):
                 low_cpu_mem_usage=True,
             )
             config = self.vlm.config
+            if reset_vision_model:
+                self.vlm.model.vision_model = SmolVLMVisionTransformer._from_config(config.vision_config)
         else:
             config = AutoConfig.from_pretrained(model_id)
             self.vlm = SmolVLMForConditionalGeneration(config=config)
