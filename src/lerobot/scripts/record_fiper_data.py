@@ -250,9 +250,9 @@ def main(cfg: FiperDataRecordingPipelineConfig):
                     info, frames = rollout(
                         env=env,
                         policy=policy,
-                        seed=seed,
                         preprocessor=preprocessor,
-                        postprocessor=postprocessor
+                        postprocessor=postprocessor,
+                        seed=seed,
                     )
 
                     # Accept only successful ID rollouts for calibration set
@@ -288,7 +288,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
         # Data recording for test set
         elif target_split == "test":
             domain = next(test_domain_cycle)
-            logging.info(f"Evaluating {domain.title()} environments for test set.")
+            logging.info(f"Evaluating {domain} environments for test set.")
             tasks = [(tg, tid, env) for tg, group in envs_by_domain[domain].items() for tid, env in group.items()]
             for task_group, task_id, env in tasks:
                 # Reset the FIPER data recorder before a new episode
@@ -298,9 +298,10 @@ def main(cfg: FiperDataRecordingPipelineConfig):
                 rollout_info, ep_frames = rollout(
                     env=env,
                     policy=policy,
+                    preprocessor=preprocessor,
+                    postprocessor=postprocessor,
                     seed=seed
                 )
-                env.close()
 
                 task_dir = get_task_dir(out_root=cfg.output_dir, task_group=task_group, task_id=task_id)
                 test_dir = task_dir / "test"
