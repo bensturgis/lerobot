@@ -23,11 +23,11 @@ eval:
 
 output_dir: outputs/train/smolvla/libero_5_tasks_scratch_with_vision_02
 steps: 100000
-batch_size: 15
+batch_size: 40
 eval_freq: 10000
 val_ratio: 0.05
 save_freq: 10000
-seed: 180123899
+seed: 18
 wandb:
   enable: true
 
