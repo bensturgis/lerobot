@@ -258,7 +258,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
                     # Accept only successful ID rollouts for calibration set
                     if info["successful"]:
                         task_dir = get_task_dir(out_root=cfg.output_dir, task_group=task_group, task_id=task_id)
-                        calib_dir = task_dir / "calibration"
+                        calib_dir = task_dir / "rollouts" / "calibration"
                         if cfg.save_videos:
                             save_episode_video(
                                 ep_frames=frames,
@@ -304,7 +304,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
                 )
 
                 task_dir = get_task_dir(out_root=cfg.output_dir, task_group=task_group, task_id=task_id)
-                test_dir = task_dir / "test"
+                test_dir = task_dir / "rollouts" / "test"
                 if cfg.save_videos:
                     save_episode_video(
                         ep_frames=ep_frames,
