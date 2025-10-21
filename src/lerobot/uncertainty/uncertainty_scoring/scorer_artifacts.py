@@ -82,12 +82,12 @@ def build_scorer_artifacts_for_fiper_recorder(
         policy_cfg=policy_cfg,
         env_cfg=env_cfg,
     )
-    laplace_posterior = get_laplace_posterior(
-        policy=policy,
-        preprocessor=preprocesser,
-        laplace_scopes=fiper_data_recorder_cfg.laplace_scopes,
-        calib_fraction=fiper_data_recorder_cfg.calib_fraction,
-        batch_size=fiper_data_recorder_cfg.batch_size,
-        dataset_cfg=dataset_cfg,
-    )
-    return ScorerArtifacts(ensemble_adapter=ensemble_model, laplace_posterior=laplace_posterior)
+    # laplace_posterior = get_laplace_posterior(
+    #     policy=policy,
+    #     preprocessor=preprocesser,
+    #     laplace_scopes=fiper_data_recorder_cfg.laplace_scopes,
+    #     calib_fraction=fiper_data_recorder_cfg.calib_fraction,
+    #     batch_size=fiper_data_recorder_cfg.batch_size,
+    #     dataset_cfg=dataset_cfg,
+    # )
+    return ScorerArtifacts(ensemble_adapter=ensemble_model, laplace_posterior=None)
