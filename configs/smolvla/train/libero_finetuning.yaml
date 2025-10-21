@@ -11,7 +11,7 @@ dataset:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-finetuning-with-reinitialization
+  repo_id: bensturgis/smolvla-libero-finetuning-with-reinitialization-02
 
 env:
   type: libero
@@ -20,17 +20,17 @@ env:
 
 eval:
   batch_size: 1
-  n_episodes: 5
+  n_episodes: 10
 
 reinitialize_selected_layers: True
 
-output_dir: outputs/train/smolvla/libero_finetuning_with_reinitialization
+output_dir: outputs/train/smolvla/libero_finetuning_with_reinitialization_02
 steps: 100000
 batch_size: 48
 eval_freq: 5000
 save_freq: 5000
 val_ratio: 0.05
-seed: 736
+seed: 22
 wandb:
   enable: true
 

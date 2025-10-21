@@ -298,7 +298,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         vision_model = self.model.vlm_with_expert.get_vlm_model().vision_model
         layers = vision_model.encoder.layers
         for layer in layers[-2:]:
-            for proj in ("q_proj","k_proj","v_proj", "out_proj"):
+            for proj in ("q_proj", "k_proj", "v_proj", "out_proj"):
                 module = getattr(layer.self_attn, proj)
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:

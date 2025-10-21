@@ -174,11 +174,11 @@ class FiperDataRecorder:
                 )
         return {
             "terminal_eval_times": np.asarray(self.config.terminal_vel_eval_times),
-            "ensemble_terminal_velocities": torch.stack(ensemble_terminal_vels, dim=0).cpu(),
-            "laplace_terminal_velocities": torch.stack(laplace_terminal_vels, dim=0).cpu(),
-            "composed_terminal_velocities": torch.stack(composed_terminal_vels, dim=0).cpu(),
-            "composed_ensemble_terminal_velocities": torch.stack(composed_ensemble_terminal_vels, dim=0).cpu(),
-            "composed_laplace_terminal_velocities": torch.stack(composed_laplace_terminal_vels, dim=0).cpu(),
+            "ensemble_terminal_velocities": torch.stack(ensemble_terminal_vels, dim=0).detach().cpu().numpy(),
+            "laplace_terminal_velocities": torch.stack(laplace_terminal_vels, dim=0).detach().cpu().numpy(),
+            "composed_terminal_velocities": torch.stack(composed_terminal_vels, dim=0).detach().cpu().numpy(),
+            "composed_ensemble_terminal_velocities": torch.stack(composed_ensemble_terminal_vels, dim=0).detach().cpu().numpy(),
+            "composed_laplace_terminal_velocities": torch.stack(composed_laplace_terminal_vels, dim=0).detach().cpu().numpy(),
         }
 
     def compute_log_likelihood(
@@ -252,17 +252,16 @@ class FiperDataRecorder:
             composed_laplace_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
 
         return {
-            "ensemble_log_likelihood": ensemble_log_likelihood.cpu(),
-            "laplace_log_likelihood": laplace_log_likelihood.cpu(),
-            "composed_log_likelihood": composed_log_likelihood.cpu(),
-            "composed_ensemble_log_likelihood": composed_ensemble_log_likelihood.cpu(),
-            "composed_laplace_log_likelihood": composed_laplace_log_likelihood.cpu(),
+            "ensemble_log_likelihood": ensemble_log_likelihood.detach().cpu().numpy(),
+            "laplace_log_likelihood": laplace_log_likelihood.detach().cpu().numpy(),
+            "composed_log_likelihood": composed_log_likelihood.detach().cpu().numpy(),
+            "composed_ensemble_log_likelihood": composed_ensemble_log_likelihood.detach().cpu().numpy(),
+            "composed_laplace_log_likelihood": composed_laplace_log_likelihood.detach().cpu().numpy(),
         }
 
     def record_inter_vel_diffs(
         self,
         ode_states: Tensor,
-        composed_ode_states: Optional[Tensor],
         velocity_fn: Callable[[Tensor, Tensor], Tensor],
         laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor],
         ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor],
@@ -301,9 +300,9 @@ class FiperDataRecorder:
 
         return {
             "ode_eval_times": np.asarray(self.config.ode_eval_times),
-            "velocities": torch.stack(sampler_vels, dim=0).cpu(),
-            "ensemble_velocities": torch.stack(ensemble_vels, dim=0).cpu(),
-            "laplace_velocities": torch.stack(laplace_vels, dim=0).cpu(),
+            "velocities": torch.stack(sampler_vels, dim=0).detach().cpu().numpy(),
+            "ensemble_velocities": torch.stack(ensemble_vels, dim=0).detach().cpu().numpy(),
+            "laplace_velocities": torch.stack(laplace_vels, dim=0).detach().cpu().numpy(),
             "vel_diff_scaling": np.asarray(vel_diff_scaling_factors),
         }
 
@@ -362,7 +361,7 @@ class FiperDataRecorder:
             return_intermediate_states=True,
         )
         action_candidates = ode_states[-1]  # (num_uncertainty_sequences, horizon, action_dim)
-        step_data["action_pred"] = action_candidates.cpu()
+        step_data["action_pred"] = action_candidates.detach().cpu().numpy()
 
         if self.prev_selected_action_idx is not None:
             # Compose full ODE states from stored previous and new action generation

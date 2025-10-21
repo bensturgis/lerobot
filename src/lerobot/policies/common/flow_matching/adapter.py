@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional
 
+import numpy as np
 import torch
 from torch import Tensor, nn
 
@@ -89,5 +90,5 @@ class BaseFlowMatchingAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> Tensor:
+    def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> np.ndarray:
         raise NotImplementedError

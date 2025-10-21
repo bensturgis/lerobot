@@ -30,12 +30,12 @@ uncertainty_sampler:
     num_action_samples: 25
   cross_bayesian_sampler:
     scorer_type: ensemble
-    ensemble_model_path: outputs/train/smolvla/libero_5_tasks_scratch_with_vision/checkpoints/020000/pretrained_model
+    ensemble_model_path: outputs/train/smolvla/libero_finetuning_with_reinitialization_02/checkpoints/015000/pretrained_model
     scoring_metric:
       metric_type: mode_distance
     num_action_samples: 25
 
-seed: 457103
-job_name: libero_smolvla_finetuning
+seed: 2211
+job_name: libero_smolvla_reinitialization
 
-# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_5_tasks_scratch_with_vision_02/checkpoints/020000/pretrained_model
+# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuning_with_reinitialization/checkpoints/015000/pretrained_model

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -50,7 +51,7 @@ class SmolVLAAdapter(BaseFlowMatchingAdapter):
         }
 
     @torch.no_grad()
-    def prepare_conditioning(self, observation: dict[str, Tensor], num_action_samples: int) -> Dict[str, Tensor]:
+    def prepare_conditioning(self, observation: Dict[str, Tensor], num_action_samples: int) -> Dict[str, Tensor]:
         observation = self.expand_observation(observation=observation, num_action_samples=num_action_samples)
 
         images, img_masks = self.model.prepare_images(observation)
@@ -95,12 +96,12 @@ class SmolVLAAdapter(BaseFlowMatchingAdapter):
             return -v_s
         return v_t
 
-    def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> Tensor:
+    def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> np.ndarray:
         num_vlm_layers = len(self.model.vlm_with_expert.get_vlm_model().text_model.layers)
-        keys = conditioning["past_key_values"][(num_vlm_layers // 2) - 1]["key_states"]
-        values = conditioning["past_key_values"][(num_vlm_layers // 2) - 1]["value_states"]
+        keys = conditioning["past_key_values"][(num_vlm_layers // 2) - 1]["key_states"][0]
+        values = conditioning["past_key_values"][(num_vlm_layers // 2) - 1]["value_states"][0]
 
-        batch_size = keys.shape[0]
-        flat_keys = keys.reshape(batch_size, -1)
-        flat_values = values.reshape(batch_size, -1)
-        return torch.cat([flat_keys, flat_values], dim=1)
+        flat_keys = keys.reshape(-1)
+        flat_values = values.reshape(-1)
+        concatenated_keys_values = torch.cat([flat_keys, flat_values])
+        return concatenated_keys_values.detach().to(torch.float32).cpu().numpy()

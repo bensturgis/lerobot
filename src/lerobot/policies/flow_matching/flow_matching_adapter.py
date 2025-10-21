@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -59,4 +60,4 @@ class FlowMatchingAdapter(BaseFlowMatchingAdapter):
         return v_t
 
     def prepare_fiper_obs_embedding(self, conditioning: Dict[str, Tensor]) -> Tensor:
-        return conditioning["global_cond"]
+        return conditioning["global_cond"][0]
