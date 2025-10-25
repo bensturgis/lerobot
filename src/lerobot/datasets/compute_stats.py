@@ -13,9 +13,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from pathlib import Path
+
 import numpy as np
 
-from lerobot.datasets.utils import load_image_as_numpy
+from lerobot.datasets.utils import EPISODES_DIR, load_image_as_numpy, load_nested_dataset
 
 
 def estimate_num_samples(
@@ -174,3 +176,26 @@ def aggregate_stats(stats_list: list[dict[str, dict]]) -> dict[str, dict[str, np
         aggregated_stats[key] = aggregate_feature_stats(stats_with_key)
 
     return aggregated_stats
+
+def compute_stats_for_episodes(pq_dir: Path, episode_ids: list[int]) -> dict[str, dict[str, np.ndarray]]:
+    """
+    Aggregate normalization stats for a subset of episodes.
+    """
+    # Load raw episodes dataset
+    episodes_dataset = load_nested_dataset(pq_dir / EPISODES_DIR)
+    stat_cols = [c for c in episodes_dataset.features if c.startswith("stats/")]
+
+    # Filter selected episodes
+    episode_indices = [i for i, eid in enumerate(episodes_dataset["episode_index"]) if eid in set(episode_ids)]
+    episodes_subset = episodes_dataset.select(episode_indices)
+
+    # Build per-episode dicts and aggregate
+    per_ep_stats = []
+    for i in range(len(episodes_subset)):
+        ep_stats: dict[str, dict[str, np.ndarray]] = {}
+        for col in stat_cols:
+            feat, stat_name = col.split("stats/", 1)[1].rsplit("/", 1)
+            values = np.array(episodes_subset[i][col])
+            ep_stats.setdefault(feat, {})[stat_name] = values
+        per_ep_stats.append(ep_stats)
+    return aggregate_stats(per_ep_stats)

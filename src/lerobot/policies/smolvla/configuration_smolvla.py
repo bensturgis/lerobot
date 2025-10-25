@@ -33,8 +33,8 @@ class SmolVLAConfig(PreTrainedConfig):
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
             "VISUAL": NormalizationMode.IDENTITY,
-            "STATE": NormalizationMode.MEAN_STD,
-            "ACTION": NormalizationMode.MEAN_STD,
+            "STATE": NormalizationMode.MIN_MAX,
+            "ACTION": NormalizationMode.MIN_MAX,
         }
     )
 
@@ -84,7 +84,6 @@ class SmolVLAConfig(PreTrainedConfig):
 
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"  # Select the VLM backbone.
     load_vlm_weights: bool = True  # Set to True in case of training the expert from scratch. True when init from pretrained SmolVLA weights
-    reset_vision_model: bool = False
 
     add_image_special_tokens: bool = False  # Whether to use special image tokens around image features.
 
