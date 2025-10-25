@@ -22,7 +22,6 @@ from transformers import (
     AutoModelForImageTextToText,
     AutoProcessor,
     SmolVLMForConditionalGeneration,
-    SmolVLMVisionTransformer
 )
 
 

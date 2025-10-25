@@ -317,6 +317,7 @@ def train(cfg: TrainPipelineConfig):
         policy.reinitialize_selected_layers()
 
     if train_episode_ids != all_episode_ids:
+        logging.info("Extracting dataset stats from training episodes")
         training_stats = compute_stats_for_episodes(full_dataset.meta.root, train_episode_ids)
     else:
         training_stats = full_dataset.meta.stats
