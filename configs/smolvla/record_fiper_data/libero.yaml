@@ -10,19 +10,19 @@ dataset:
 env:
   type: libero
   task: libero_10
-  task_ids: [0]
+  task_ids: [0, 4, 7, 8, 9]
 
 fiper_data_recorder:
   domains: [id]
   num_uncertainty_sequences: 64
-  scoring_metrics: [mode_distance]
+  scoring_metrics: [mode_distance, inter_vel_diff]
   ode_eval_times: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
   terminal_vel_eval_times: [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
-  ensemble_model_path: outputs/train/smolvla/libero_finetuning_with_reinitialization_02/checkpoints/015000/pretrained_model
+  ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50_02/checkpoints/005000/pretrained_model
 
 n_calib_episodes: 100
 n_test_episodes: 200
 
-seed: 18012023
+seed: 837
 
-# python src/lerobot/scripts/record_fiper_data.py --config=configs/smolvla/record_fiper_data/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuning_with_reinitialization/checkpoints/015000/pretrained_model
+# python src/lerobot/scripts/record_fiper_data.py --config=configs/smolvla/record_fiper_data/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50/checkpoints/005000/pretrained_model

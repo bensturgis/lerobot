@@ -27,6 +27,7 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
+from lerobot.datasets.compute_stats import compute_stats_for_episodes
 from lerobot.datasets.factory import make_dataset, make_train_val_split
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle, filter_libero_episodes, patch_dataset_episode_boundaries
@@ -314,17 +315,40 @@ def train(cfg: TrainPipelineConfig):
     if cfg.policy.pretrained_path and cfg.reinitialize_selected_layers:
         policy.reinitialize_selected_layers()
 
+    if train_episode_ids != all_episode_ids:
+        training_stats = compute_stats_for_episodes(full_dataset.meta.root, train_episode_ids)
+    else:
+        training_stats = full_dataset.meta.stats
+
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
-    if not (cfg.resume and cfg.policy.pretrained_path):
+    postprocessor_kwargs = {}
+    if (cfg.policy.pretrained_path and not cfg.resume) or not cfg.policy.pretrained_path:
         # Only provide dataset_stats when not resuming from saved processor state
-        processor_kwargs["dataset_stats"] = full_dataset.meta.stats
+        processor_kwargs["dataset_stats"] = training_stats
 
     if cfg.policy.pretrained_path is not None:
-        processor_kwargs["preprocessor_overrides"] = {"device_processor": {"device": device.type}}
+        processor_kwargs["preprocessor_overrides"] = {
+            "device_processor": {"device": device.type},
+            "normalizer_processor": {
+                "stats": training_stats,
+                "features": {**policy.config.input_features, **policy.config.output_features},
+                "norm_map": policy.config.normalization_mapping,
+            },
+        }
+        postprocessor_kwargs["postprocessor_overrides"] = {
+            "unnormalizer_processor": {
+                "stats": training_stats,
+                "features": policy.config.output_features,
+                "norm_map": policy.config.normalization_mapping,
+            },
+        }
 
     preprocessor, postprocessor = make_pre_post_processors(
-        policy_cfg=cfg.policy, pretrained_path=cfg.policy.pretrained_path, **processor_kwargs
+        policy_cfg=cfg.policy,
+        pretrained_path=cfg.policy.pretrained_path,
+        **processor_kwargs,
+        **postprocessor_kwargs,
     )
 
     logging.info("Creating optimizer and scheduler")
