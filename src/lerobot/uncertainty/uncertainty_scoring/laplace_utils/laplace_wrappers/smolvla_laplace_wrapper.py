@@ -29,11 +29,14 @@ class SmolVLALaplaceWrapper(LaplaceWrapper):
             scopes: Which submodules to expose to the Laplace posterior.
                 Available scopes:
                     - "action_out_proj": Final linear projection from expert hidden size
-                    to action dimension.
+                        to action dimension.
                     - "action_time_embed": The action-time fusion layer that mixes action tokens with
-                    the timestep embedding.
+                        the timestep embedding.
                     - "expert_last": The final transformer block of the action expert.
-                Defaults to ["action_out_proj"].
+                    - "state_proj": The projection layer from the state to the hidden size of the text model.
+                    - "vlm_connector": VLM connector mapping vision tokens to text space.
+                    - "vision_last": Last layer of the vision encoder.
+                Defaults to ["expert_last", "action_out_proj"].
         """
         scopes = scopes or ["action_out_proj"]
         super().__init__(model=model, config=config, scopes=scopes)
@@ -42,6 +45,9 @@ class SmolVLALaplaceWrapper(LaplaceWrapper):
             "action_out_proj": "aop",
             "action_time_embed": "ate",
             "expert_last": "el",
+            "state_proj": "sp",
+            "vlm_connector": "vc",
+            "vision_last": "vl",
         }
 
     def build_collate_fn(
@@ -171,14 +177,38 @@ class SmolVLALaplaceWrapper(LaplaceWrapper):
                 target_modules.append(self.model.action_time_mlp_out)
             elif scope == "expert_last":
                 action_expert = self.model.vlm_with_expert.lm_expert
-                target_modules.append(action_expert.layers[-1].self_attn.o_proj)
-                target_modules.append(action_expert.layers[-1].mlp.gate_proj)
-                target_modules.append(action_expert.layers[-1].mlp.up_proj)
-                target_modules.append(action_expert.layers[-1].mlp.down_proj)
+                layer = action_expert.layers[-1]
+                target_modules.extend([
+                    layer.self_attn.o_proj,
+                    layer.mlp.gate_proj,
+                    layer.mlp.up_proj,
+                    layer.mlp.down_proj
+                ])
+            elif scope == "state_proj":
+                target_modules.append(self.model.state_proj)
+            elif scope == "vlm_connector":
+                connector = self.model.vlm_with_expert.get_vlm_model().connector
+                target_modules.append(connector)
+            elif scope == "vision_last":
+                vision_model = self.model.vlm_with_expert.get_vlm_model().vision_model
+                last_vision_layer = vision_model.encoder.layers[-1]
+                # Attention projections
+                target_modules.extend([
+                    last_vision_layer.self_attn.q_proj,
+                    last_vision_layer.self_attn.k_proj,
+                    last_vision_layer.self_attn.v_proj,
+                    last_vision_layer.self_attn.out_proj,
+                ])
+
+                # MLP linears within the vision last layer
+                for m in last_vision_layer.mlp.modules():
+                    if isinstance(m, nn.Linear):
+                        target_modules.append(m)
             else:
                 raise ValueError(
                     f"Unknown Laplace approximation target {scope}. "
-                    "Choose from ['action_out_proj', 'action_time_embed', 'expert_last']."
+                    "Choose from ['action_out_proj', 'action_time_embed', 'expert_last', "
+                    "'state_proj', 'vlm_connector', 'vision_last']."
                 )
 
         # Freeze all parameters

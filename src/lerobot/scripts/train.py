@@ -312,6 +312,7 @@ def train(cfg: TrainPipelineConfig):
     )
 
     if cfg.policy.pretrained_path and cfg.reinitialize_selected_layers:
+        logging.info("Reinitialize selected layers")
         policy.reinitialize_selected_layers()
 
     # Create processors - only provide dataset_stats if not resuming from saved processors

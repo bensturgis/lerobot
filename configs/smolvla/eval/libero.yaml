@@ -7,4 +7,4 @@ eval:
   batch_size: 4
   n_episodes: 10
 
-# python src/lerobot/scripts/eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuning_with_reinitialization/checkpoints/015000/pretrained_model
+# python src/lerobot/scripts/eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuning_with_aop_reinitialization/checkpoints/010000/pretrained_model

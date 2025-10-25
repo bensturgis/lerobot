@@ -10,6 +10,7 @@ dataset:
 env:
   type: libero
   task: libero_10
+  task_ids: [0, 4, 7, 8, 9]
 
 eval_uncert_est:
   n_episodes: 50
@@ -30,12 +31,12 @@ uncertainty_sampler:
     num_action_samples: 25
   cross_bayesian_sampler:
     scorer_type: ensemble
-    ensemble_model_path: outputs/train/smolvla/libero_finetuning_with_reinitialization_02/checkpoints/015000/pretrained_model
+    ensemble_model_path: outputs/train/smolvla/libero_finetuning_with_aop_reinitialization_02/checkpoints/005000/pretrained_model
     scoring_metric:
       metric_type: mode_distance
     num_action_samples: 25
 
-seed: 2211
-job_name: libero_smolvla_reinitialization
+seed: 111
+job_name: finetuned_laplace_fitting
 
-# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuning_with_reinitialization/checkpoints/015000/pretrained_model
+# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuning_with_aop_reinitialization/checkpoints/005000/pretrained_model

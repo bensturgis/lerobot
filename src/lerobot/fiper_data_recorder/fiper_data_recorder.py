@@ -156,22 +156,22 @@ class FiperDataRecorder:
             #     composed_terminal_vels.append(self.prev_velocity_fn(
             #         x_t=composed_action_samples, t=time_tensor
             #     ))
-            #     composed_ensemble_terminal_vels.append(self.prev_ensemble_velocity_fn(
-            #         x_t=composed_action_samples, t=time_tensor
-            #     ))
-            #     composed_laplace_terminal_vels.append(self.prev_laplace_velocity_fn(
-            #         x_t=composed_action_samples, t=time_tensor
-            #     ))
+                # composed_ensemble_terminal_vels.append(self.prev_ensemble_velocity_fn(
+                #     x_t=composed_action_samples, t=time_tensor
+                # ))
+                # composed_laplace_terminal_vels.append(self.prev_laplace_velocity_fn(
+                #     x_t=composed_action_samples, t=time_tensor
+                # ))
             # else:
             #     composed_terminal_vels.append(
             #         torch.full_like(action_samples, float('nan'))
             #     )
-            #     composed_ensemble_terminal_vels.append(
-            #         torch.full_like(action_samples, float('nan'))
-            #     )
-            #     composed_laplace_terminal_vels.append(
-            #         torch.full_like(action_samples, float('nan'))
-            #     )
+                # composed_ensemble_terminal_vels.append(
+                #     torch.full_like(action_samples, float('nan'))
+                # )
+                # composed_laplace_terminal_vels.append(
+                #     torch.full_like(action_samples, float('nan'))
+                # )
         return {
             "terminal_eval_times": np.asarray(self.config.terminal_vel_eval_times),
             "ensemble_terminal_velocities": torch.stack(ensemble_terminal_vels, dim=0).detach().cpu().numpy(),
@@ -340,7 +340,7 @@ class FiperDataRecorder:
 
         ensemble_conditioning = self.ensemble_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
         ensemble_velocity_fn = self.ensemble_adapter.make_velocity_fn(conditioning=ensemble_conditioning)
-
+        
         # laplace_conditioning = laplace_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
         # laplace_velocity_fn = laplace_adapter.make_velocity_fn(conditioning=laplace_conditioning)
         laplace_velocity_fn = None
@@ -377,9 +377,7 @@ class FiperDataRecorder:
         #     )
         #     composed_action_samples = composed_ode_states[-1] # (num_uncertainty_sequences, horizon, action_dim)
         # else:
-        #     composed_ode_states = None
         #     composed_action_samples = None
-        composed_ode_states = None
         composed_action_samples = None
 
         # Record terminal velocities
