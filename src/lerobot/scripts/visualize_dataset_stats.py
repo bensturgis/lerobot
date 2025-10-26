@@ -89,6 +89,7 @@ def compute_feature_histograms_for_episodes(
         }
 
     # Accumulate hist counts per episode using fixed edges
+    total_counts_per_feature = {}  # Track total counts per feature for normalization
     for ep_id in episode_ids:
         episode_rows = hf[dataset.meta.episodes["dataset_from_index"][ep_id]:dataset.meta.episodes["dataset_to_index"][ep_id]]
         for feature_key, out in result.items():
@@ -100,6 +101,19 @@ def compute_feature_histograms_for_episodes(
             for d in range(feature_vals.shape[1]):
                 counts, _ = np.histogram(feature_vals[:, d], bins=out["bin_edges"][d])
                 out["counts"][d] += counts
+
+                # Track total counts for normalization
+                if feature_key not in total_counts_per_feature:
+                    total_counts_per_feature[feature_key] = np.zeros(feature_vals.shape[1])
+                total_counts_per_feature[feature_key][d] += counts.sum()
+
+    # Convert absolute counts to fractions
+    for feature_key, out in result.items():
+        if feature_key in total_counts_per_feature:
+            for d in range(len(total_counts_per_feature[feature_key])):
+                total = total_counts_per_feature[feature_key][d]
+                if total > 0:
+                    out["counts"][d] = out["counts"][d] / total
 
     return result
 
@@ -127,10 +141,24 @@ def plot_feature_histograms(
         for i in range(feature_dim):
             ax = axes[i]
             centers = 0.5 * (bin_edges[i, 1:] + bin_edges[i, :-1])
-            ax.bar(centers, histograms[feature_key]["counts"][i], width=np.diff(bin_edges[i]), align="center")
+            fractions = histograms[feature_key]["counts"][i].copy()
+
+            if feature_key == "action" and i != 6:
+                # Find and exclude the largest bin
+                max_bin_idx = np.argmax(fractions)
+                excluded_value = fractions[max_bin_idx]
+                fractions[max_bin_idx] = 0
+
+                ax.text(
+                    0.05, 0.95, f'excluded bin: {excluded_value:.3f}',
+                    transform=ax.transAxes, verticalalignment='top',
+                    bbox={"boxstyle": 'round', "facecolor": 'white', "alpha": 0.8}
+                )
+
+            ax.bar(centers, fractions, width=np.diff(bin_edges[i]), align="center")
             ax.set_title(f"{feature_key} | {histograms[feature_key]['dim_names'][i]}")
             ax.set_xlabel("value")
-            ax.set_ylabel("count")
+            ax.set_ylabel("fraction")
         for j in range(feature_dim, len(axes)):
             axes[j].axis("off")
         fig.tight_layout()
