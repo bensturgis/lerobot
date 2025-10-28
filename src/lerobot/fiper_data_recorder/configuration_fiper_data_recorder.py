@@ -31,6 +31,13 @@ class LikelihoodODESolverConfig:
     rtol: float | None = None
     exact_divergence: bool = False
 
+@dataclass
+class LaplaceConfig:
+    """Configuration parameters for the Laplace approximation."""
+    scopes: list[str] | None = None
+    calib_fraction: float = 1.0
+    batch_size: int = 1
+    num_samples: int = 5
 
 @dataclass
 class FiperDataRecorderConfig:
@@ -51,10 +58,8 @@ class FiperDataRecorderConfig:
     # Parameters for the ensemble model
     ensemble_model_path: str | Path | None = None
 
-    # Parameters for the Laplace approximation calibration dataloader
-    laplace_scopes: list[str] | None = None
-    calib_fraction: float = 1.0
-    batch_size: int = 1
+    # Parameters for the Laplace approximation
+    laplace_config: LaplaceConfig = field(default_factory=LaplaceConfig)
 
     # Times at which to record ODE states and velocities during the flow integration
     ode_eval_times: list[float] = field(

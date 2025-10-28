@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -6,7 +6,7 @@ from torch import Tensor
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.factory import make_uncertainty_scoring_metric
 
-from ..uncertainty_scoring.laplace_utils.posterior_builder import sample_adapter_from_posterior
+from ..uncertainty_scoring.laplace_utils.posterior_builder import sample_from_posterior
 from ..uncertainty_scoring.scorer_artifacts import ScorerArtifacts
 from .configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
@@ -53,15 +53,16 @@ class CrossBayesianSampler(UncertaintySampler):
             uncertainty_sampler=self,
         )
 
-        self.ensemble_adapter = scorer_artifacts.ensemble_adapter
+        self.ensemble_models = scorer_artifacts.ensemble_models
         self.laplace_posterior = scorer_artifacts.laplace_posterior
-        if config.scorer_type == "ensemble" and self.ensemble_adapter is None:
-            raise ValueError("ensemble_adapter is required for scorer_type='ensemble'.")
-        elif config.scorer_type == "laplace" and self.laplace_posterior is None:
-            raise ValueError("laplace_posterior is required for scorer_type='laplace'.")
+        self.num_laplace_samples = config.laplace_config.num_samples
+        if config.scorer_type == "ensemble" and not self.ensemble_models:
+            raise ValueError("At least one ensemble model is required for scorer_type='ensemble'.")
+        elif config.scorer_type == "laplace" and not self.laplace_posterior:
+            raise ValueError("Laplace posterior is required for scorer_type='laplace'.")
         elif config.scorer_type not in {"ensemble", "laplace"}:
             raise ValueError(f"Unknown scorer_type: {config.scorer_type!r}")
-        self.scorer_model = None
+        self.scorer_models: List[BaseFlowMatchingAdapter] = []
 
         # Sampler-specific settings
         self.config = config
@@ -109,36 +110,43 @@ class CrossBayesianSampler(UncertaintySampler):
 
         if self.config.scorer_type == "laplace":
             # Draw flow matching model from the Laplace posterior
-            self.scorer_model = sample_adapter_from_posterior(
+            self.scorer_models = sample_from_posterior(
                 laplace_posterior=self.laplace_posterior,
                 uncertainty_adapter=self.model,
-                generator=generator
+                num_samples=self.num_laplace_samples,
+                generator=generator,
             )
         else:
-            self.scorer_model = self.ensemble_adapter
+            self.scorer_models = self.ensemble_models
 
-        # Build the conditioned velocity function of the scorer
-        scorer_conditioning = self.scorer_model.prepare_conditioning(observation, self.num_action_samples)
-        scorer_velocity_fn = self.scorer_model.make_velocity_fn(conditioning=scorer_conditioning)
+        # Compute uncertainty scores from each scorer model
+        scorer_uncertanty_means: List[float] = []
+        for scorer in self.scorer_models:
+            # Build the conditioned velocity function of the scorer
+            scorer_conditioning = scorer.prepare_conditioning(observation, self.num_action_samples)
+            scorer_velocity_fn = scorer.make_velocity_fn(conditioning=scorer_conditioning)
 
-        # Compute uncertainty based on selected metric
-        if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
-            uncertainty_scores = self.scoring_metric(
-                action_sequences=ode_states[-1],
-                velocity_fn=scorer_velocity_fn,
-            )
-        elif self.scoring_metric.name == "inter_vel_diff":
-            uncertainty_scores = self.scoring_metric(
-                ref_ode_states=ode_states,
-                ref_velocity_fn=velocity_fn,
-                cmp_ode_states=ode_states,
-                cmp_velocity_fn=scorer_velocity_fn,
-            )
-        else:
-            raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
+            # Compute uncertainty based on selected metric
+            if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
+                uncertainty_scores = self.scoring_metric(
+                    action_sequences=ode_states[-1],
+                    velocity_fn=scorer_velocity_fn,
+                )
+            elif self.scoring_metric.name == "inter_vel_diff":
+                uncertainty_scores = self.scoring_metric(
+                    ref_ode_states=ode_states,
+                    ref_velocity_fn=velocity_fn,
+                    cmp_ode_states=ode_states,
+                    cmp_velocity_fn=scorer_velocity_fn,
+                )
+            else:
+                raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
+
+            # Average uncertainty scores of a single scorer over all action samples
+            scorer_uncertanty_means.append(uncertainty_scores.mean().item())
 
         # Average uncertainty scores and store for logging
-        self.uncertainty = uncertainty_scores.mean().item()
+        self.uncertainty = sum(scorer_uncertanty_means) / len(self.scorer_models)
 
         # Pick one action sequence at random
         self.action_candidates = ode_states[-1]
