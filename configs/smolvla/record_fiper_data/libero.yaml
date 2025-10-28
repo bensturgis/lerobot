@@ -15,15 +15,17 @@ env:
 fiper_data_recorder:
   domains: [id]
   num_uncertainty_sequences: 64
-  scoring_metrics: [mode_distance, inter_vel_diff]
+  scoring_metrics: [mode_distance]
   ode_eval_times: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
-  terminal_vel_eval_times: [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
-  ensemble_model_path: outputs/train/smolvla/libero_finetuning_with_aop_reinitialization_02/checkpoints/005000/pretrained_model
+  terminal_vel_eval_times: [0, 0.05, 0.1, 0.15, 0.2, 0.25]
+  ensemble_model_path: outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model
   laplace_scopes: [action_out_proj]
+  calib_fraction: 1.0
 
-n_calib_episodes: 100
-n_test_episodes: 100
+n_calib_episodes: 70
+n_test_episodes: 150
 
-seed: 111
+seed: 26
+job_name: smolvla_libero_finetuned
 
-# python src/lerobot/scripts/record_fiper_data.py --config=configs/smolvla/record_fiper_data/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuning_with_aop_reinitialization/checkpoints/005000/pretrained_model
+# python src/lerobot/scripts/record_fiper_data.py --config=configs/smolvla/record_fiper_data/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model

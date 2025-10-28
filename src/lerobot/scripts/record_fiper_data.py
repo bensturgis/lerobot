@@ -229,7 +229,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
 
         if collect_calib and collect_test:
             # Prioritize collection of calibration set
-            target_split = "calibration" if n_collected_calib_eps <= n_collected_test_eps else "test"
+            target_split = "calibration" if 2 * n_collected_calib_eps <= n_collected_test_eps else "test"
         elif collect_calib:
             target_split = "calibration"
         elif collect_test:

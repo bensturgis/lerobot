@@ -57,8 +57,8 @@ class FiperDataRecorder:
         self.laplace_posterior = scorer_artifacts.laplace_posterior
         if self.ensemble_adapter is None:
             raise ValueError("Ensemble model is required for FIPER data recording.")
-        # elif self.laplace_posterior is None:
-        #     raise ValueError("Laplace posterior is required for FIPER data recording.")
+        elif self.laplace_posterior is None:
+            raise ValueError("Laplace posterior is required for FIPER data recording.")
 
         # Build time grid for sampling according to ODE solver method and scoring metric
         extra_times = []
@@ -138,47 +138,47 @@ class FiperDataRecorder:
         """
         # Store scorers' velocities on the final sampled action sequence
         ensemble_terminal_vels: List[Tensor] = []
-        # laplace_terminal_vels: List[Tensor] = []
+        laplace_terminal_vels: List[Tensor] = []
         # Store sampler's velocities on composed action sequence
-        # composed_terminal_vels: List[Tensor] = []
+        composed_terminal_vels: List[Tensor] = []
         # Store scorers' velocities on composed action sequence
-        # composed_ensemble_terminal_vels: List[Tensor] = []
-        # composed_laplace_terminal_vels: List[Tensor] = []
+        composed_ensemble_terminal_vels: List[Tensor] = []
+        composed_laplace_terminal_vels: List[Tensor] = []
         for time in self.config.terminal_vel_eval_times:
             time_tensor = torch.tensor(time, device=self.device, dtype=self.dtype)
             ensemble_terminal_vels.append(ensemble_velocity_fn(
                 x_t=action_samples, t=time_tensor,
             ))
-            # laplace_terminal_vels.append(laplace_velocity_fn(
-            #     x_t=action_samples, t=time_tensor
-            # ))
-            # if self.prev_selected_action_idx is not None:
-            #     composed_terminal_vels.append(self.prev_velocity_fn(
-            #         x_t=composed_action_samples, t=time_tensor
-            #     ))
-                # composed_ensemble_terminal_vels.append(self.prev_ensemble_velocity_fn(
-                #     x_t=composed_action_samples, t=time_tensor
-                # ))
-                # composed_laplace_terminal_vels.append(self.prev_laplace_velocity_fn(
-                #     x_t=composed_action_samples, t=time_tensor
-                # ))
-            # else:
-            #     composed_terminal_vels.append(
-            #         torch.full_like(action_samples, float('nan'))
-            #     )
-                # composed_ensemble_terminal_vels.append(
-                #     torch.full_like(action_samples, float('nan'))
-                # )
-                # composed_laplace_terminal_vels.append(
-                #     torch.full_like(action_samples, float('nan'))
-                # )
+            laplace_terminal_vels.append(laplace_velocity_fn(
+                x_t=action_samples, t=time_tensor
+            ))
+            if self.prev_selected_action_idx is not None:
+                composed_terminal_vels.append(self.prev_velocity_fn(
+                    x_t=composed_action_samples, t=time_tensor
+                ))
+                composed_ensemble_terminal_vels.append(self.prev_ensemble_velocity_fn(
+                    x_t=composed_action_samples, t=time_tensor
+                ))
+                composed_laplace_terminal_vels.append(self.prev_laplace_velocity_fn(
+                    x_t=composed_action_samples, t=time_tensor
+                ))
+            else:
+                composed_terminal_vels.append(
+                    torch.full_like(action_samples, float('nan'))
+                )
+                composed_ensemble_terminal_vels.append(
+                    torch.full_like(action_samples, float('nan'))
+                )
+                composed_laplace_terminal_vels.append(
+                    torch.full_like(action_samples, float('nan'))
+                )
         return {
             "terminal_eval_times": np.asarray(self.config.terminal_vel_eval_times),
             "ensemble_terminal_velocities": torch.stack(ensemble_terminal_vels, dim=0).detach().cpu().numpy(),
-            # "laplace_terminal_velocities": torch.stack(laplace_terminal_vels, dim=0).detach().cpu().numpy(),
-            # "composed_terminal_velocities": torch.stack(composed_terminal_vels, dim=0).detach().cpu().numpy(),
-            # "composed_ensemble_terminal_velocities": torch.stack(composed_ensemble_terminal_vels, dim=0).detach().cpu().numpy(),
-            # "composed_laplace_terminal_velocities": torch.stack(composed_laplace_terminal_vels, dim=0).detach().cpu().numpy(),
+            "laplace_terminal_velocities": torch.stack(laplace_terminal_vels, dim=0).detach().cpu().numpy(),
+            "composed_terminal_velocities": torch.stack(composed_terminal_vels, dim=0).detach().cpu().numpy(),
+            "composed_ensemble_terminal_velocities": torch.stack(composed_ensemble_terminal_vels, dim=0).detach().cpu().numpy(),
+            "composed_laplace_terminal_velocities": torch.stack(composed_laplace_terminal_vels, dim=0).detach().cpu().numpy(),
         }
 
     def compute_log_likelihood(
@@ -281,7 +281,7 @@ class FiperDataRecorder:
         # Compute velocities at intermediate ODE states for sampler, ensemble and laplace model
         sampler_vels: List[Tensor] = []
         ensemble_vels: List[Tensor] = []
-        # laplace_vels: List[Tensor] = []
+        laplace_vels: List[Tensor] = []
 
         vel_diff_scaling_factors: List[float] = []
         for timestep, time in enumerate(self.config.ode_eval_times):
@@ -293,16 +293,16 @@ class FiperDataRecorder:
             ensemble_vels.append(
                 ensemble_velocity_fn(x_t=ode_state, t=time_tensor)
             )
-            # laplace_vels.append(
-            #     laplace_velocity_fn(x_t=ode_state, t=time_tensor)
-            # )
+            laplace_vels.append(
+                laplace_velocity_fn(x_t=ode_state, t=time_tensor)
+            )
             vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
 
         return {
             "ode_eval_times": np.asarray(self.config.ode_eval_times),
             "velocities": torch.stack(sampler_vels, dim=0).detach().cpu().numpy(),
             "ensemble_velocities": torch.stack(ensemble_vels, dim=0).detach().cpu().numpy(),
-            # "laplace_velocities": torch.stack(laplace_vels, dim=0).detach().cpu().numpy(),
+            "laplace_velocities": torch.stack(laplace_vels, dim=0).detach().cpu().numpy(),
             "vel_diff_scaling": np.asarray(vel_diff_scaling_factors),
         }
 
@@ -327,11 +327,11 @@ class FiperDataRecorder:
         step_data: Dict[str, Any] = {}
 
         # Draw flow matching model from the Laplace posterior
-        # laplace_adapter = sample_adapter_from_posterior(
-        #     laplace_posterior=self.laplace_posterior,
-        #     uncertainty_adapter=self.flow_matching_adapter,
-        #     generator=generator
-        # )
+        laplace_adapter = sample_adapter_from_posterior(
+            laplace_posterior=self.laplace_posterior,
+            uncertainty_adapter=self.flow_matching_adapter,
+            generator=generator
+        )
 
         # Build the velocity function for sampler and scorer model conditioned on the current observation
         conditioning = self.flow_matching_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
@@ -341,9 +341,8 @@ class FiperDataRecorder:
         ensemble_conditioning = self.ensemble_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
         ensemble_velocity_fn = self.ensemble_adapter.make_velocity_fn(conditioning=ensemble_conditioning)
         
-        # laplace_conditioning = laplace_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
-        # laplace_velocity_fn = laplace_adapter.make_velocity_fn(conditioning=laplace_conditioning)
-        laplace_velocity_fn = None
+        laplace_conditioning = laplace_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
+        laplace_velocity_fn = laplace_adapter.make_velocity_fn(conditioning=laplace_conditioning)
 
         # Sample noise priors
         noise_sample = self.flow_matching_adapter.sample_prior(
@@ -364,21 +363,20 @@ class FiperDataRecorder:
         action_candidates = ode_states[-1]  # (num_uncertainty_sequences, horizon, action_dim)
         step_data["action_pred"] = action_candidates.detach().cpu().numpy()
 
-        # if self.prev_selected_action_idx is not None:
-        #     # Compose full ODE states from stored previous and new action generation
-        #     composed_ode_states = compose_ode_states(
-        #         prev_ode_states=self.prev_ode_states[
-        #             :, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :
-        #         ],
-        #         new_ode_states=ode_states,
-        #         horizon=self.horizon,
-        #         n_action_steps=self.n_action_steps,
-        #         n_obs_steps=self.n_obs_steps
-        #     )
-        #     composed_action_samples = composed_ode_states[-1] # (num_uncertainty_sequences, horizon, action_dim)
-        # else:
-        #     composed_action_samples = None
-        composed_action_samples = None
+        if self.prev_selected_action_idx is not None:
+            # Compose full ODE states from stored previous and new action generation
+            composed_ode_states = compose_ode_states(
+                prev_ode_states=self.prev_ode_states[
+                    :, self.prev_selected_action_idx:self.prev_selected_action_idx+1, :, :
+                ],
+                new_ode_states=ode_states,
+                horizon=self.horizon,
+                n_action_steps=self.n_action_steps,
+                n_obs_steps=self.n_obs_steps
+            )
+            composed_action_samples = composed_ode_states[-1] # (num_uncertainty_sequences, horizon, action_dim)
+        else:
+            composed_action_samples = None
 
         # Record terminal velocities
         if "mode_distance" in self.config.scoring_metrics:
