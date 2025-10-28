@@ -7,11 +7,10 @@ dataset:
       libero_10: [0, 4, 7, 8, 9]
     }
 
-
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-finetuning-with-aop-reinitialization-02
+  repo_id: bensturgis/smolvla-libero-finetuned-aop-reinitialization-02
 
 env:
   type: libero
@@ -24,14 +23,15 @@ eval:
 
 reinitialize_selected_layers: True
 
-output_dir: outputs/train/smolvla/libero_finetuning_with_aop_reinitialization_02
+output_dir: outputs/train/smolvla/libero_finetuned_aop_reinitialization_02
 steps: 100000
 batch_size: 48
 eval_freq: 5000
 save_freq: 5000
-val_ratio: 0.05
-seed: 1111
+enable_val_loss: False
+seed: 72
 wandb:
   enable: true
+job_name: smolvla_libero_finetuned_aop_reinitialization_02
 
-# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero_finetuning.yaml --policy.path=outputs/train/smolvla/libero_filtered_base_unfreezed_vision_horizon_50/checkpoints/020000/pretrained_model --policy.repo_id=bensturgis/smolvla-libero-finetuning-with-aop-reinitialization-02
+# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero_finetuning.yaml --policy.path=outputs/train/smolvla/libero_base/checkpoints/030000/pretrained_model --policy.repo_id=bensturgis/smolvla-libero-finetuned-aop-reinitialization-02

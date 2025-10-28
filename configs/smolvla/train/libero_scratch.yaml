@@ -19,7 +19,7 @@ env:
 
 eval:
   batch_size: 1
-  n_episodes: 5
+  n_episodes: 10
 
 output_dir: outputs/train/smolvla/libero_base
 steps: 200000
