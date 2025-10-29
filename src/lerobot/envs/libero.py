@@ -30,7 +30,7 @@ from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 from robosuite.utils.transform_utils import quat2axisangle
 
-from .configs import OODConfig
+from .configs import BddlSwapOODConfig, OODConfig
 
 
 def _parse_camera_names(camera_name: str | Sequence[str]) -> list[str]:
@@ -117,6 +117,7 @@ class LiberoEnv(gym.Env):
         task_suite: Any,
         task_id: int,
         task_suite_name: str,
+        bddl_path: str | None = None,
         camera_name: str | Sequence[str] = "agentview_image,robot0_eye_in_hand_image",
         obs_type: str = "pixels",
         render_mode: str = "rgb_array",
@@ -159,6 +160,7 @@ class LiberoEnv(gym.Env):
         self._init_states = get_task_init_states(task_suite, self.task_id) if self.init_states else None
         self._init_state_id = self.episode_index  # tie each sub-env to a fixed init state
 
+        self.bddl_path = bddl_path
         self._env = self._make_envs_task(task_suite, self.task_id)
         default_steps = 500
         self._max_episode_steps = TASK_SUITE_MAX_STEPS.get(task_suite_name, default_steps)
@@ -211,7 +213,10 @@ class LiberoEnv(gym.Env):
         task = task_suite.get_task(task_id)
         self.task = task.name
         self.task_description = task.language
-        task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
+        if self.bddl_path:
+            task_bddl_file = self.bddl_path
+        else:
+            task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
 
         env_args = {
             "bddl_file_name": task_bddl_file,
@@ -302,7 +307,7 @@ def build_libero_env_factories(
     n_envs: int,
     camera_names: list[str],
     init_states: bool,
-    ood: OODConfig,
+    ood: BddlSwapOODConfig,
     gym_kwargs: Mapping[str, Any],
 ) -> list[Callable[[], LiberoEnv]]:
     """Build n_envs factory callables for a single (suite, task_id)."""
@@ -311,12 +316,14 @@ def build_libero_env_factories(
         gym_kwargs = dict(gym_kwargs)
         # Edit the environment kwargs before creation if OoD is enabled
         gym_kwargs = ood.tweak_gym_kwargs(gym_kwargs)
+        ood_bddl_path = ood.resolve_bddl_path(suite, task_id)
         env =  LiberoEnv(
             task_suite=suite,
             task_id=task_id,
             task_suite_name=suite_name,
+            bddl_path=ood_bddl_path,
             camera_name=camera_names,
-            init_states=init_states,
+            init_states=gym_kwargs.pop("init_states", init_states),
             episode_index=episode_index,
             **gym_kwargs,
         )

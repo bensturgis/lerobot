@@ -14,6 +14,7 @@
 
 import abc
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Tuple
 
 import draccus
@@ -28,11 +29,11 @@ from lerobot.teleoperators.config import TeleoperatorConfig
 
 @dataclass
 class OODConfig(abc.ABC):
-    enabled: bool = False
+    enable: bool = False
 
     def tweak_gym_kwargs(self, kwargs: dict) -> dict:
         """Adjust kwargs for gym.make()."""
-        return self._tweak_gym_kwargs_impl(kwargs) if self.enabled else kwargs
+        return self._tweak_gym_kwargs_impl(kwargs) if self.enable else kwargs
 
     def _tweak_gym_kwargs_impl(self, kwargs: dict) -> dict:
         """Will be overwritten by subclasses."""
@@ -40,7 +41,7 @@ class OODConfig(abc.ABC):
 
     def wrap(self, env: gym.Env) -> gym.Env:
         """Return wrapped env."""
-        return self._wrap_impl(env) if self.enabled else env
+        return self._wrap_impl(env) if self.enable else env
 
     def _wrap_impl(self, env: gym.Env) -> gym.Env:
         """Will be overwritten by subclasses."""
@@ -67,6 +68,31 @@ class ImagePatchOODConfig(OODConfig):
             allowed_area=self.allowed_area,
             patch_color=self.patch_color,
         )
+
+
+@dataclass
+class BddlSwapOODConfig(OODConfig):
+    root_dir: str = "src/lerobot/envs/libero_ood_bddl_files"
+    disable_init_states: bool = True
+
+    def _tweak_gym_kwargs_impl(self, kwargs: dict) -> dict:
+        if self.disable_init_states:
+            kwargs["init_states"] = False
+        return kwargs
+
+    def resolve_bddl_path(self, task_suite: Any, task_id: int) -> str | None:
+        if not self.enable or not self.root_dir:
+            return None
+
+        task = task_suite.get_task(task_id)
+
+        ood_bddl_path = Path(self.root_dir) / task.problem_folder / task.bddl_file
+
+        if not ood_bddl_path.exists():
+            raise FileNotFoundError(
+                f"Could not find OOD BDDL at {ood_bddl_path}."
+            )
+        return ood_bddl_path
 
 
 @dataclass
@@ -327,7 +353,7 @@ class LiberoEnv(EnvConfig):
     )
 
     # Out-of-distribution configuration
-    ood: ImagePatchOODConfig = ImagePatchOODConfig()
+    ood: BddlSwapOODConfig = BddlSwapOODConfig()
 
     def __post_init__(self):
         if self.obs_type == "pixels":

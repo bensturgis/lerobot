@@ -10,7 +10,7 @@ dataset:
 env:
   type: libero
   task: libero_10
-  task_ids: [0, 4, 7, 8, 9]
+  task_ids: [0]
 
 fiper_data_recorder:
   domains: [id]
