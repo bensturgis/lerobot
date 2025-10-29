@@ -56,7 +56,7 @@ class FiperDataRecorderConfig:
     scoring_metrics: tuple = ("mode_distance", "inter_vel_diff", "likelihood")
 
     # Parameters for the ensemble model
-    ensemble_model_path: str | Path | None = None
+    ensemble_model_paths: list[str] | None = None
 
     # Parameters for the Laplace approximation
     laplace_config: LaplaceConfig = field(default_factory=LaplaceConfig)

@@ -1,6 +1,6 @@
 import pickle
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -22,7 +22,7 @@ from lerobot.policies.common.flow_matching.ode_solver import (
 )
 from lerobot.uncertainty.uncertainty_samplers.utils import compose_ode_states
 from lerobot.uncertainty.uncertainty_scoring.laplace_utils.posterior_builder import (
-    sample_adapter_from_posterior,
+    sample_from_posterior,
 )
 from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import ScorerArtifacts
 
@@ -53,10 +53,11 @@ class FiperDataRecorder:
         self.dtype = flow_matching_adapter.dtype
 
         # Extract scorer artifacts
-        self.ensemble_adapter = scorer_artifacts.ensemble_adapter
+        self.ensemble_adapters = scorer_artifacts.ensemble_models
         self.laplace_posterior = scorer_artifacts.laplace_posterior
-        if self.ensemble_adapter is None:
-            raise ValueError("Ensemble model is required for FIPER data recording.")
+        self.num_laplace_samples = config.laplace_config.num_samples
+        if self.ensemble_adapters is None:
+            raise ValueError("At least one ensemble model is required for FIPER data recording.")
         elif self.laplace_posterior is None:
             raise ValueError("Laplace posterior is required for FIPER data recording.")
 
@@ -118,8 +119,8 @@ class FiperDataRecorder:
         self.prev_selected_action_idx: Optional[int] = None
 
         # Store the velocity function of the ensemble and laplace model from the previous action sequence generation
-        self.prev_ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
-        self.prev_laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_ensemble_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] | None = None
+        self.prev_laplace_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] | None = None
 
         # Store data from action generation steps across rollout
         self.rollout_data: List[Dict[str, Any]] = []
@@ -128,9 +129,9 @@ class FiperDataRecorder:
         self,
         action_samples: Tensor,
         composed_action_samples: Optional[Tensor],
-        laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor],
-        ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor],
-    ) -> Dict[str, Union[np.ndarray, Tensor]]:
+        laplace_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]],
+        ensemble_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]],
+    ) -> Dict[str, np.ndarray]:
         """
         Evaluate terminal velocities at configured times for ensemble/laplace on the
         current samples, and for sampler/ensemble/laplace on composed samples.
@@ -146,32 +147,40 @@ class FiperDataRecorder:
         composed_laplace_terminal_vels: List[Tensor] = []
         for time in self.config.terminal_vel_eval_times:
             time_tensor = torch.tensor(time, device=self.device, dtype=self.dtype)
-            ensemble_terminal_vels.append(ensemble_velocity_fn(
-                x_t=action_samples, t=time_tensor,
-            ))
-            laplace_terminal_vels.append(laplace_velocity_fn(
-                x_t=action_samples, t=time_tensor
-            ))
+            ensemble_terminal_vels_at_t = torch.stack(
+                [vel_fn(x_t=action_samples, t=time_tensor) for vel_fn in ensemble_velocity_fns],
+                dim=0
+            )
+            ensemble_terminal_vels.append(ensemble_terminal_vels_at_t)
+            laplace_terminal_vels_at_t = torch.stack(
+                [vel_fn(x_t=action_samples, t=time_tensor) for vel_fn in laplace_velocity_fns],
+                dim=0
+            )
+            laplace_terminal_vels.append(laplace_terminal_vels_at_t)
             if self.prev_selected_action_idx is not None:
                 composed_terminal_vels.append(self.prev_velocity_fn(
                     x_t=composed_action_samples, t=time_tensor
                 ))
-                composed_ensemble_terminal_vels.append(self.prev_ensemble_velocity_fn(
-                    x_t=composed_action_samples, t=time_tensor
-                ))
-                composed_laplace_terminal_vels.append(self.prev_laplace_velocity_fn(
-                    x_t=composed_action_samples, t=time_tensor
-                ))
+                composed_ensemble_terminal_vels_at_t = torch.stack(
+                    [vel_fn(x_t=composed_action_samples, t=time_tensor) for vel_fn in self.prev_ensemble_velocity_fns],
+                    dim=0
+                )
+                composed_ensemble_terminal_vels.append(composed_ensemble_terminal_vels_at_t)
+                composed_laplace_terminal_vels_at_t = torch.stack(
+                    [vel_fn(x_t=composed_action_samples, t=time_tensor) for vel_fn in self.prev_laplace_velocity_fns],
+                    dim=0
+                )
+                composed_laplace_terminal_vels.append(composed_laplace_terminal_vels_at_t)
             else:
                 composed_terminal_vels.append(
                     torch.full_like(action_samples, float('nan'))
                 )
-                composed_ensemble_terminal_vels.append(
-                    torch.full_like(action_samples, float('nan'))
-                )
-                composed_laplace_terminal_vels.append(
-                    torch.full_like(action_samples, float('nan'))
-                )
+                composed_ensemble_terminal_vels.append(torch.full(
+                    (len(ensemble_velocity_fns), *action_samples.shape), float('nan')
+                ))
+                composed_laplace_terminal_vels.append(torch.full(
+                    (len(laplace_velocity_fns), *action_samples.shape), float('nan')
+                ))
         return {
             "terminal_eval_times": np.asarray(self.config.terminal_vel_eval_times),
             "ensemble_terminal_velocities": torch.stack(ensemble_terminal_vels, dim=0).detach().cpu().numpy(),
@@ -206,26 +215,15 @@ class FiperDataRecorder:
         self,
         action_samples: Tensor,
         composed_action_samples: Optional[Tensor],
-        laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor],
-        ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor],
+        laplace_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]],
+        ensemble_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]],
         generator: Optional[torch.Generator] = None
-    ) -> Dict[str, Tensor]:
+    ) -> Dict[str, np.ndarray]:
         """
         Compute log-likelihoods of the current samples under ensemble/laplace and,
         if a composed trajectory exists, log-likelihoods of composed samples under
         sampler/ensemble/laplace. Returns the recorded data in a dict.
         """
-        # Compute log-likelihood of sampled action sequences under ensemble and laplace model
-        ensemble_log_likelihood = self.compute_log_likelihood(
-            action_samples=action_samples,
-            velocity_fn=ensemble_velocity_fn,
-            generator=generator,
-        )
-        laplace_log_likelihood = self.compute_log_likelihood(
-            action_samples=action_samples,
-            velocity_fn=laplace_velocity_fn,
-            generator=generator,
-        )
         # Compute log-likelihood of composed action sequence under sampler model
         if self.prev_selected_action_idx is not None:
             composed_log_likelihood = self.compute_log_likelihood(
@@ -235,37 +233,69 @@ class FiperDataRecorder:
             )
         else:
             composed_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
+        # Compute log-likelihood of sampled action sequences under ensemble and laplace model
+        ensemble_log_likelihood: List[Tensor] = []
+        laplace_log_likelihood: List[Tensor] = []
+        for vel_fn in ensemble_velocity_fns:
+            ensemble_log_likelihood.append(
+                self.compute_log_likelihood(
+                    action_samples=action_samples,
+                    velocity_fn=vel_fn,
+                    generator=generator,
+                )
+            )
+        for vel_fn in laplace_velocity_fns:
+            laplace_log_likelihood.append(
+                self.compute_log_likelihood(
+                    action_samples=action_samples,
+                    velocity_fn=vel_fn,
+                    generator=generator,
+                )
+            )
         # Compute log-likelihood of composed action sequence under ensemble and laplace model
         if self.prev_selected_action_idx is not None:
-            composed_ensemble_log_likelihood = self.compute_log_likelihood(
-                action_samples=composed_action_samples,
-                velocity_fn=self.prev_ensemble_velocity_fn,
-                generator=generator,
-            )
-            composed_laplace_log_likelihood = self.compute_log_likelihood(
-                action_samples=composed_action_samples,
-                velocity_fn=self.prev_laplace_velocity_fn,
-                generator=generator,
+            composed_ensemble_log_likelihood: List[Tensor] = []
+            for vel_fn in self.prev_ensemble_velocity_fns:
+                composed_ensemble_log_likelihood.append(
+                    self.compute_log_likelihood(
+                        action_samples=composed_action_samples,
+                        velocity_fn=vel_fn,
+                        generator=generator,
+                    )
+                )
+            composed_laplace_log_likelihood: List[Tensor] = []
+            for vel_fn in self.prev_laplace_velocity_fns:
+                composed_laplace_log_likelihood.append(self.compute_log_likelihood(
+                    action_samples=composed_action_samples,
+                    velocity_fn=vel_fn,
+                    generator=generator,
+                )
             )
         else:
-            composed_ensemble_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
-            composed_laplace_log_likelihood = torch.full((self.config.num_uncertainty_sequences,), float('nan'))
+            composed_ensemble_log_likelihood = [
+                torch.full((self.config.num_uncertainty_sequences,), float('nan'))
+                for _ in ensemble_velocity_fns
+            ]
+            composed_laplace_log_likelihood = [
+                torch.full((self.config.num_uncertainty_sequences,), float('nan'))
+                for _ in laplace_velocity_fns
+            ]
 
         return {
-            "ensemble_log_likelihood": ensemble_log_likelihood.detach().cpu().numpy(),
-            "laplace_log_likelihood": laplace_log_likelihood.detach().cpu().numpy(),
+            "ensemble_log_likelihood": torch.stack(ensemble_log_likelihood, dim=0).detach().cpu().numpy(),
+            "laplace_log_likelihood": torch.stack(laplace_log_likelihood, dim=0).detach().cpu().numpy(),
             "composed_log_likelihood": composed_log_likelihood.detach().cpu().numpy(),
-            "composed_ensemble_log_likelihood": composed_ensemble_log_likelihood.detach().cpu().numpy(),
-            "composed_laplace_log_likelihood": composed_laplace_log_likelihood.detach().cpu().numpy(),
+            "composed_ensemble_log_likelihood": torch.stack(composed_ensemble_log_likelihood, dim=0).detach().cpu().numpy(),
+            "composed_laplace_log_likelihood": torch.stack(composed_laplace_log_likelihood, dim=0).detach().cpu().numpy(),
         }
 
     def record_inter_vel_diffs(
         self,
         ode_states: Tensor,
         velocity_fn: Callable[[Tensor, Tensor], Tensor],
-        laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor],
-        ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor],
-    ) -> Dict[str, Union[np.ndarray, Tensor]]:
+        laplace_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]],
+        ensemble_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]],
+    ) -> Dict[str, np.ndarray]:
         """
         Select intermediate ODE states at configured times and evaluate velocities for
         sampler/ensemble/laplace. If available, also evaluate on previous/composed states.
@@ -290,12 +320,16 @@ class FiperDataRecorder:
             sampler_vels.append(
                 velocity_fn(x_t=ode_state, t=time_tensor)
             )
-            ensemble_vels.append(
-                ensemble_velocity_fn(x_t=ode_state, t=time_tensor)
+            ensemble_vels_at_t = torch.stack(
+                [vel_fn(x_t=ode_state, t=time_tensor) for vel_fn in ensemble_velocity_fns],
+                dim=0
             )
-            laplace_vels.append(
-                laplace_velocity_fn(x_t=ode_state, t=time_tensor)
+            ensemble_vels.append(ensemble_vels_at_t)
+            laplace_vels_at_t = torch.stack(
+                [vel_fn(x_t=ode_state, t=time_tensor) for vel_fn in laplace_velocity_fns],
+                dim=0
             )
+            laplace_vels.append(laplace_vels_at_t)
             vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
 
         return {
@@ -327,9 +361,10 @@ class FiperDataRecorder:
         step_data: Dict[str, Any] = {}
 
         # Draw flow matching model from the Laplace posterior
-        laplace_adapter = sample_adapter_from_posterior(
+        laplace_adapters = sample_from_posterior(
             laplace_posterior=self.laplace_posterior,
             uncertainty_adapter=self.flow_matching_adapter,
+            num_samples=self.num_laplace_samples,
             generator=generator
         )
 
@@ -338,11 +373,15 @@ class FiperDataRecorder:
         velocity_fn = self.flow_matching_adapter.make_velocity_fn(conditioning=conditioning)
         step_data["obs_embedding"] = self.flow_matching_adapter.prepare_fiper_obs_embedding(conditioning=conditioning)
 
-        ensemble_conditioning = self.ensemble_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
-        ensemble_velocity_fn = self.ensemble_adapter.make_velocity_fn(conditioning=ensemble_conditioning)
-        
-        laplace_conditioning = laplace_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
-        laplace_velocity_fn = laplace_adapter.make_velocity_fn(conditioning=laplace_conditioning)
+        ensemble_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] = []
+        for ensemble_adapter in self.ensemble_adapters:
+            ensemble_conditioning = ensemble_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
+            ensemble_velocity_fns.append(ensemble_adapter.make_velocity_fn(conditioning=ensemble_conditioning))
+
+        laplace_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] = []
+        for laplace_adapter in laplace_adapters:
+            laplace_conditioning = laplace_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
+            laplace_velocity_fns.append(laplace_adapter.make_velocity_fn(conditioning=laplace_conditioning))
 
         # Sample noise priors
         noise_sample = self.flow_matching_adapter.sample_prior(
@@ -383,8 +422,8 @@ class FiperDataRecorder:
             terminal_vels_data = self.record_terminal_vels(
                 action_samples=action_candidates,
                 composed_action_samples=composed_action_samples,
-                laplace_velocity_fn=laplace_velocity_fn,
-                ensemble_velocity_fn=ensemble_velocity_fn,
+                laplace_velocity_fns=laplace_velocity_fns,
+                ensemble_velocity_fns=ensemble_velocity_fns,
             )
             step_data.update(terminal_vels_data)
 
@@ -393,8 +432,8 @@ class FiperDataRecorder:
             log_likelihood_data = self.record_log_likelihoods(
                 action_samples=action_candidates,
                 composed_action_samples=composed_action_samples,
-                laplace_velocity_fn=laplace_velocity_fn,
-                ensemble_velocity_fn=ensemble_velocity_fn,
+                laplace_velocity_fns=laplace_velocity_fns,
+                ensemble_velocity_fns=ensemble_velocity_fns,
                 generator=generator,
             )
             step_data.update(log_likelihood_data)
@@ -404,8 +443,8 @@ class FiperDataRecorder:
             inter_vel_diff_data = self.record_inter_vel_diffs(
                 ode_states=ode_states,
                 velocity_fn=velocity_fn,
-                laplace_velocity_fn=laplace_velocity_fn,
-                ensemble_velocity_fn=ensemble_velocity_fn,
+                laplace_velocity_fns=laplace_velocity_fns,
+                ensemble_velocity_fns=ensemble_velocity_fns,
             )
             step_data.update(inter_vel_diff_data)
 
@@ -423,8 +462,8 @@ class FiperDataRecorder:
         self.prev_velocity_fn = velocity_fn
         self.prev_ode_states = ode_states
         self.prev_selected_action_idx = action_selection_idx
-        self.prev_laplace_velocity_fn = laplace_velocity_fn
-        self.prev_ensemble_velocity_fn = ensemble_velocity_fn
+        self.prev_laplace_velocity_fns = laplace_velocity_fns
+        self.prev_ensemble_velocity_fns = ensemble_velocity_fns
 
         # Store data from this action generation step
         self.rollout_data.append(step_data)
@@ -439,8 +478,8 @@ class FiperDataRecorder:
         self.prev_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
         self.prev_ode_states: Optional[Tensor] = None
         self.prev_selected_action_idx: Optional[int] = None
-        self.prev_laplace_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
-        self.prev_ensemble_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_laplace_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] | None = None
+        self.prev_ensemble_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] | None = None
 
         # Clear recorded rollout data
         self.rollout_data.clear()
