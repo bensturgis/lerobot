@@ -9,25 +9,25 @@
             )
           )
           (:yaw_rotation (
-              (0.0 10.0)
+              (10.0 20.0)
             )
           )
       )
       (milk_init_region
           (:target living_room_table)
           (:ranges (
-              (0.05 -0.125 0.1 -0.07500000000000001)
+              (0.05 -0.075 0.1 -0.025)
             )
           )
           (:yaw_rotation (
-              (0.0 0.0)
+              (10.0 20.0)
             )
           )
       )
       (cream_cheese_init_region
           (:target living_room_table)
           (:ranges (
-              (0.1 -0.225 0.15 -0.17500000000000002)
+              (0.1 -0.175 0.15 -0.125)
             )
           )
           (:yaw_rotation (
@@ -38,7 +38,7 @@
       (orange_juice_init_region
           (:target living_room_table)
           (:ranges (
-              (-0.025 -0.3 0.025 -0.25)
+              (0.0 -0.3 0.05 -0.25)
             )
           )
           (:yaw_rotation (
