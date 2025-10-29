@@ -17,7 +17,8 @@ from lerobot.datasets.utils import filter_libero_episodes, patch_dataset_episode
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.processor import PolicyProcessorPipeline
-from lerobot.utils.utils import format_big_number, get_safe_torch_device
+from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import LaplaceConfig
+from lerobot.utils.utils import format_big_number
 
 from .laplace_wrappers.factory import make_laplace_wrapper
 from .laplace_wrappers.laplace_wrapper import LaplaceWrapper
@@ -81,11 +82,12 @@ def create_laplace_calib_loader(
     return calib_loader
 
 
-def sample_adapter_from_posterior(
+def sample_from_posterior(
     laplace_posterior: BaseLaplace,
     uncertainty_adapter: BaseFlowMatchingAdapter,
+    num_samples: int = 1,
     generator: Optional[torch.Generator] = None,
-) -> BaseFlowMatchingAdapter:
+) -> List[BaseFlowMatchingAdapter]:
     """
     Draw one weight sample from a fitted Laplace posterior and return a cloned
     uncertainty adapter whose underlying model uses those sampled weights.
@@ -101,32 +103,36 @@ def sample_adapter_from_posterior(
     """
     # Draw weights from the Laplace posterior
     laplace_model_weights = laplace_posterior.sample(
-        n_samples=1,
+        n_samples=num_samples,
         generator=generator
-    ).squeeze(0)
+    )
 
-    # Copy the MAP model so we never mutate the original
-    laplace_adapter = copy.deepcopy(uncertainty_adapter)
+    laplace_adapters: List[BaseFlowMatchingAdapter] = []
+    for i in range(num_samples):
+        # Copy the MAP model so we never mutate the original
+        laplace_adapter = copy.deepcopy(uncertainty_adapter)
 
-    # Collect the parameters that were in the posterior
-    target_params = [p for p in laplace_adapter.model.parameters() if p.requires_grad]
+        # Collect the parameters that were in the posterior
+        target_params = [p for p in laplace_adapter.model.parameters() if p.requires_grad]
 
-    # Consistency check to avoid silent weight mis-alignment
-    n_expected = sum(p.numel() for p in target_params)
-    if laplace_model_weights.numel() != n_expected:
-        raise RuntimeError(
-            f"[Laplace] Sample size mismatch: drew {laplace_model_weights.numel()} "
-            f"weights but found {n_expected} trainable parameters in the copy."
-        )
+        # Consistency check to avoid silent weight mis-alignment
+        n_expected = sum(p.numel() for p in target_params)
+        if laplace_model_weights.shape[1] != n_expected:
+            raise RuntimeError(
+                f"[Laplace] Sample size mismatch: drew {laplace_model_weights.shape[1]} "
+                f"weights but found {n_expected} trainable parameters in the copy."
+            )
 
-    # Write sampled parameters into the copied model (in-place assignment)
-    vector_to_parameters(laplace_model_weights, target_params)
+        # Write sampled parameters into the copied model (in-place assignment)
+        vector_to_parameters(laplace_model_weights[i], target_params)
 
-    # Move the model to the same device as sampled weights and switch to inference mode
-    laplace_adapter.model = laplace_adapter.model.to(laplace_model_weights.device)
-    laplace_adapter.model.eval()
+        # Move the model to the same device as sampled weights and switch to inference mode
+        laplace_adapter.model = laplace_adapter.model.to(laplace_model_weights.device)
+        laplace_adapter.model.eval()
 
-    return laplace_adapter
+        laplace_adapters.append(laplace_adapter)
+
+    return laplace_adapters
 
 
 def make_laplace_path(
@@ -146,9 +152,7 @@ def make_laplace_path(
 def get_laplace_posterior(
     policy: PreTrainedPolicy,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
-    laplace_scopes: Optional[List[str]],
-    calib_fraction: float,
-    batch_size: int,
+    laplace_config: LaplaceConfig,
     dataset_cfg: DatasetConfig,
 ) -> Laplace:
     """
@@ -161,12 +165,12 @@ def get_laplace_posterior(
         A fitted or loaded Laplace posterior.
     """
     # Wrap the flow matching model so it takes inputs and generates outputs compatible with Laplace
-    laplace_wrapper = make_laplace_wrapper(policy=policy, scopes=laplace_scopes)
+    laplace_wrapper = make_laplace_wrapper(policy=policy, scopes=laplace_config.scopes)
 
     laplace_path = make_laplace_path(
         laplace_wrapper=laplace_wrapper,
         pretrained_path=policy.config.pretrained_path,
-        calib_fraction=calib_fraction,
+        calib_fraction=laplace_config.calib_fraction,
     )
 
     laplace_posterior = Laplace(
@@ -186,8 +190,8 @@ def get_laplace_posterior(
             preprocessor=preprocessor,
             dataset_cfg=dataset_cfg,
             policy_cfg=policy.config,
-            calib_fraction=calib_fraction,
-            batch_size=batch_size,
+            calib_fraction=laplace_config.calib_fraction,
+            batch_size=laplace_config.batch_size,
         )
 
         logging.info("Fitting new Laplace posterior.")

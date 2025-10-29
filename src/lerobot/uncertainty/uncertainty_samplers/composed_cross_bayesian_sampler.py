@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -6,7 +6,7 @@ from torch import Tensor
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.factory import make_uncertainty_scoring_metric
 
-from ..uncertainty_scoring.laplace_utils.posterior_builder import sample_adapter_from_posterior
+from ..uncertainty_scoring.laplace_utils.posterior_builder import sample_from_posterior
 from ..uncertainty_scoring.scorer_artifacts import ScorerArtifacts
 from .configuration_uncertainty_sampler import (
     CrossBayesianSamplerConfig,
@@ -63,15 +63,16 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
                 "Composed sequence cross-Bayesian sampler is not compatible with intermediate velocity difference score."
             )
 
-        self.ensemble_adapter = scorer_artifacts.ensemble_adapter
+        self.ensemble_models = scorer_artifacts.ensemble_models
         self.laplace_posterior = scorer_artifacts.laplace_posterior
-        if config.scorer_type == "ensemble" and self.ensemble_adapter is None:
-            raise ValueError("ensemble_model is required for scorer_type='ensemble'.")
-        elif config.scorer_type == "laplace" and self.laplace_posterior is None:
-            raise ValueError("laplace_posterior is required for scorer_type='laplace'.")
+        self.num_laplace_samples = config.laplace_config.num_samples
+        if config.scorer_type == "ensemble" and not self.ensemble_models:
+            raise ValueError("At least one ensemble model is required for scorer_type='ensemble'.")
+        elif config.scorer_type == "laplace" and not self.laplace_posterior:
+            raise ValueError("Laplace posterior is required for scorer_type='laplace'.")
         elif config.scorer_type not in {"ensemble", "laplace"}:
             raise ValueError(f"Unknown scorer_type: {config.scorer_type!r}")
-        self.scorer_model = None
+        self.scorer_models: List[BaseFlowMatchingAdapter] = []
 
         # Sampler-specific settings
         self.config = config
@@ -79,7 +80,7 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
         # Store the velocity functions and ODE states from the previous action sequence generation
         self.prev_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
         self.prev_ode_states: Tensor | None = None
-        self.prev_scorer_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_scorer_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] | None = None
 
        # Index of the selected action sequence from the previous actions batch
         self.prev_selected_action_idx: int | None = None
@@ -127,20 +128,23 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
 
         if self.config.scorer_type == "laplace":
             # Draw flow matching model from the Laplace posterior
-            self.scorer_model = sample_adapter_from_posterior(
+            self.scorer_models = sample_from_posterior(
                 laplace_posterior=self.laplace_posterior,
                 uncertainty_adapter=self.model,
-                generator=generator
+                num_samples=self.num_laplace_samples,
+                generator=generator,
             )
         else:
-            self.scorer_model = self.ensemble_adapter
+            self.scorer_models = self.ensemble_models
 
-        # Create and prepare the scorer conditioning vector
-        scorer_conditioning = self.scorer_model.prepare_conditioning(observation, self.num_action_samples)
-        scorer_velocity_fn = self.scorer_model.make_velocity_fn(conditioning=scorer_conditioning)
+        scorer_velocity_fns: List[Callable[[Tensor, Tensor], Tensor]] = []
+        for scorer in self.scorer_models:
+            # Create and prepare the scorer conditioning vector
+            scorer_conditioning = scorer.prepare_conditioning(observation, self.num_action_samples)
+            scorer_velocity_fn = scorer.make_velocity_fn(conditioning=scorer_conditioning)
+            scorer_velocity_fns.append(scorer_velocity_fn)
 
         if self.prev_selected_action_idx is None:
-            # If no previous trajectory is stored, return placeholder uncertainty
             self.uncertainty = float('-inf')
         else:
             # Compose full ODE states from stored previous and new action generation
@@ -154,33 +158,26 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
                 n_obs_steps=self.n_obs_steps
             )
 
-            # Compute uncertainty based on selected metric
-            if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
-                uncertainty_scores = self.scoring_metric(
-                    action_sequences=composed_ode_states[-1],
-                    velocity_fn=self.prev_scorer_velocity_fn,
-                )
-            elif self.scoring_metric.name == "inter_vel_diff":
-                # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix
-                prev_selected_ode_states = select_and_expand_ode_states(
-                    ode_states=self.prev_ode_states,
-                    traj_idx=self.prev_selected_action_idx,
-                )
+            # Compute uncertainty scores from each scorer model
+            scorer_uncertanty_means: List[float] = []
+            for prev_scorer_velocity_fn in self.prev_scorer_velocity_fns:
+                # Compute uncertainty based on selected metric
+                if self.scoring_metric.name in ("terminal_vel_norm", "mode_distance", "likelihood"):
+                    uncertainty_scores = self.scoring_metric(
+                        action_sequences=composed_ode_states[-1],
+                        velocity_fn=prev_scorer_velocity_fn,
+                    )
+                else:
+                    raise ValueError(f"Invalid uncertainty metric: {self.scoring_metric.name}.")
 
-                uncertainty_scores = self.scoring_metric(
-                    ref_ode_states=prev_selected_ode_states,
-                    ref_velocity_fn=self.prev_velocity_fn,
-                    cmp_ode_states=composed_ode_states,
-                    cmp_velocity_fn=self.prev_scorer_velocity_fn,
-                )
-            else:
-                raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
+                # Average uncertainty scores of a single scorer over all action samples
+                scorer_uncertanty_means.append(uncertainty_scores.mean().item())
 
             # Average uncertainty scores and store for logging
-            self.uncertainty = uncertainty_scores.mean().item()
+            self.uncertainty = sum(scorer_uncertanty_means) / len(self.scorer_models)
 
         # Store scorer model, conditioning vectors, ODE states from the previous action sampling step
-        self.prev_scorer_velocity_fn = scorer_velocity_fn
+        self.prev_scorer_velocity_fns = scorer_velocity_fns
         self.prev_velocity_fn = velocity_fn
         self.prev_ode_states = new_ode_states
 
@@ -195,7 +192,7 @@ class ComposedCrossBayesianSampler(UncertaintySampler):
         Reset internal state to prepare for a new rollout.
         """
         # Clear stored velocity functions, ODE states and selected action sequence from previous step
-        self.prev_scorer_velocity_fn = None
+        self.prev_scorer_velocity_fns = None
         self.prev_velocity_fn = None
         self.prev_ode_states = None
         self.prev_selected_action_idx = None

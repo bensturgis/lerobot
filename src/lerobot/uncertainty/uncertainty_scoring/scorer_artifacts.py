@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from laplace import Laplace
 
@@ -16,7 +16,7 @@ from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.processor import PolicyProcessorPipeline
 
 from ..uncertainty_samplers.configuration_uncertainty_sampler import UncertaintySamplerConfig
-from .ensemble_utils.factory import build_ensemble_model
+from .ensemble_utils.factory import build_ensemble_models
 from .laplace_utils.posterior_builder import get_laplace_posterior
 
 
@@ -26,10 +26,10 @@ class ScorerArtifacts:
     Artifacts required by the uncertainty scorer.
 
     Attributes:
-        ensemble_adapter: Model adapter used when scorer_type='ensemble'.
+        ensemble_models: Model adapters used when scorer_type='ensemble'.
         laplace_posterior: Laplace posterior used when scorer_type='laplace'.
     """
-    ensemble_adapter: Optional[BaseFlowMatchingAdapter] = None
+    ensemble_models: List[BaseFlowMatchingAdapter] = None
     laplace_posterior: Optional[Laplace] = None
 
 def build_scorer_artifacts_for_uncertainty_sampler(
@@ -48,19 +48,17 @@ def build_scorer_artifacts_for_uncertainty_sampler(
     if scorer_type is None:
         return ScorerArtifacts()
     if scorer_type == "ensemble":
-        ensemble_adapter = build_ensemble_model(
-            ensemble_model_path=active_config.ensemble_model_path,
+        ensemble_models = build_ensemble_models(
+            ensemble_model_paths=active_config.ensemble_model_paths,
             policy_cfg=policy_cfg,
             env_cfg=env_cfg,
         )
-        return ScorerArtifacts(ensemble_adapter=ensemble_adapter)
+        return ScorerArtifacts(ensemble_models=ensemble_models)
     if scorer_type == "laplace":
         laplace_posterior = get_laplace_posterior(
             policy=policy,
             preprocessor=preprocesser,
-            laplace_scopes=active_config.laplace_scopes,
-            calib_fraction=active_config.calib_fraction,
-            batch_size=active_config.batch_size,
+            laplace_config=active_config.laplace_config,
             dataset_cfg=dataset_cfg,
         )
         return ScorerArtifacts(laplace_posterior=laplace_posterior)
@@ -77,17 +75,15 @@ def build_scorer_artifacts_for_fiper_recorder(
     """
     Build both ensemble model and Laplace posterior artifacts for the FIPER data recorder.
     """
-    ensemble_model = build_ensemble_model(
-        ensemble_model_path=fiper_data_recorder_cfg.ensemble_model_path,
+    ensemble_models = build_ensemble_models(
+        ensemble_model_paths=fiper_data_recorder_cfg.ensemble_model_paths,
         policy_cfg=policy_cfg,
         env_cfg=env_cfg,
     )
     laplace_posterior = get_laplace_posterior(
         policy=policy,
         preprocessor=preprocesser,
-        laplace_scopes=fiper_data_recorder_cfg.laplace_scopes,
-        calib_fraction=fiper_data_recorder_cfg.calib_fraction,
-        batch_size=fiper_data_recorder_cfg.batch_size,
+        laplace_config=fiper_data_recorder_cfg.laplace_config,
         dataset_cfg=dataset_cfg,
     )
-    return ScorerArtifacts(ensemble_adapter=ensemble_model, laplace_posterior=laplace_posterior)
+    return ScorerArtifacts(ensemble_models=ensemble_models, laplace_posterior=laplace_posterior)

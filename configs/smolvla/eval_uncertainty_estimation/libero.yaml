@@ -14,29 +14,40 @@ env:
 
 eval_uncert_est:
   n_episodes: 50
-  uncert_est_methods: [cross_bayesian]
+  uncert_est_methods: [cross_bayesian, composed_cross_bayesian]
   domains: [id]
 
 uncertainty_sampler:
   composed_cross_bayesian_sampler:
-    scorer_type: ensemble
-    ensemble_model_path: outputs/train/smolvla/libero_5_tasks_scratch_02/checkpoints/020000/pretrained_model
-    laplace_scopes: [action_out_proj, expert_last]
+    scorer_type: laplace
+    ensemble_model_paths: [
+      outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model,
+    ]
+    laplace_config:
+      scopes: [action_out_proj]
+      calib_fraction: 1.0
+      num_samples: 3
     scoring_metric:
       metric_type: mode_distance
-    num_action_samples: 20
+    num_action_samples: 25
   composed_sequence_sampler:
     scoring_metric:
       metric_type: mode_distance
     num_action_samples: 25
   cross_bayesian_sampler:
-    scorer_type: ensemble
-    ensemble_model_path: outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model
+    scorer_type: laplace
+    ensemble_model_paths: [
+      outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model,
+    ]
+    laplace_config:
+      scopes: [action_out_proj]
+      calib_fraction: 1.0
+      num_samples: 3
     scoring_metric:
       metric_type: mode_distance
     num_action_samples: 25
 
-seed: 193
-job_name: smolvla_finetuned_n_action_steps_16
+seed: 123
+job_name: test_multi_scorers
 
-# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model --policy.n_action_steps=16
+# python src/lerobot/scripts/uncertainty/eval_uncertainty_estimation.py --config=configs/smolvla/eval_uncertainty_estimation/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model

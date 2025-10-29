@@ -53,7 +53,7 @@ class EvalUncertaintyEstimationPipelineConfig:
         if (
             "cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
             self.uncertainty_sampler.cross_bayesian_sampler.scorer_type == "ensemble" and
-            self.uncertainty_sampler.cross_bayesian_sampler.ensemble_model_path is None
+            not self.uncertainty_sampler.cross_bayesian_sampler.ensemble_model_paths
         ):
              raise ValueError(
                 "Cross-Bayesian uncertainty sampler with scorer_type=ensemble requested but no" \
@@ -63,7 +63,7 @@ class EvalUncertaintyEstimationPipelineConfig:
         if (
             "composed_cross_bayesian" in self.eval_uncert_est.uncert_est_methods and
             self.uncertainty_sampler.composed_cross_bayesian_sampler.scorer_type == "ensemble" and
-            self.uncertainty_sampler.composed_cross_bayesian_sampler.ensemble_model_path is None
+            not self.uncertainty_sampler.composed_cross_bayesian_sampler.ensemble_model_paths
         ):
             raise ValueError(
                 "Composed Cross-Bayesian uncertainty sampler with scorer_type=ensemble requested but no " \

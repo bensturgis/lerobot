@@ -124,21 +124,8 @@ class ComposedSequenceSampler(UncertaintySampler):
                     action_sequences=composed_ode_states[-1],
                     velocity_fn=self.prev_velocity_fn,
                 )
-            elif self.scoring_metric.name == "inter_vel_diff":
-                # Broadcast the selected past ODE states so all new samples are compared against the same executed prefix
-                prev_selected_ode_states = select_and_expand_ode_states(
-                    ode_states=self.prev_ode_states,
-                    traj_idx=self.prev_selected_action_idx,
-                )
-
-                uncertainty_scores = self.scoring_metric(
-                    ref_ode_states=prev_selected_ode_states,
-                    ref_velocity_fn=self.prev_velocity_fn,
-                    cmp_ode_states=composed_ode_states,
-                    cmp_velocity_fn=self.prev_velocity_fn,
-                )
             else:
-                raise ValueError(f"Unknown uncertainty metric: {self.scoring_metric.name}.")
+                raise ValueError(f"Invalid uncertainty metric: {self.scoring_metric.name}.")
 
             # Average uncertainty scores and store for logging
             self.uncertainty = uncertainty_scores.mean().item()
