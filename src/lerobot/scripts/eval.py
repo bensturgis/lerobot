@@ -299,15 +299,15 @@ def eval_policy(
                 ep_frames.append(np.stack(env.call("render")[:n_to_render_now]))
         else:
             for camera in camera_names:
-                if isinstance(env, gym.vector.SyncVectorEnv):
-                    frames = [env.envs[i].unwrapped.render(camera_name=camera) for i in range(n_to_render_now)]
-                    ep_frames[camera].append(np.stack(frames))  # noqa: B023
-                elif isinstance(env, gym.vector.AsyncVectorEnv):
-                    # Here we must render all frames and discard any we don't need.
-                    render_envs = env.call("unwrapped")[:n_to_render_now]
-                    ep_frames[camera].append(np.stack(
-                        render_envs[i].render(camera_name=camera) for i in range(n_to_render_now)
-                    ))
+                image_name = env.envs[0].unwrapped.camera_name_mapping[camera]
+                if isinstance(env, gym.vector.SyncVectorEnv):                        
+                    frames = []
+                    for i in range(n_to_render_now):
+                        raw_obs = env.envs[i].unwrapped._env.env._get_observations()
+                        frames.append(env.envs[i].unwrapped._format_raw_obs(raw_obs)["pixels"][image_name])
+                    ep_frames[camera].append(np.stack(frames))
+                else:
+                    raise ValueError("Camera-specific rendering not supported for AsyncVectorEnv.")
 
         # Live visualization of first environment
         if live_vis:
@@ -330,7 +330,7 @@ def eval_policy(
                 start_seed + (batch_ix * env.num_envs), start_seed + ((batch_ix + 1) * env.num_envs)
             )
 
-        camera_names: list[str] | None = getattr(env.envs[0], "camera_names", None)
+        camera_names: list[str] | None = getattr(env.envs[0], "camera_name", None)
         # Cache frames for rendering videos. Each item will be (b, h, w, c), and the list indexes the rollout
         # step.
         if max_episodes_rendered > 0:
