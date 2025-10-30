@@ -16,7 +16,7 @@
       (alphabet_soup_init_region
           (:target living_room_table)
           (:ranges (
-              (0.025 -0.125 0.07500000000000001 -0.07500000000000001)
+              (0.025 -0.125 0.05 -0.07500000000000001)
             )
           )
           (:yaw_rotation (
@@ -38,7 +38,7 @@
       (tomato_sauce_init_region
           (:target living_room_table)
           (:ranges (
-              (0.07500000000000001 -0.175 0.125 -0.125)
+              (0.12 -0.1 0.14 -0.08)
             )
           )
           (:yaw_rotation (
@@ -49,7 +49,7 @@
       (ketchup_init_region
           (:target living_room_table)
           (:ranges (
-              (-0.225 -0.125 -0.17500000000000002 -0.075)
+              (-0.2 -0.075 -0.15 -0.025)
             )
           )
           (:yaw_rotation (

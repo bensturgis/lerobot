@@ -49,7 +49,7 @@
       (red_coffee_mug_init_region
           (:target living_room_table)
           (:ranges (
-              (0.1 0.125 0.125 0.175)
+              (0.107 0.05 0.125 0.1)
             )
           )
           (:yaw_rotation (

@@ -146,9 +146,9 @@ def build_env_for_domain(cfg: EnvConfig, domain: Literal["id", "ood"]) -> Dict[s
         A mapping of the form {suite_name: {task_id: env}}, containing exactly one env.
     """
     if domain == "id":
-        cfg.ood.enabled = False
+        cfg.ood.enable = False
     elif domain == "ood":
-        cfg.ood.enabled = True
+        cfg.ood.enable = True
     else:
         raise ValueError(f"Unknown eval domain '{domain}'. Expected 'id' or 'ood'.")
     return make_single_env(cfg)

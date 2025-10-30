@@ -50,7 +50,7 @@ class FiperDataRecorderConfig:
     num_uncertainty_sequences: int = 256
 
     # Which environment domains to evaluate. Allowed values: "id" (in-distribution), "ood" (out-of-distribution).
-    domains: tuple[str] = ("id", "ood")
+    domains: list[str] = field(default_factory=lambda: ["id", "ood"])
 
     # Scoring metrics to be recorded, choose from "mode_distance", "inter_vel_diff" and "likelihood"
     scoring_metrics: tuple = ("mode_distance", "inter_vel_diff", "likelihood")

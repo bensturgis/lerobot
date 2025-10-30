@@ -10,26 +10,27 @@ dataset:
 env:
   type: libero
   task: libero_10
-  task_ids: [0]
+  task_ids: [0, 4, 7, 8, 9]
 
 fiper_data_recorder:
-  domains: [id]
+  domains: [id, ood]
   num_uncertainty_sequences: 64
   scoring_metrics: [mode_distance]
   ode_eval_times: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
   terminal_vel_eval_times: [0, 0.05, 0.1, 0.15, 0.2, 0.25]
   ensemble_model_paths: [
-    outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model
+    outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model,
+    outputs/train/smolvla/libero_finetuned_03/checkpoints/010000/pretrained_model
   ]
   laplace_config:
     scopes: [action_out_proj]
     calib_fraction: 1.0
-    num_samples: 2
+    num_samples: 4
 
 n_calib_episodes: 70
 n_test_episodes: 150
 
-seed: 1110
-job_name: smolvla_libero_finetuned_multi_scorer
+seed: 20118
+job_name: smolvla_libero_finetuned_multi_scorer_and_ood
 
 # python src/lerobot/scripts/record_fiper_data.py --config=configs/smolvla/record_fiper_data/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model

@@ -46,6 +46,28 @@
             )
           )
       )
+      (alphabet_soup_init_region
+          (:target kitchen_table)
+          (:ranges (
+              (0.1 -0.1 0.125 -0.05)
+            )
+          )
+          (:yaw_rotation (
+              (0.0 0.0)
+            )
+          )
+      )
+      (red_coffee_mug_init_region
+          (:target kitchen_table)
+          (:ranges (
+              (0.125 -0.25 0.175 -0.2)
+            )
+          )
+          (:yaw_rotation (
+              (0.0 0.0)
+            )
+          )
+      )
       (top_side
           (:target microwave_1)
       )
@@ -62,6 +84,8 @@
   (:objects
     porcelain_mug_1 - porcelain_mug
     white_yellow_mug_1 - white_yellow_mug
+    alphabet_soup_1 - alphabet_soup
+    red_coffee_mug_1 - red_coffee_mug
   )
 
   (:obj_of_interest
@@ -73,6 +97,8 @@
     (On porcelain_mug_1 kitchen_table_porcelain_mug_init_region)
     (On white_yellow_mug_1 kitchen_table_white_yellow_mug_init_region)
     (On microwave_1 kitchen_table_microwave_init_region)
+    (On alphabet_soup_1 kitchen_table_alphabet_soup_init_region)
+    (On red_coffee_mug_1 kitchen_table_red_coffee_mug_init_region)
     (Open microwave_1)
   )
 

@@ -402,7 +402,7 @@ def create_libero_envs(
         raise ValueError("`task` must contain at least one LIBERO suite name.")
 
     print(
-        f"Creating LIBERO envs | suites={suite_names} | n_envs(per task)={n_envs} | init_states={init_states}"
+        f"Creating LIBERO envs | suites={suite_names} | n_envs(per task)={n_envs} | ood_enabled={ood.enable}"
     )
     if task_ids_filter is not None:
         print(f"Restricting to task_ids={task_ids_filter}")
