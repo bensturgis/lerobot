@@ -64,7 +64,6 @@ dependencies = [
     "huggingface-hub[hf-transfer,cli]>=0.34.2",
 
     # Core dependencies
-    "numpy>=1.24,<2.0",
     "scipy>=1.11,<1.16",
     "cmake>=3.29.0.1",
     "einops>=0.8.0",
@@ -141,7 +140,10 @@ xarm = ["gym-xarm>=0.1.1"]
 libero = ["lerobot[transformers-dep]", "libero @ git+https://github.com/huggingface/lerobot-libero.git@main#egg=libero"]
 
 # Uncertainty Estimation
-uncertainty = ["laplace-torch>=0.2.2.2,<0.3"]
+uncertainty = [
+    "laplace-torch>=0.2.2.2,<0.3",
+    "curvlinops-for-pytorch>=2.0.1,<4.0.0",
+]
 
 # All
 all = [
