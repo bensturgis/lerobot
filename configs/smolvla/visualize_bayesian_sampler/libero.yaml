@@ -18,8 +18,8 @@ vector_field:
   action_dims: [4, 5]
   # action_steps: [5, 10, 15, 20, 25, 30, 35, 40, 45, 49]
   grid_size: 20
-  min_action: -4
-  max_action: 4
+  min_action: -1
+  max_action: 1
 
 flows:
   num_paths: 5
@@ -27,11 +27,12 @@ flows:
   axis_limits: [[-1.5, 1.5], [-1.5, 1.5]]
 
 cross_bayesian_sampler:
-  scorer_type: laplace
-  # ensemble_model_path: /home/bensturgis/thesis/repos/lerobot/outputs/train/smolvla/libero_finetuning_with_reinitialization_02/checkpoints/015000/pretrained_model
-  # ensemble_model_path: outputs/train/smolvla/libero_5_tasks_scratch_with_vision_02/checkpoints/020000/pretrained_model
-  # ensemble_model_path: outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50/checkpoints/005000/pretrained_model
-  laplace_scopes: [action_out_proj]
+  scorer_type: ensemble
+  ensemble_model_paths: [
+    outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model
+  ]
+  laplace_config:
+    scopes: [action_out_proj]
   num_action_samples: 25
   scoring_metric:
     metric_type: mode_distance
@@ -40,6 +41,4 @@ cross_bayesian_sampler:
 show: False
 seed: 58
 
-# python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/smolvla/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_5_tasks_scratch_with_vision/checkpoints/015000/pretrained_model
-# python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/smolvla/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_5_tasks_scratch_with_vision/checkpoints/020000/pretrained_model
-# python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/smolvla/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_filtered_finetuned_unfreezed_vision_horizon_50/checkpoints/005000/pretrained_model
+# python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/smolvla/visualize_bayesian_sampler/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/last/pretrained_model
