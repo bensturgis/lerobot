@@ -175,13 +175,13 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
             )
             scorer_action_seq_visualizer = ActionSeqVisualizer(
                 config.action_seq,
-                model=cross_bayesian_sampler.scorer_model,
+                model=None,
                 postprocessor=postprocessor,
                 output_root=ep_dir,
             )
             vector_field_visualizer = VectorFieldVisualizer(
                 config=config.vector_field,
-                model=cross_bayesian_sampler.scorer_model,
+                model=None,
                 output_root=ep_dir,
             )
             flow_visualizer = FlowVisualizer(
@@ -242,7 +242,7 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                     )
 
                     # Extract the current scorer model
-                    scorer_model: BaseFlowMatchingAdapter = cross_bayesian_sampler.scorer_model
+                    scorer_model: BaseFlowMatchingAdapter = cross_bayesian_sampler.scorer_models[0]
 
                     # Visualize action sequence batch of sampler and scorer model
                     sampler_action_seq_visualizer.visualize(
