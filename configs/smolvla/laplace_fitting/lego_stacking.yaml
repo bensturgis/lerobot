@@ -1,0 +1,14 @@
+dataset:
+  repo_id: JohannesSaut/insert_lego_merged
+
+policy:
+  type: smolvla
+  device: cuda
+
+laplace:
+  scopes: [action_out_proj]
+  calib_fraction: 1.0
+
+seed: 91
+
+# python src/lerobot/scripts/uncertainty/fit_laplace_posterior.py --config=configs/smolvla/laplace_fitting/lego_stacking.yaml --policy.path=outputs/train/smolvla/lego_stacking_01/checkpoints/050000/pretrained_model

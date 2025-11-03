@@ -106,7 +106,7 @@ def main(config: VisualizeComposedSeqSamplerPipelineConfig):
         env_cfg=config.env,
         dataset_cfg=config.dataset,
         policy=policy,
-        preprocesser=preprocessor,
+        preprocessor=preprocessor,
     )
 
     # Initialize composed action sequence uncertainty sampler

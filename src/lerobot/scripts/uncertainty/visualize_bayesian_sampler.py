@@ -105,7 +105,7 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
         env_cfg=config.env,
         dataset_cfg=config.dataset,
         policy=policy,
-        preprocesser=preprocessor,
+        preprocessor=preprocessor,
     )
 
     # Initialize and extract the cross-bayesian sampler

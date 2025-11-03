@@ -1,5 +1,4 @@
 import datetime as dt
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,8 +31,8 @@ class EvalUncertaintyEstimationPipelineConfig:
             self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
             self.policy.pretrained_path = policy_path
         else:
-            logging.warning(
-                "No pretrained path was provided, policy for uncertainty evaluation will be built from scratch (random weights)."
+            raise ValueError(
+                "No pretrained policy path was provided for the uncertainty evaluation."
             )
 
         if not self.job_name:

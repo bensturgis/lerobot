@@ -477,7 +477,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             env_cfg=cfg.env,
             dataset_cfg=cfg.dataset,
             policy=policy,
-            preprocesser=preprocessor,
+            preprocessor=preprocessor,
         )
         scoring_metric_by_method[uncert_est_method] = getattr(uncertainty_config.active_config, "scoring_metric", None)
 

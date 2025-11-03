@@ -14,7 +14,7 @@ env:
 
 eval_uncert_est:
   n_episodes: 50
-  uncert_est_methods: [cross_bayesian, composed_cross_bayesian]
+  uncert_est_methods: [cross_bayesian]
   domains: [id]
 
 uncertainty_sampler:
@@ -35,9 +35,10 @@ uncertainty_sampler:
       metric_type: mode_distance
     num_action_samples: 25
   cross_bayesian_sampler:
-    scorer_type: laplace
+    scorer_type: ensemble
     ensemble_model_paths: [
       outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model,
+      outputs/train/smolvla/libero_finetuned_03/checkpoints/010000/pretrained_model,
     ]
     laplace_config:
       scopes: [action_out_proj]

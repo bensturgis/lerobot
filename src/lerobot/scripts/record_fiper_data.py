@@ -202,7 +202,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
         env_cfg=cfg.env,
         dataset_cfg=cfg.dataset,
         policy=policy,
-        preprocesser=preprocessor,
+        preprocessor=preprocessor,
     )
     policy.init_fiper_data_recorder(
         config=cfg.fiper_data_recorder,

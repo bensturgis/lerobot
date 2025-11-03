@@ -38,7 +38,7 @@ def build_scorer_artifacts_for_uncertainty_sampler(
     env_cfg: envs.EnvConfig,
     dataset_cfg: DatasetConfig,
     policy: PreTrainedPolicy,
-    preprocesser: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
+    preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
 ) -> ScorerArtifacts:
     """
     Build scorer artifacts (ensemble model or Laplace posterior) from the active uncertainty sampler config.
@@ -57,7 +57,7 @@ def build_scorer_artifacts_for_uncertainty_sampler(
     if scorer_type == "laplace":
         laplace_posterior = get_laplace_posterior(
             policy=policy,
-            preprocessor=preprocesser,
+            preprocessor=preprocessor,
             laplace_config=active_config.laplace_config,
             dataset_cfg=dataset_cfg,
         )
@@ -70,7 +70,7 @@ def build_scorer_artifacts_for_fiper_recorder(
     env_cfg: envs.EnvConfig,
     dataset_cfg: DatasetConfig,
     policy: PreTrainedPolicy,
-    preprocesser: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
+    preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
 ) -> ScorerArtifacts:
     """
     Build both ensemble model and Laplace posterior artifacts for the FIPER data recorder.
@@ -82,7 +82,7 @@ def build_scorer_artifacts_for_fiper_recorder(
     )
     laplace_posterior = get_laplace_posterior(
         policy=policy,
-        preprocessor=preprocesser,
+        preprocessor=preprocessor,
         laplace_config=fiper_data_recorder_cfg.laplace_config,
         dataset_cfg=dataset_cfg,
     )
