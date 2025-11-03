@@ -30,7 +30,7 @@ from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.compute_stats import compute_stats_for_episodes
 from lerobot.datasets.factory import make_dataset, make_train_val_split
 from lerobot.datasets.sampler import EpisodeAwareSampler
-from lerobot.datasets.utils import cycle, filter_libero_episodes, patch_dataset_episode_boundaries
+from lerobot.datasets.utils import cycle, filter_libero_episodes
 from lerobot.envs.factory import make_env
 from lerobot.envs.utils import close_envs
 from lerobot.optim.factory import make_optimizer_and_scheduler
@@ -205,7 +205,6 @@ def train(cfg: TrainPipelineConfig):
         policy_cfg=cfg.policy,
         num_workers=cfg.num_workers,
     )
-    full_dataset = patch_dataset_episode_boundaries(dataset=full_dataset)
 
     all_episode_ids = list(full_dataset.meta.episodes["episode_index"])
     if cfg.dataset.repo_id == "HuggingFaceVLA/libero" and cfg.dataset.libero_tasks is not None:

@@ -9,11 +9,10 @@ from laplace.baselaplace import BaseLaplace
 from torch.nn.utils import vector_to_parameters
 from torch.utils.data import DataLoader
 
-from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.datasets.factory import make_dataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
-from lerobot.datasets.utils import filter_libero_episodes, patch_dataset_episode_boundaries
+from lerobot.datasets.utils import filter_libero_episodes
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.processor import PolicyProcessorPipeline
@@ -26,12 +25,13 @@ from .laplace_wrappers.laplace_wrapper import LaplaceWrapper
 
 @torch.no_grad()
 def create_laplace_calib_loader(
-    laplace_wrapper: PreTrainedPolicy,
+    laplace_wrapper: LaplaceWrapper,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
-    dataset_cfg: DatasetConfig,
+    dataset: LeRobotDataset,
     policy_cfg: PreTrainedConfig,
     calib_fraction: float,
     batch_size: int,
+    libero_tasks: dict[str, list[int]] | None = None
 ) -> DataLoader:
     """
     Build a DataLoader for fitting a Laplace approximation around the policy's underlying model.
@@ -44,13 +44,11 @@ def create_laplace_calib_loader(
         batch_size: Number of samples per batch in the returned DataLoader.
     """
     # Extract a subset of the full train dataset for calibration
-    dataset = make_dataset(dataset_cfg=dataset_cfg, policy_cfg=policy_cfg)
-    dataset = patch_dataset_episode_boundaries(dataset=dataset)
     all_episode_ids = list(dataset.meta.episodes["episode_index"])
-    if dataset_cfg.repo_id == "HuggingFaceVLA/libero" and dataset_cfg.libero_tasks is not None:
+    if dataset.repo_id == "HuggingFaceVLA/libero" and libero_tasks is not None:
         episode_ids_to_use = filter_libero_episodes(
             dataset=dataset,
-            tasks_to_use=dataset_cfg.libero_tasks,
+            tasks_to_use=libero_tasks,
         )
     else:
         episode_ids_to_use = all_episode_ids
@@ -64,7 +62,7 @@ def create_laplace_calib_loader(
     )
 
     logging.info(f"Total number of episodes: {dataset.num_episodes} and frames: {dataset.num_frames} ({format_big_number(len(dataset))})")
-    if dataset_cfg.repo_id == "HuggingFaceVLA/libero" and dataset_cfg.libero_tasks is not None:
+    if dataset.repo_id == "HuggingFaceVLA/libero" and libero_tasks is not None:
         logging.info(f"Number of selected episodes: {len(episode_ids_to_use)}")
     num_calib_frames = len(calib_sampler)
     logging.info(f"Number of Laplace calib frames: {num_calib_frames} ({format_big_number(num_calib_frames)}) for calibration fraction: {calib_fraction}")
@@ -152,8 +150,9 @@ def make_laplace_path(
 def get_laplace_posterior(
     policy: PreTrainedPolicy,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
+    dataset: LeRobotDataset,
     laplace_config: LaplaceConfig,
-    dataset_cfg: DatasetConfig,
+    libero_tasks: dict[str, list[int]] | None = None
 ) -> Laplace:
     """
     Construct or load a Laplace posterior for the underlying model of a policy.
@@ -188,10 +187,11 @@ def get_laplace_posterior(
         calib_loader = create_laplace_calib_loader(
             laplace_wrapper=laplace_wrapper,
             preprocessor=preprocessor,
-            dataset_cfg=dataset_cfg,
+            dataset=dataset,
             policy_cfg=policy.config,
             calib_fraction=laplace_config.calib_fraction,
             batch_size=laplace_config.batch_size,
+            libero_tasks=libero_tasks,
         )
 
         logging.info("Fitting new Laplace posterior.")

@@ -354,7 +354,7 @@ class LiberoEnv(EnvConfig):
 
     # Out-of-distribution configuration
     ood: BddlSwapOODConfig = field(default_factory=BddlSwapOODConfig)
-    
+
     def __post_init__(self):
         if self.obs_type == "pixels":
             self.features["pixels/agentview_image"] = PolicyFeature(

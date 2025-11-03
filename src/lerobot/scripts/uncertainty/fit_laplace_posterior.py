@@ -50,8 +50,9 @@ def main(cfg: FitLaplacePosteriorPipelineConfig):
     get_laplace_posterior(
         policy=policy,
         preprocessor=preprocessor,
+        dataset=dataset,
         laplace_config=cfg.laplace,
-        dataset_cfg=cfg.dataset,
+        libero_tasks=cfg.dataset.libero_tasks,
     )
 
 

@@ -28,6 +28,7 @@ from tqdm import tqdm, trange
 from lerobot.configs import parser
 from lerobot.configs.visualize_bayesian_sampler import VisualizeBayesianSamplerPipelineConfig
 from lerobot.constants import ACTION
+from lerobot.datasets.factory import make_dataset
 from lerobot.envs.factory import make_single_env
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
@@ -98,14 +99,16 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
 
+    logging.info("Creating dataset")
+    dataset = make_dataset(dataset_cfg=config.dataset, policy_cfg=config.policy)
+
     # Prepare scorer artifacts for cross-bayesian uncertainty sampler
     scorer_artifacts = build_scorer_artifacts_for_uncertainty_sampler(
         uncertainty_sampler_cfg=uncertainty_sampler_config,
-        policy_cfg=config.policy,
-        env_cfg=config.env,
-        dataset_cfg=config.dataset,
         policy=policy,
         preprocessor=preprocessor,
+        dataset=dataset,
+        libero_tasks=config.dataset.libero_tasks,
     )
 
     # Initialize and extract the cross-bayesian sampler

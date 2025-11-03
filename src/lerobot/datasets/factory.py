@@ -16,14 +16,12 @@
 import logging
 import random
 from pprint import pformat
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import List, Tuple
 
 import torch
-from torch.utils.data import Subset
 
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
@@ -31,6 +29,7 @@ from lerobot.datasets.lerobot_dataset import (
 )
 from lerobot.datasets.streaming_dataset import StreamingLeRobotDataset
 from lerobot.datasets.transforms import ImageTransforms
+from lerobot.datasets.utils import patch_dataset_episode_boundaries
 
 IMAGENET_STATS = {
     "mean": [[[0.485]], [[0.456]], [[0.406]]],  # (c,1,1)
@@ -134,6 +133,8 @@ def make_dataset(
         for key in dataset.meta.camera_keys:
             for stats_type, stats in IMAGENET_STATS.items():
                 dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32)
+
+    dataset = patch_dataset_episode_boundaries(dataset=dataset)
 
     return dataset
 

@@ -35,7 +35,7 @@ uncertainty_sampler:
       metric_type: mode_distance
     num_action_samples: 25
   cross_bayesian_sampler:
-    scorer_type: ensemble
+    scorer_type: laplace
     ensemble_model_paths: [
       outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model,
       outputs/train/smolvla/libero_finetuned_03/checkpoints/010000/pretrained_model,
