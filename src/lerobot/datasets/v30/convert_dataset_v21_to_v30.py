@@ -22,15 +22,10 @@ This script will help you convert any LeRobot dataset already pushed to the hub 
 - Check consistency between these new stats and the old ones.
 - Remove the deprecated `stats.json`.
 - Update codebase_version in `info.json`.
-- Push this new version to the hub on the 'main' branch and tags it with "v3.0".
 
-Usage:
-
-```bash
-python src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
-    --repo-id=lerobot/pusht
-```
-
+By default this does not push to the Hub; use --push-to-hub to enable pushing:
+    python src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
+        --repo-id=lerobot/pusht --push-to-hub
 """
 
 import argparse
@@ -418,6 +413,7 @@ def convert_dataset(
     branch: str | None = None,
     data_file_size_in_mb: int | None = None,
     video_file_size_in_mb: int | None = None,
+    push_to_hub: bool = False,  # <-- default: local-only
 ):
     root = HF_LEROBOT_HOME / repo_id
     old_root = HF_LEROBOT_HOME / f"{repo_id}_old"
@@ -451,21 +447,20 @@ def convert_dataset(
     shutil.move(str(root), str(old_root))
     shutil.move(str(new_root), str(root))
 
-    hub_api = HfApi()
-    try:
-        hub_api.delete_tag(repo_id, tag=CODEBASE_VERSION, repo_type="dataset")
-    except HTTPError as e:
-        print(f"tag={CODEBASE_VERSION} probably doesn't exist. Skipping exception ({e})")
-        pass
-    hub_api.delete_files(
-        delete_patterns=["data/chunk*/episode_*", "meta/*.jsonl", "videos/chunk*"],
-        repo_id=repo_id,
-        revision=branch,
-        repo_type="dataset",
-    )
-    hub_api.create_tag(repo_id, tag=CODEBASE_VERSION, revision=branch, repo_type="dataset")
-
-    LeRobotDataset(repo_id).push_to_hub()
+    if push_to_hub:
+        hub_api = HfApi()
+        try:
+            hub_api.delete_tag(repo_id, tag=CODEBASE_VERSION, repo_type="dataset")
+        except HTTPError as e:
+            print(f"tag={CODEBASE_VERSION} probably doesn't exist. Skipping exception ({e})")
+        hub_api.delete_files(
+            delete_patterns=["data/chunk*/episode_*", "meta/*.jsonl", "videos/chunk*"],
+            repo_id=repo_id,
+            revision=branch,
+            repo_type="dataset",
+        )
+        hub_api.create_tag(repo_id, tag=CODEBASE_VERSION, revision=branch, repo_type="dataset")
+        LeRobotDataset(repo_id).push_to_hub()
 
 
 if __name__ == "__main__":
@@ -494,6 +489,11 @@ if __name__ == "__main__":
         type=int,
         default=None,
         help="File size in MB. Defaults to 100 for data and 500 for videos.",
+    )
+    parser.add_argument(
+        "--push-to-hub",
+        action="store_true",
+        help="If set, modify/push changes to the Hub; otherwise convert locally only.",
     )
 
     args = parser.parse_args()

@@ -1,0 +1,19 @@
+dataset:
+  repo_id: JohannesSaut/insert_lego_merged
+
+policy:
+  type: smolvla
+  device: cuda
+  repo_id: bensturgis/smolvla-lego-stacking-01
+
+output_dir: outputs/train/smolvla/lego_stacking_01
+steps: 200000
+batch_size: 48
+save_freq: 10000
+enable_val_loss: False
+seed: 7
+wandb:
+  enable: true
+job_name: lego_stacking_01
+
+# python src/lerobot/scripts/train.py --config=configs/smolvla/train/lego_stacking.yaml

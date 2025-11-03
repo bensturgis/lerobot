@@ -103,7 +103,7 @@ class EnvConfig(draccus.ChoiceRegistry, abc.ABC):
     features_map: dict[str, str] = field(default_factory=dict)
     max_parallel_tasks: int = 1
     disable_env_checker: bool = True
-    ood: OODConfig = OODConfig()
+    ood: OODConfig = field(default_factory=OODConfig())
 
     @property
     def type(self) -> str:
@@ -138,7 +138,7 @@ class AlohaEnv(EnvConfig):
     )
 
     # Out-of-distribution configuration
-    ood: ImagePatchOODConfig = ImagePatchOODConfig()
+    ood: ImagePatchOODConfig = field(default_factory=ImagePatchOODConfig())
 
     def __post_init__(self):
         if self.obs_type == "pixels":
@@ -181,7 +181,7 @@ class PushtEnv(EnvConfig):
     )
 
     # Out-of-distribution configuration
-    ood: ImagePatchOODConfig = ImagePatchOODConfig()
+    ood: ImagePatchOODConfig = field(default_factory=ImagePatchOODConfig())
 
     def __post_init__(self):
         if self.obs_type == "pixels_agent_pos":
@@ -225,7 +225,7 @@ class XarmEnv(EnvConfig):
     )
 
     # Out-of-distribution configuration
-    ood: ImagePatchOODConfig = ImagePatchOODConfig()
+    ood: ImagePatchOODConfig = field(default_factory=ImagePatchOODConfig())
 
     def __post_init__(self):
         if self.obs_type == "pixels_agent_pos":
@@ -353,8 +353,8 @@ class LiberoEnv(EnvConfig):
     )
 
     # Out-of-distribution configuration
-    ood: BddlSwapOODConfig = BddlSwapOODConfig()
-
+    ood: BddlSwapOODConfig = field(default_factory=BddlSwapOODConfig)
+    
     def __post_init__(self):
         if self.obs_type == "pixels":
             self.features["pixels/agentview_image"] = PolicyFeature(
