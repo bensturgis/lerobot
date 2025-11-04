@@ -4,16 +4,16 @@ dataset:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-lego-stacking-02
+  repo_id: bensturgis/smolvla-lego-stacking-03
 
-output_dir: outputs/train/smolvla/lego_stacking_02
+output_dir: outputs/train/smolvla/lego_stacking_03
 steps: 200000
 batch_size: 48
 save_freq: 10000
 enable_val_loss: False
-seed: 32
+seed: 1903
 wandb:
   enable: true
-job_name: lego_stacking_02
+job_name: lego_stacking_03
 
-# python src/lerobot/scripts/train.py --config=configs/smolvla/train/lego_stacking.yaml
+# python src/lerobot/scripts/train.py --config=configs/smolvla/train/lego_stacking_scratch.yaml
