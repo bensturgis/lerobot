@@ -12,7 +12,6 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.fiper_data_recording import FiperDataRecordingPipelineConfig
-from lerobot.datasets.factory import make_dataset
 from lerobot.envs.factory import build_env_for_domain
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
@@ -197,15 +196,11 @@ def main(cfg: FiperDataRecordingPipelineConfig):
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
 
-    logging.info("Creating dataset")
-    dataset = make_dataset(dataset_cfg=cfg.dataset, policy_cfg=cfg.policy)
-
     scorer_artifacts = build_scorer_artifacts_for_fiper_recorder(
         fiper_data_recorder_cfg=cfg.fiper_data_recorder,
         policy=policy,
-        dataset=dataset,
         preprocessor=preprocessor,
-        libero_tasks=cfg.dataset.libero_tasks,
+        dataset_cfg=cfg.dataset,
     )
     policy.init_fiper_data_recorder(
         config=cfg.fiper_data_recorder,

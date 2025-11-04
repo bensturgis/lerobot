@@ -2,7 +2,7 @@ import logging
 
 from lerobot.configs import parser
 from lerobot.configs.fit_laplace_posterior import FitLaplacePosteriorPipelineConfig
-from lerobot.datasets.factory import make_dataset
+from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.uncertainty.uncertainty_scoring.laplace_utils.posterior_builder import get_laplace_posterior
@@ -25,16 +25,13 @@ def main(cfg: FitLaplacePosteriorPipelineConfig):
             f"but got '{cfg.policy.type}'."
         )
 
-    logging.info("Creating dataset")
-    dataset = make_dataset(
-        dataset_cfg=cfg.dataset,
-        policy_cfg=cfg.policy,
-    )
-
     logging.info("Loading policy")
+    ds_meta = LeRobotDatasetMetadata(
+        cfg.dataset.repo_id, root=cfg.dataset.root, revision=cfg.dataset.revision
+    )
     policy: PreTrainedPolicy = make_policy(
         cfg=cfg.policy,
-        ds_meta=dataset.meta,
+        ds_meta=ds_meta,
     ).to(device)
     policy.eval()
 
@@ -50,9 +47,8 @@ def main(cfg: FitLaplacePosteriorPipelineConfig):
     get_laplace_posterior(
         policy=policy,
         preprocessor=preprocessor,
-        dataset=dataset,
         laplace_config=cfg.laplace,
-        libero_tasks=cfg.dataset.libero_tasks,
+        dataset_cfg=cfg.dataset,
     )
 
 

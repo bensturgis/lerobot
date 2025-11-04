@@ -1447,7 +1447,7 @@ def recompute_episode_boundaries_from_hf_table(dataset: torch.utils.data.Dataset
             seen_any.add(ep_id)
         else:
             assert ep_id >= last_seen, "Episode IDs are not non-decreasing; dataset not grouped by episode."
-            
+
         if ep_id not in first_idx:
             first_idx[ep_id] = frame_idx
         # End is exclusive, keep bumping it as we advance
@@ -1460,7 +1460,7 @@ def recompute_episode_boundaries_from_hf_table(dataset: torch.utils.data.Dataset
     end_indices = [last_idx_plus_one[e] for e in episode_ids_sorted]
 
     # Each episode must be non-empty and ranges must be strictly increasing / non-overlapping
-    assert all(s < t for s, t in zip(start_indices, end_indices)), \
+    assert all(s < t for s, t in zip(start_indices, end_indices, strict=True)), \
         "Found an episode with non-positive length."
 
     assert all(end_indices[i] <= start_indices[i+1] for i in range(len(start_indices) - 1)), \

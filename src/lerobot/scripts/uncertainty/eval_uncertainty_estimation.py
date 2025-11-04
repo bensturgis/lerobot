@@ -34,7 +34,6 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.eval_uncertainty_estimation import EvalUncertaintyEstimationPipelineConfig
-from lerobot.datasets.factory import make_dataset
 from lerobot.envs.factory import build_env_for_domain
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
@@ -464,9 +463,6 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
 
-    logging.info("Creating dataset")
-    dataset = make_dataset(dataset_cfg=cfg.dataset, policy_cfg=cfg.policy)
-
     # Prepare configs and scorer artifacts for each uncertainty estimation method
     scorer_artifacts_by_method: Dict[str, ScorerArtifacts] = {}
     uncertainty_config_by_method: Dict[str, UncertaintySamplerConfig] = {}
@@ -479,8 +475,7 @@ def main(cfg: EvalUncertaintyEstimationPipelineConfig):
             uncertainty_sampler_cfg=uncertainty_config,
             policy=policy,
             preprocessor=preprocessor,
-            dataset=dataset,
-            libero_tasks=cfg.dataset.libero_tasks,
+            dataset_cfg=cfg.dataset,
         )
         scoring_metric_by_method[uncert_est_method] = getattr(uncertainty_config.active_config, "scoring_metric", None)
 

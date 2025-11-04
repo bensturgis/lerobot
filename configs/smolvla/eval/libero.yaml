@@ -1,13 +1,13 @@
 env:
   type: libero
   task: libero_10
-  task_ids: [9]
+  task_ids: [8]
   ood:
     enable: true  
 
 eval:
-  batch_size: 5
-  n_episodes: 100
+  batch_size: 3
+  n_episodes: 3
 
 seed: 72
 
