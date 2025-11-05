@@ -178,7 +178,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
     # Build evaluation environments for each domain (ID/OOD)
     envs_by_domain: Dict[str, Dict[str, Dict[int, gym.Env]]] = {
         domain: build_env_for_domain(cfg.env, domain)
-        for domain in cfg.fiper_data_recorder.domains
+        for domain in cfg.domains
     }
 
     logging.info("Loading policy.")

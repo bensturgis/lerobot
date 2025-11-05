@@ -21,6 +21,8 @@ class FiperDataRecordingPipelineConfig:
 
     n_calib_episodes: int = 60
     n_test_episodes: int = 240
+    # Which environment domains to evaluate. Allowed values: "id" (in-distribution), "ood" (out-of-distribution).
+    domains: list[str] = field(default_factory=lambda: ["id", "ood"])
     seed: int | None = None
     job_name: str | None = None
     output_dir: Path | None = None
