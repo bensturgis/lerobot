@@ -32,4 +32,4 @@ wandb:
   enable: true
 job_name: smolvla_libero_base
 
-# python src/lerobot/scripts/train.py --config=configs/smolvla/train/libero_scratch.yaml
+# python src/lerobot/scripts/lerobot_train.py --config=configs/smolvla/train/libero_scratch.yaml

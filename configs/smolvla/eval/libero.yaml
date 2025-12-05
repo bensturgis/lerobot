@@ -1,14 +1,14 @@
 env:
   type: libero
   task: libero_10
-  task_ids: [8]
+  task_ids: [0, 4, 7, 8, 9]
   ood:
-    enable: true  
+    enable: false  
 
 eval:
   batch_size: 3
-  n_episodes: 3
+  n_episodes: 50
 
-seed: 72
+seed: 17
 
-# python src/lerobot/scripts/eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model
+# python src/lerobot/scripts/lerobot_eval.py --config=configs/smolvla/eval/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model

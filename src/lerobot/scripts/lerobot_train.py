@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+import math
 import time
 from contextlib import nullcontext
 from pprint import pformat
@@ -26,9 +27,10 @@ from torch.optim import Optimizer
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.datasets.factory import make_dataset
+from lerobot.datasets.compute_stats import compute_stats_for_episodes
+from lerobot.datasets.factory import make_dataset, make_train_val_split
 from lerobot.datasets.sampler import EpisodeAwareSampler
-from lerobot.datasets.utils import cycle
+from lerobot.datasets.utils import cycle, filter_libero_episodes
 from lerobot.envs.factory import make_env, make_env_pre_post_processors
 from lerobot.envs.utils import close_envs
 from lerobot.optim.factory import make_optimizer_and_scheduler
@@ -182,13 +184,71 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     # Dataset loading synchronization: main process downloads first to avoid race conditions
     if is_main_process:
         logging.info("Creating dataset")
-        dataset = make_dataset(cfg)
+        full_dataset = make_dataset(
+            dataset_cfg=cfg.dataset,
+            policy_cfg=cfg.policy,
+            num_workers=cfg.num_workers,
+        )
 
     accelerator.wait_for_everyone()
 
     # Now all other processes can safely load the dataset
     if not is_main_process:
-        dataset = make_dataset(cfg)
+        full_dataset = make_dataset(
+            dataset_cfg=cfg.dataset,
+            policy_cfg=cfg.policy,
+            num_workers=cfg.num_workers,
+        )
+
+    all_episode_ids = list(full_dataset.meta.episodes["episode_index"])
+    if cfg.dataset.repo_id == "HuggingFaceVLA/libero" and cfg.dataset.libero_tasks is not None:
+        episode_ids_to_use = filter_libero_episodes(
+            dataset=full_dataset,
+            tasks_to_use=cfg.dataset.libero_tasks,
+        )
+    else:
+        episode_ids_to_use = all_episode_ids
+
+    # Create dataloader for offline training
+    train_sampler = None
+    if episode_ids_to_use != all_episode_ids or getattr(cfg.policy, "drop_n_last_frames", 0) > 0:
+        if cfg.dataset.streaming:
+            raise RuntimeError(
+                "Episode filtering or frame dropping requires an episode aware sampler, "
+                "which is disallowed in streaming mode."
+            )
+        train_sampler = EpisodeAwareSampler(
+            dataset_from_indices=full_dataset.meta.episodes["dataset_from_index"],
+            dataset_to_indices=full_dataset.meta.episodes["dataset_to_index"],
+            episode_indices_to_use=sorted(episode_ids_to_use),
+            drop_n_last_frames=getattr(cfg.policy, "drop_n_last_frames", 0),
+            shuffle=True,
+        )
+
+    train_shuffle = (train_sampler is None) and (not cfg.dataset.streaming)
+    train_loader = torch.utils.data.DataLoader(
+        full_dataset,
+        num_workers=cfg.num_workers,
+        batch_size=cfg.batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        pin_memory=device.type == "cuda",
+        drop_last=False,
+        prefetch_factor=2,
+    )
+
+    # Effective sizes for logging and trackers
+    effective_train_frames = len(train_sampler) if train_sampler is not None else len(full_dataset)
+    effective_train_eps = len(episode_ids_to_use)
+
+    if is_main_process:
+        logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
+        if cfg.env is not None:
+            logging.info(f"{cfg.env.task=}")
+        logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
+        logging.info(f"Total number of episodes: {full_dataset.num_episodes} and frames: {full_dataset.num_frames} ({format_big_number(len(full_dataset))})")
+        if cfg.dataset.repo_id == "HuggingFaceVLA/libero" and cfg.dataset.libero_tasks is not None:
+            logging.info(f"Number of selected episodes: {effective_train_eps} and frames: {effective_train_frames} ({format_big_number(effective_train_frames)})")
 
     # Create environment used for evaluating checkpoints during training on simulation data.
     # On real-world data, no need to create an environment as evaluations are done outside train.py,
@@ -203,25 +263,35 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         logging.info("Creating policy")
     policy = make_policy(
         cfg=cfg.policy,
-        ds_meta=dataset.meta,
+        ds_meta=full_dataset.meta,
         rename_map=cfg.rename_map,
     )
 
     # Wait for all processes to finish policy creation before continuing
     accelerator.wait_for_everyone()
 
+    if cfg.policy.pretrained_path and cfg.reinitialize_selected_layers:
+        logging.info("Reinitialize selected layers")
+        policy.reinitialize_selected_layers()
+
+    if episode_ids_to_use != all_episode_ids:
+        logging.info("Extracting dataset stats from training episodes")
+        training_stats = compute_stats_for_episodes(full_dataset.meta.root, episode_ids_to_use)
+    else:
+        training_stats = full_dataset.meta.stats
+
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
     postprocessor_kwargs = {}
     if (cfg.policy.pretrained_path and not cfg.resume) or not cfg.policy.pretrained_path:
         # Only provide dataset_stats when not resuming from saved processor state
-        processor_kwargs["dataset_stats"] = dataset.meta.stats
+        processor_kwargs["dataset_stats"] = training_stats
 
     if cfg.policy.pretrained_path is not None:
         processor_kwargs["preprocessor_overrides"] = {
             "device_processor": {"device": device.type},
             "normalizer_processor": {
-                "stats": dataset.meta.stats,
+                "stats": training_stats,
                 "features": {**policy.config.input_features, **policy.config.output_features},
                 "norm_map": policy.config.normalization_mapping,
             },
@@ -231,7 +301,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         }
         postprocessor_kwargs["postprocessor_overrides"] = {
             "unnormalizer_processor": {
-                "stats": dataset.meta.stats,
+                "stats": training_stats,
                 "features": policy.config.output_features,
                 "norm_map": policy.config.normalization_mapping,
             },
@@ -257,53 +327,21 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     num_total_params = sum(p.numel() for p in policy.parameters())
 
     if is_main_process:
-        logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
         if cfg.env is not None:
             logging.info(f"{cfg.env.task=}")
             logging.info("Creating environment processors")
             env_preprocessor, env_postprocessor = make_env_pre_post_processors(
                 env_cfg=cfg.env, policy_cfg=cfg.policy
             )
-        logging.info(f"{cfg.steps=} ({format_big_number(cfg.steps)})")
-        logging.info(f"{dataset.num_frames=} ({format_big_number(dataset.num_frames)})")
-        logging.info(f"{dataset.num_episodes=}")
-        num_processes = accelerator.num_processes
-        effective_bs = cfg.batch_size * num_processes
-        logging.info(f"Effective batch size: {cfg.batch_size} x {num_processes} = {effective_bs}")
         logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
         logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
-    # create dataloader for offline training
-    if hasattr(cfg.policy, "drop_n_last_frames"):
-        shuffle = False
-        sampler = EpisodeAwareSampler(
-            dataset.meta.episodes["dataset_from_index"],
-            dataset.meta.episodes["dataset_to_index"],
-            episode_indices_to_use=dataset.episodes,
-            drop_n_last_frames=cfg.policy.drop_n_last_frames,
-            shuffle=True,
-        )
-    else:
-        shuffle = True
-        sampler = None
-
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        num_workers=cfg.num_workers,
-        batch_size=cfg.batch_size,
-        shuffle=shuffle and not cfg.dataset.streaming,
-        sampler=sampler,
-        pin_memory=device.type == "cuda",
-        drop_last=False,
-        prefetch_factor=2 if cfg.num_workers > 0 else None,
-    )
-
     # Prepare everything with accelerator
     accelerator.wait_for_everyone()
-    policy, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        policy, optimizer, dataloader, lr_scheduler
+    policy, optimizer, train_loader, lr_scheduler = accelerator.prepare(
+        policy, optimizer, train_loader, lr_scheduler
     )
-    dl_iter = cycle(dataloader)
+    dl_iter = cycle(train_loader)
 
     policy.train()
 
@@ -318,12 +356,11 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     # Use effective batch size for proper epoch calculation in distributed training
     effective_batch_size = cfg.batch_size * accelerator.num_processes
     train_tracker = MetricsTracker(
-        effective_batch_size,
-        dataset.num_frames,
-        dataset.num_episodes,
-        train_metrics,
+        batch_size=effective_batch_size,
+        num_frames=effective_train_frames,
+        num_episodes=effective_train_eps,
+        metrics=train_metrics,
         initial_step=step,
-        accelerator=accelerator,
     )
 
     if is_main_process:
@@ -415,8 +452,8 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
                 }
                 eval_tracker = MetricsTracker(
                     cfg.batch_size,
-                    dataset.num_frames,
-                    dataset.num_episodes,
+                    effective_train_frames,
+                    effective_train_eps,
                     eval_metrics,
                     initial_step=step,
                     accelerator=accelerator,

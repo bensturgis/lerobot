@@ -52,13 +52,14 @@ import logging
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
 from pprint import pformat
-from typing import Any, Callable, Dict, Optional, TypedDict
+from typing import Any, TypedDict
 
 import einops
 import gymnasium as gym
@@ -320,7 +321,7 @@ def eval_policy(
         else:
             for camera in camera_names:
                 image_name = env.envs[0].unwrapped.camera_name_mapping[camera]
-                if isinstance(env, gym.vector.SyncVectorEnv):                        
+                if isinstance(env, gym.vector.SyncVectorEnv):
                     frames = []
                     for i in range(n_to_render_now):
                         raw_obs = env.envs[i].unwrapped._env.env._get_observations()
@@ -355,7 +356,7 @@ def eval_policy(
         # step.
         if max_episodes_rendered > 0:
             if camera_names is not None:
-                ep_frames: Dict[str, list[np.ndarray]] = {
+                ep_frames: dict[str, list[np.ndarray]] = {
                     cam: [] for cam in camera_names
                 }
             else:
@@ -414,7 +415,7 @@ def eval_policy(
 
         # Maybe render video for visualization.
         def write_video_for_episode(
-            stacked_frames: np.ndarray, done_idx: int, camera: Optional[str] = None
+            stacked_frames: np.ndarray, done_idx: int, camera: str | None = None
         ):
             camera_dir = (videos_dir / camera) if camera is not None else videos_dir
             camera_dir.mkdir(parents=True, exist_ok=True)

@@ -29,8 +29,8 @@ from lerobot.utils.constants import OBS_IMAGES
 class SmolVLAConfig(PreTrainedConfig):
     # Input / output structure.
     n_obs_steps: int = 1
-    chunk_size: int = 25
-    n_action_steps: int = 12
+    chunk_size: int = 50
+    n_action_steps: int = 25
 
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
@@ -41,7 +41,7 @@ class SmolVLAConfig(PreTrainedConfig):
     )
 
     # Shorter state and action vectors will be padded
-    max_state_dim: int = 7
+    max_state_dim: int = 8
     max_action_dim: int = 7
 
     # Image preprocessing
