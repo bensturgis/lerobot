@@ -325,7 +325,8 @@ def eval_policy(
                     frames = []
                     for i in range(n_to_render_now):
                         raw_obs = env.envs[i].unwrapped._env.env._get_observations()
-                        frames.append(env.envs[i].unwrapped._format_raw_obs(raw_obs)["pixels"][image_name])
+                        image = env.envs[i].unwrapped._format_raw_obs(raw_obs)["pixels"][image_name]
+                        frames.append(image[::-1, ::-1]) # flip both H and W for visualization
                     ep_frames[camera].append(np.stack(frames))
                 else:
                     raise ValueError("Camera-specific rendering not supported for AsyncVectorEnv.")

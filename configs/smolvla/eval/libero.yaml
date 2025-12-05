@@ -7,7 +7,7 @@ env:
 
 eval:
   batch_size: 3
-  n_episodes: 50
+  n_episodes: 100
 
 seed: 17
 
