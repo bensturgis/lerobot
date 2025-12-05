@@ -18,9 +18,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from lerobot import (
-    policies,  # noqa: F401
-)
 from lerobot.datasets.transforms import ImageTransformsConfig
 from lerobot.datasets.video_utils import get_safe_default_codec
 
@@ -62,7 +59,8 @@ class EvalConfig:
     batch_size: int = 50
     # `use_async_envs` specifies whether to use asynchronous environments (multiprocessing).
     use_async_envs: bool = False
-    def __post_init__(self):
+
+    def __post_init__(self) -> None:
         if self.batch_size > self.n_episodes:
             raise ValueError(
                 "The eval batch size is greater than the number of eval episodes "

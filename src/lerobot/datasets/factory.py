@@ -16,7 +16,6 @@
 import logging
 import random
 from pprint import pformat
-from typing import List, Tuple
 
 import torch
 
@@ -30,6 +29,7 @@ from lerobot.datasets.lerobot_dataset import (
 from lerobot.datasets.streaming_dataset import StreamingLeRobotDataset
 from lerobot.datasets.transforms import ImageTransforms
 from lerobot.datasets.utils import patch_dataset_episode_boundaries
+from lerobot.utils.constants import ACTION, OBS_PREFIX, REWARD
 
 IMAGENET_STATS = {
     "mean": [[[0.485]], [[0.456]], [[0.406]]],  # (c,1,1)
@@ -57,11 +57,11 @@ def resolve_delta_timestamps(
     """
     delta_timestamps = {}
     for key in ds_meta.features:
-        if key == "next.reward" and cfg.reward_delta_indices is not None:
+        if key == REWARD and cfg.reward_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.reward_delta_indices]
-        if key == "action" and cfg.action_delta_indices is not None:
+        if key == ACTION and cfg.action_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
-        if key.startswith("observation.") and cfg.observation_delta_indices is not None:
+        if key.startswith(OBS_PREFIX) and cfg.observation_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.observation_delta_indices]
 
     if len(delta_timestamps) == 0:
@@ -140,8 +140,8 @@ def make_dataset(
 
 
 def make_train_val_split(
-    episode_ids: List[int], val_ratio: float, seed: int | None,
-) -> Tuple[List[int], List[int]]:
+    episode_ids: list[int], val_ratio: float, seed: int | None,
+) -> tuple[list[int], list[int]]:
     """Split episode IDs into train and validation sets using the given ratio."""
     if seed is not None:
         rng = random.Random(seed)
