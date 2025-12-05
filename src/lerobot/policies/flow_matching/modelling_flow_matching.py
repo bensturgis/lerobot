@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from typing import Callable, Dict, Sequence, Union
+from collections.abc import Callable, Sequence
 
 import einops
 import numpy as np
@@ -15,7 +15,6 @@ import torchvision
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from lerobot.constants import ACTION, FINAL_FEATURE_MAP_MODULE, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
     FiperDataRecorderConfig,
 )
@@ -32,6 +31,13 @@ from lerobot.policies.utils import (
 )
 from lerobot.uncertainty.uncertainty_samplers.configuration_uncertainty_sampler import (
     UncertaintySamplerConfig,
+)
+from lerobot.utils.constants import (
+    ACTION,
+    FINAL_FEATURE_MAP_MODULE,
+    OBS_ENV_STATE,
+    OBS_IMAGES,
+    OBS_STATE,
 )
 
 
@@ -139,7 +145,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
     def generate_actions(
         self,
         batch: dict[str, Tensor],
-        generator: Union[torch.Generator, Sequence[torch.Generator], None] = None,
+        generator: torch.Generator | Sequence[torch.Generator] | None = None,
     ) -> Tensor:
         """
         This function expects `batch` to have:
@@ -193,7 +199,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
     def select_action(
         self,
         batch: dict[str, Tensor],
-        generator: Union[torch.Generator, Sequence[torch.Generator], None] = None,
+        generator: torch.Generator | Sequence[torch.Generator] | None = None,
     ) -> Tensor:
         """Select a single action given environment observations.
 
@@ -240,9 +246,19 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         """Run the batch through the model and compute the loss for training or validation."""
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
-            batch[OBS_IMAGES] = torch.stack(
-                [batch[key] for key in self.config.image_features], dim=-4
-            )
+
+            imgs = []
+            for key in self.config.image_features:
+                img = batch[key]
+
+                if img.dim() == 4:
+                    img = img.unsqueeze(1)
+                elif img.dim() != 5:
+                    raise ValueError(f"Unexpected image tensor shape {img.shape} for key {key}")
+
+                imgs.append(img)
+
+            batch[OBS_IMAGES] = torch.stack(imgs, dim=2)
         loss = self.flow_matching.compute_loss(batch)
         # no output_dict so returning None
         return loss, None
@@ -277,7 +293,7 @@ class FlowMatchingModel(nn.Module):
         self.ode_solver = ODESolver()
 
     def forward(
-        self, interpolated_trajectory: Tensor, timestep: Tensor, observation: Dict[str, Tensor]
+        self, interpolated_trajectory: Tensor, timestep: Tensor, observation: dict[str, Tensor]
     ) -> Tensor:
         """
         Args:
@@ -312,7 +328,7 @@ class FlowMatchingModel(nn.Module):
         self,
         batch_size: int,
         global_cond: Tensor,
-        generator: Union[torch.Generator, Sequence[torch.Generator], None] = None,
+        generator: torch.Generator | Sequence[torch.Generator] | None = None,
     ) -> Tensor:
         device = get_device_from_parameters(self)
         dtype = get_dtype_from_parameters(self)

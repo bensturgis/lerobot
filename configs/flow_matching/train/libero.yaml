@@ -1,35 +1,44 @@
 dataset:
-  repo_id: lerobot/libero_spatial_one_bowl
-
-env:
-  type: libero
-  task: LiberoEnv-v0
-  benchmark: libero_spatial
-
-eval:
-  batch_size: 3
+  repo_id: HuggingFaceVLA/libero
+  libero_tasks: {
+      libero_spatial: [],
+      libero_object: [],
+      libero_goal: [],
+      libero_10: [0, 4, 7, 8, 9]
+    }
 
 policy:
   type: flow_matching
   device: cuda
+  repo_id: bensturgis/flow-matching-libero
   cond_vf_type: ot
   ode_step_size: 0.1
-  horizon: 16
-  n_action_steps: 8
+  n_obs_steps: 1
+  horizon: 48
+  n_action_steps: 24
   crop_shape: null
   crop_is_random: false
   use_separate_rgb_encoder_per_camera: true
   push_to_hub: false
 
+env:
+  type: libero
+  task: libero_10
+  task_ids: [0, 4, 7, 8, 9]
 
-output_dir: outputs/train/flow_matching_libero_upstream_integration
-batch_size: 32
-steps: 125000
+eval:
+  batch_size: 1
+  n_episodes: 10
+
+output_dir: outputs/train/flow_matching/libero_01
+batch_size: 3
+steps: 200000
 eval_freq: 5000
 save_freq: 5000
-val_ratio: 0.025
-seed: 261099
+enable_val_loss: False
+seed: 14
 wandb:
   enable: true
+job_name: flow_matching_libero
 
-# python src/lerobot/scripts/train.py --config=configs/flow_matching/train/libero.yaml
+# python src/lerobot/scripts/lerobot_train.py --config=configs/flow_matching/train/libero.yaml

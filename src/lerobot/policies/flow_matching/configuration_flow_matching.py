@@ -60,7 +60,7 @@ class FlowMatchingConfig(PreTrainedConfig):
             to False as the original Flow Matching Policy implementation does the same.
     """
     # Inputs / output structure.
-    n_obs_steps: int = 2
+    n_obs_steps: int = 1
     horizon: int = 16
     n_action_steps: int = 8
 
