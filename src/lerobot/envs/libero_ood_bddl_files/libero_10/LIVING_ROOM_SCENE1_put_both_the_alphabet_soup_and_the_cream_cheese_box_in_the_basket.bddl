@@ -16,7 +16,7 @@
       (alphabet_soup_init_region
           (:target living_room_table)
           (:ranges (
-              (0.025 -0.125 0.05 -0.07500000000000001)
+              (0.025 -0.125 0.075 -0.07500000000000001)
             )
           )
           (:yaw_rotation (
@@ -35,10 +35,10 @@
             )
           )
       )
-      (tomato_sauce_init_region
+      (ketchup_init_region
           (:target living_room_table)
           (:ranges (
-              (0.12 -0.1 0.14 -0.08)
+              (-0.2 -0.11 -0.15 -0.06)
             )
           )
           (:yaw_rotation (
@@ -46,10 +46,10 @@
             )
           )
       )
-      (ketchup_init_region
+      (white_yellow_mug_init_region
           (:target living_room_table)
           (:ranges (
-              (-0.2 -0.075 -0.15 -0.025)
+              (0.07500000000000001 -0.25 0.125 -0.225)
             )
           )
           (:yaw_rotation (
@@ -69,9 +69,9 @@
   (:objects
     alphabet_soup_1 - alphabet_soup
     cream_cheese_1 - cream_cheese
-    tomato_sauce_1 - tomato_sauce
     ketchup_1 - ketchup
     basket_1 - basket
+    white_yellow_mug_1 - white_yellow_mug
   )
 
   (:obj_of_interest
@@ -83,7 +83,7 @@
   (:init
     (On alphabet_soup_1 living_room_table_alphabet_soup_init_region)
     (On cream_cheese_1 living_room_table_cream_cheese_init_region)
-    (On tomato_sauce_1 living_room_table_tomato_sauce_init_region)
+    (On white_yellow_mug_1 living_room_table_white_yellow_mug_init_region)
     (On ketchup_1 living_room_table_ketchup_init_region)
     (On basket_1 living_room_table_basket_init_region)
   )

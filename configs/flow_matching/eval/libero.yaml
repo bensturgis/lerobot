@@ -1,9 +1,14 @@
 env:
   type: libero
-  task: libero_spatial
+  task: libero_10
+  task_ids: [8]
+  ood:
+    enable: true  
 
 eval:
-  batch_size: 1
-  n_episodes: 2
+  batch_size: 3
+  n_episodes: 20
 
-# python src/lerobot/scripts/eval.py --config=configs/flow_matching/eval/libero.yaml --policy.path=outputs/train/flow_matching/libero_spatial/checkpoints/035000/pretrained_model_migrated
+seed: 3747
+
+# python src/lerobot/scripts/lerobot_eval.py --config=configs/flow_matching/eval/libero.yaml --policy.path=outputs/train/flow_matching/libero_02/checkpoints/040000/pretrained_model
