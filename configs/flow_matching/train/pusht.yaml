@@ -7,8 +7,9 @@ env:
 policy:
   type: flow_matching
   device: cuda
+  repo_id: bensturgis/flow-matching-pusht-01
 
-output_dir: outputs/train/flow_matching_pusht
+output_dir: outputs/train/flow_matching/pusht_01
 batch_size: 64
 steps: 200000
 eval_freq: 20000

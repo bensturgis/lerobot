@@ -65,7 +65,7 @@ class OODConfig(abc.ABC):
 
 @dataclass
 class ImagePatchOODConfig(OODConfig):
-    static: bool = True
+    static: bool = False
     min_frac: float = 0.1
     max_frac: float = 0.2
     allowed_area: tuple[float, float] | None = None
@@ -165,7 +165,7 @@ class AlohaEnv(EnvConfig):
     )
 
     # Out-of-distribution configuration
-    ood: ImagePatchOODConfig = field(default_factory=ImagePatchOODConfig())
+    ood: ImagePatchOODConfig = field(default_factory=ImagePatchOODConfig)
 
     def __post_init__(self):
         if self.obs_type == "pixels":
@@ -214,7 +214,7 @@ class PushtEnv(EnvConfig):
     )
 
     # Out-of-distribution configuration
-    ood: ImagePatchOODConfig = field(default_factory=ImagePatchOODConfig())
+    ood: ImagePatchOODConfig = field(default_factory=ImagePatchOODConfig)
 
     def __post_init__(self):
         if self.obs_type == "pixels_agent_pos":

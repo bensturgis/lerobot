@@ -60,17 +60,16 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
 from tqdm import tqdm
+from typing_extensions import Unpack
 
-from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
-    FiperDataRecorderConfig,
+from lerobot.fiper_data_recorder.configuration_fiper_rollout_recorder import (
+    FiperRolloutRecorderConfig,
 )
 from lerobot.policies.common.aloha import (
     pi_aloha_decode_state,
     pi_aloha_encode_actions,
     pi_aloha_encode_actions_inv,
 )
-from typing_extensions import Unpack
-
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.rtc.modeling_rtc import RTCProcessor
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
@@ -204,7 +203,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         self.config = config
 
         self.uncertainty_sampler = None
-        self.fiper_data_recorder = None
+        self.fiper_rollout_recorder = None
 
         self.init_rtc_processor()
         self.model = VLAFlowMatching(config, rtc_processor=self.rtc_processor)
@@ -227,15 +226,14 @@ class SmolVLAPolicy(PreTrainedPolicy):
             scorer_artifacts=scorer_artifacts,
         )
 
-    def init_fiper_data_recorder(
+    def init_fiper_rollout_recorder(
         self,
-        config: FiperDataRecorderConfig,
-        scorer_artifacts,
+        config: FiperRolloutRecorderConfig,
     ):
         """
         Constructs the FIPER data recorder based on the config.
         """
-        from lerobot.fiper_data_recorder.fiper_data_recorder import FiperDataRecorder
+        from lerobot.fiper_data_recorder.fiper_rollout_recorder import FiperRolloutRecorder
         from lerobot.policies.factory import make_flow_matching_adapter
 
         flow_matching_adapter = make_flow_matching_adapter(
@@ -243,10 +241,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
             policy_config=self.config
         )
 
-        self.fiper_data_recorder = FiperDataRecorder(
+        self.fiper_rollout_recorder = FiperRolloutRecorder(
             config=config,
             flow_matching_adapter=flow_matching_adapter,
-            scorer_artifacts=scorer_artifacts,
         )
 
     def reset(self):
@@ -258,8 +255,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
         if self.uncertainty_sampler is not None:
             self.uncertainty_sampler.reset()
 
-        if self.fiper_data_recorder is not None:
-            self.fiper_data_recorder.reset()
+        if self.fiper_rollout_recorder is not None:
+            self.fiper_rollout_recorder.reset()
 
     def init_rtc_processor(self):
         """Initialize RTC processor if RTC is enabled in config."""
@@ -281,10 +278,13 @@ class SmolVLAPolicy(PreTrainedPolicy):
         return self.parameters()
 
     def reinitialize_selected_layers(self) -> list[nn.Parameter]:
+        for p in self.parameters():
+            p.requires_grad = False
+
         reinitialized_params = []
 
         for module in [
-            self.model.action_out_proj, self.model.action_time_mlp_in, self.model.action_time_mlp_out, self.model.state_proj
+            self.model.action_out_proj
         ]:
             nn.init.xavier_uniform_(module.weight)
             if module.bias is not None:
@@ -292,55 +292,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
             for p in module.parameters():
                 reinitialized_params.append(p)
 
-        # Action expert last transformer layers
-        action_expert = self.model.vlm_with_expert.lm_expert
-        for layer in action_expert.layers[-2:]:
-            for proj in ("q_proj","k_proj","v_proj","o_proj"):
-                module = getattr(layer.self_attn, proj)
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-                for p in getattr(layer.self_attn, proj).parameters():
-                    reinitialized_params.append(p)
-            for module in layer.mlp.modules():
-                if isinstance(module, nn.Linear):
-                    nn.init.xavier_uniform_(module.weight)
-                    if module.bias is not None:
-                        nn.init.zeros_(module.bias)
-                    for p in module.parameters():
-                        reinitialized_params.append(p)
-
-        # Vision connector
-        connector = self.model.vlm_with_expert.get_vlm_model().connector
-        for module in connector.modules():
-            if isinstance(module, torch.nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-        for p in connector.parameters():
-            reinitialized_params.append(p)
-
-        # Vision encoder last transformer layers
-        vision_model = self.model.vlm_with_expert.get_vlm_model().vision_model
-        layers = vision_model.encoder.layers
-        for layer in layers[-2:]:
-            for proj in ("q_proj", "k_proj", "v_proj", "out_proj"):
-                module = getattr(layer.self_attn, proj)
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-                for p in getattr(layer.self_attn, proj).parameters():
-                    reinitialized_params.append(p)
-            for module in layer.mlp.modules():
-                if isinstance(module, nn.Linear):
-                    nn.init.xavier_uniform_(module.weight)
-                    if module.bias is not None:
-                        nn.init.zeros_(module.bias)
-                    for p in module.parameters():
-                        reinitialized_params.append(p)
-
-        for i, p in enumerate(reinitialized_params):
-            assert p.requires_grad, f"Parameter {i} ({p.shape}) has requires_grad=False"
+        for p in reinitialized_params:
+            p.requires_grad = True
 
         return reinitialized_params
 
@@ -369,7 +322,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
                 observation=batch,
             )
             tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty:.4f}")
-        elif not self.training and self.fiper_data_recorder is not None:
+        elif not self.training and self.fiper_rollout_recorder is not None:
             batch_size = batch["observation.state"].shape[0]
             if batch_size != 1:
                 raise ValueError(
@@ -377,7 +330,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
                 )
 
             # Sample actions and record sampling data.
-            actions = self.fiper_data_recorder.conditional_sample_with_recording(
+            actions = self.fiper_rollout_recorder.conditional_sample_with_recording(
                 observation=batch,
             )
         else:

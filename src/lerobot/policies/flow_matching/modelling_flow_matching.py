@@ -15,8 +15,8 @@ import torchvision
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
-    FiperDataRecorderConfig,
+from lerobot.fiper_data_recorder.configuration_fiper_rollout_recorder import (
+    FiperRolloutRecorderConfig,
 )
 from lerobot.policies.common.flow_matching.conditional_probability_path import make_cond_prob_path
 from lerobot.policies.common.flow_matching.ode_solver import ODESolver
@@ -70,7 +70,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         self.flow_matching = FlowMatchingModel(config)
 
         self.uncertainty_sampler = None
-        self.fiper_data_recorder = None
+        self.fiper_rollout_recorder = None
 
         self.reset()
 
@@ -91,15 +91,14 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             scorer_artifacts=scorer_artifacts,
         )
 
-    def init_fiper_data_recorder(
+    def init_fiper_rollout_recorder(
         self,
-        config: FiperDataRecorderConfig,
-        scorer_artifacts,
+        config: FiperRolloutRecorderConfig,
     ):
         """
         Constructs the FIPER data recorder based on the config.
         """
-        from lerobot.fiper_data_recorder.fiper_data_recorder import FiperDataRecorder
+        from lerobot.fiper_data_recorder.fiper_rollout_recorder import FiperRolloutRecorder
         from lerobot.policies.factory import make_flow_matching_adapter
 
         flow_matching_adapter = make_flow_matching_adapter(
@@ -107,10 +106,9 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             policy_config=self.config
         )
 
-        self.fiper_data_recorder = FiperDataRecorder(
+        self.fiper_rollout_recorder = FiperRolloutRecorder(
             config=config,
             flow_matching_adapter=flow_matching_adapter,
-            scorer_artifacts=scorer_artifacts,
         )
 
     def get_optim_params(self) -> dict:
@@ -130,8 +128,8 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         if self.uncertainty_sampler is not None:
             self.uncertainty_sampler.reset()
 
-        if self.fiper_data_recorder is not None:
-            self.fiper_data_recorder.reset()
+        if self.fiper_rollout_recorder is not None:
+            self.fiper_rollout_recorder.reset()
 
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor]) -> Tensor:
@@ -172,14 +170,14 @@ class FlowMatchingPolicy(PreTrainedPolicy):
                 observation=batch, generator=generator
             )
             tqdm.write(f"{self.uncertainty_sampler.method_name} uncertainty: {uncertainty:.4f}")
-        elif not self.training and self.fiper_data_recorder is not None:
+        elif not self.training and self.fiper_rollout_recorder is not None:
             if batch_size != 1:
                 raise ValueError(
                     f"Recording FIPER data requires batch size of 1, but got {batch_size}."
                 )
 
             # Sample actions and record sampling data.
-            actions = self.fiper_data_recorder.conditional_sample_with_recording(
+            actions = self.fiper_rollout_recorder.conditional_sample_with_recording(
                 observation=batch, generator=generator
             )
         else:

@@ -2,7 +2,7 @@ import logging
 import random
 import time
 from itertools import cycle
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -11,16 +11,13 @@ from torch import nn
 from tqdm import trange
 
 from lerobot.configs import parser
-from lerobot.configs.fiper_data_recording import FiperDataRecordingPipelineConfig
+from lerobot.configs.fiper_rollout_recording import FiperRolloutRecordingPipelineConfig
 from lerobot.envs.factory import build_env_for_domain
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.processor import PolicyAction, PolicyProcessorPipeline
-from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import (
-    build_scorer_artifacts_for_fiper_recorder,
-)
 from lerobot.utils.io_utils import get_task_dir, save_episode_video
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import get_safe_torch_device, init_logging
@@ -31,8 +28,8 @@ def rollout(
     policy: PreTrainedPolicy,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction],
-    seed: Optional[int] = None,
-) -> Tuple[Dict[str, bool], List[np.ndarray]]:
+    seed: int | None = None,
+) -> tuple[dict[str, bool], list[np.ndarray]]:
     """
     Run a single rollout of a policy in a gymnasium environment.
 
@@ -59,7 +56,7 @@ def rollout(
     generator = torch.Generator(device=device).manual_seed(seed) if seed is not None else None
 
     if hasattr(env, "camera_names") and env.camera_names is not None:
-        ep_frames: Dict[str, list[np.ndarray]] = {
+        ep_frames: dict[str, list[np.ndarray]] = {
             cam: [] for cam in env.camera_names
         }
     else:
@@ -79,10 +76,7 @@ def rollout(
     else:
         ep_frames.append(env.render())
 
-    if env.spec is None:
-        max_episode_steps = env._max_episode_steps
-    else:
-        max_episode_steps = env.spec.max_episode_steps
+    max_episode_steps = env._max_episode_steps if env.spec is None else env.spec.max_episode_steps
 
     progbar = trange(
         max_episode_steps,
@@ -124,13 +118,13 @@ def rollout(
 
     return info, ep_frames
 
-def choose_seed(rng: Optional[random.Random] = None) -> int:
+def choose_seed(rng: random.Random | None = None) -> int:
     """
     Return a fresh 32-bit random seed using a random number generator.
     """
     return rng.randrange(2**31 - 1)
 
-def prepare_run_metadata(cfg: FiperDataRecordingPipelineConfig) -> Dict[str, Any]:
+def prepare_run_metadata(cfg: FiperRolloutRecordingPipelineConfig) -> dict[str, Any]:
     """
     Prepare metadata dictionary for this data recording run.
     """
@@ -148,13 +142,13 @@ def prepare_run_metadata(cfg: FiperDataRecordingPipelineConfig) -> Dict[str, Any
         "task": cfg.env.task,
         "action_prediction_horizon": horizon,
         "action_execution_horizon": cfg.policy.n_action_steps,
-        "action_batch_size": cfg.fiper_data_recorder.num_uncertainty_sequences,
+        "action_batch_size": cfg.fiper_rollout_recorder.num_uncertainty_sequences,
     }
 
     return run_metadata
 
 @parser.wrap()
-def main(cfg: FiperDataRecordingPipelineConfig):
+def main(cfg: FiperRolloutRecordingPipelineConfig):
     # Set global seed
     if cfg.seed is not None:
         set_seed(cfg.seed)
@@ -176,7 +170,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
 
     logging.info("Making environment.")
     # Build evaluation environments for each domain (ID/OOD)
-    envs_by_domain: Dict[str, Dict[str, Dict[int, gym.Env]]] = {
+    envs_by_domain: dict[str, dict[str, dict[int, gym.Env]]] = {
         domain: build_env_for_domain(cfg.env, domain)
         for domain in cfg.domains
     }
@@ -196,15 +190,8 @@ def main(cfg: FiperDataRecordingPipelineConfig):
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
 
-    scorer_artifacts = build_scorer_artifacts_for_fiper_recorder(
-        fiper_data_recorder_cfg=cfg.fiper_data_recorder,
-        policy=policy,
-        preprocessor=preprocessor,
-        dataset_cfg=cfg.dataset,
-    )
-    policy.init_fiper_data_recorder(
-        config=cfg.fiper_data_recorder,
-        scorer_artifacts=scorer_artifacts,
+    policy.init_fiper_rollout_recorder(
+        config=cfg.fiper_rollout_recorder,
     )
 
     # Alternate ID/OOD for test set, calibration set only contains ID rollouts
@@ -242,7 +229,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
             for task_group, task_id, env in tasks:
                 while True:
                     # Reset the FIPER data recorder before a new episode
-                    policy.fiper_data_recorder.reset()
+                    policy.fiper_rollout_recorder.reset()
 
                     seed = choose_seed(rng)
                     info, frames = rollout(
@@ -274,7 +261,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
                             "rollout_subtype": "ca",
                         }
 
-                        policy.fiper_data_recorder.save_data(
+                        policy.fiper_rollout_recorder.save_data(
                             output_dir=calib_dir,
                             episode_metadata=ep_metadata
                         )
@@ -290,7 +277,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
             tasks = [(tg, tid, env) for tg, group in envs_by_domain[domain].items() for tid, env in group.items()]
             for task_group, task_id, env in tasks:
                 # Reset the FIPER data recorder before a new episode
-                policy.fiper_data_recorder.reset()
+                policy.fiper_rollout_recorder.reset()
 
                 seed = choose_seed(rng)
                 rollout_info, ep_frames = rollout(
@@ -320,7 +307,7 @@ def main(cfg: FiperDataRecordingPipelineConfig):
                     "rollout_subtype": domain,
                 }
 
-                policy.fiper_data_recorder.save_data(
+                policy.fiper_rollout_recorder.save_data(
                     output_dir=test_dir,
                     episode_metadata=ep_metadata,
                 )

@@ -1,0 +1,17 @@
+env:
+  type: libero
+  task: libero_10
+  task_ids: [0, 4, 7, 8, 9]
+
+fiper_rollout_recorder:
+  num_uncertainty_sequences: 64
+  ode_eval_times: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+
+domains: [id, ood]
+n_calib_episodes: 70
+n_test_episodes: 150
+
+seed: 20118
+job_name: smolvla_libero
+
+# python src/lerobot/scripts/fiper_data_generation/record_fiper_rollout.py --config=configs/smolvla/record_fiper_rollout/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model

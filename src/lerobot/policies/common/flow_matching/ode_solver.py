@@ -41,10 +41,7 @@ class ODESolver():
         return_intermediate_states: bool = False,
         return_intermediate_vels: bool = False,
         enable_grad: bool = False,
-    ) -> Union[
-        Tensor,
-        Tuple[Tensor, Tensor]
-    ]:
+    ) -> Tensor | tuple[Tensor, Tensor]:
         """
         Solve the flow matching ODE with the conditioned velocity model.
 
@@ -111,8 +108,9 @@ class ODESolver():
                     velocities = []
                     for t, x_t in zip(time_grid, trajetory, strict=False):
                         velocities.append(velocity_fn(t=t, x_t=x_t))
+                    velocities = torch.stack(velocities, dim=0)
 
-        outputs: List[Tensor] = []
+        outputs: list[Tensor] = []
 
         if return_intermediate_states:
             outputs.append(trajetory)
@@ -120,7 +118,7 @@ class ODESolver():
             outputs.append(trajetory[-1])
 
         if return_intermediate_vels:
-            outputs.append(torch.stack(velocities, dim=0))
+            outputs.append(velocities)
 
         return outputs[0] if len(outputs) == 1 else tuple(outputs)
 
@@ -131,14 +129,14 @@ class ODESolver():
         velocity_fn: Callable[[Tensor, Tensor], Tensor],
         log_p_0: Callable[[Tensor], Tensor],
         method: str,
-        atol: Optional[float],
-        rtol: Optional[float],
-        step_size: Optional[float] = None,
+        atol: float | None,
+        rtol: float | None,
+        step_size: float | None = None,
         return_intermediate_states: bool = False,
         exact_divergence: bool = True,
-        num_hutchinson_samples: Optional[int] = 3,
-        generator: Optional[torch.Generator] = None,
-    ) -> Union[Tuple[Tensor, Tensor], Tuple[Sequence[Tensor], Tensor]]:
+        num_hutchinson_samples: int | None = 3,
+        generator: torch.Generator | None = None,
+    ) -> tuple[Tensor, Tensor] | tuple[Sequence[Tensor], Tensor]:
         """
         Integrate the combined flow matching ODE in either direction and return both the terminal
         sample and the log-likelihood log(p_1(x_1)) of the target sample x_1.
@@ -523,7 +521,7 @@ def make_lik_estimation_time_grid(ode_solver_method: str, device: torch.device, 
 
 def select_ode_states(
     time_grid: Tensor, ode_states: Tensor, requested_times: Tensor
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     """
     Extract the ODE states (and their timestamps) that correspond to a set of
     requested times.

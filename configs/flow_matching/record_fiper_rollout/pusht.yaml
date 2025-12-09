@@ -1,0 +1,14 @@
+env:
+  type: pusht
+
+fiper_rollout_recorder:
+  num_uncertainty_sequences: 128
+  ode_eval_times: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+
+n_calib_episodes: 70
+n_test_episodes: 150
+
+seed: 27
+job_name: flow_matching_pusht
+
+# python src/lerobot/scripts/fiper_data_generation/record_fiper_rollout.py --config=configs/flow_matching/record_fiper_rollout/pusht.yaml --policy.path=outputs/train/flow_matching/pusht_01/checkpoints/200000/pretrained_model

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any
 
 from laplace import Laplace
 
 from lerobot.configs.default import DatasetConfig
-from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
-    FiperDataRecorderConfig,
+from lerobot.fiper_data_recorder.configuration_fiper_rollout_scorer import (
+    FiperRolloutScorerConfig,
 )
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -27,8 +27,8 @@ class ScorerArtifacts:
         ensemble_models: Model adapters used when scorer_type='ensemble'.
         laplace_posterior: Laplace posterior used when scorer_type='laplace'.
     """
-    ensemble_models: List[BaseFlowMatchingAdapter] = None
-    laplace_posterior: Optional[Laplace] = None
+    ensemble_models: list[BaseFlowMatchingAdapter] | None = None
+    laplace_posterior: Laplace | None = None
 
 def build_scorer_artifacts_for_uncertainty_sampler(
     uncertainty_sampler_cfg: UncertaintySamplerConfig,
@@ -59,8 +59,8 @@ def build_scorer_artifacts_for_uncertainty_sampler(
         return ScorerArtifacts(laplace_posterior=laplace_posterior)
     raise ValueError(f"Unknown scorer_type: {scorer_type!r}")
 
-def build_scorer_artifacts_for_fiper_recorder(
-    fiper_data_recorder_cfg: FiperDataRecorderConfig,
+def build_scorer_artifacts_for_fiper_scorer(
+    fiper_data_scorer_cfg: FiperRolloutScorerConfig,
     policy: PreTrainedPolicy,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     dataset_cfg: DatasetConfig | None = None,
@@ -68,14 +68,28 @@ def build_scorer_artifacts_for_fiper_recorder(
     """
     Build both ensemble model and Laplace posterior artifacts for the FIPER data recorder.
     """
-    ensemble_models = build_ensemble_models(
-        ensemble_model_paths=fiper_data_recorder_cfg.ensemble_model_paths,
-        policy_cfg=policy.config,
-    )
-    laplace_posterior = get_laplace_posterior(
-        policy=policy,
-        preprocessor=preprocessor,
-        laplace_config=fiper_data_recorder_cfg.laplace_config,
-        dataset_cfg=dataset_cfg,
-    )
+    if (
+        fiper_data_scorer_cfg.is_method_enabled("bayesian_ensemble")
+        or fiper_data_scorer_cfg.is_method_enabled("composed_bayesian_ensemble")
+    ):
+        ensemble_models = build_ensemble_models(
+            ensemble_model_paths=fiper_data_scorer_cfg.ensemble_model_paths,
+            policy_cfg=policy.config,
+        )
+    else:
+        ensemble_models = None
+
+    if (
+        fiper_data_scorer_cfg.is_method_enabled("bayesian_laplace")
+        or fiper_data_scorer_cfg.is_method_enabled("composed_bayesian_laplace")
+    ):
+        laplace_posterior = get_laplace_posterior(
+            policy=policy,
+            preprocessor=preprocessor,
+            laplace_config=fiper_data_scorer_cfg.laplace_config,
+            dataset_cfg=dataset_cfg,
+        )
+    else:
+        laplace_posterior = None
+
     return ScorerArtifacts(ensemble_models=ensemble_models, laplace_posterior=laplace_posterior)

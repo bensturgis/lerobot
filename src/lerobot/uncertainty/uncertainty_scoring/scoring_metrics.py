@@ -174,7 +174,7 @@ class Likelihood(TerminalStateMetric):
         self,
         velocity_fn: Callable[[Tensor, Tensor], Tensor],
         action_sequences: Tensor,
-        generator: Optional[torch.Generator] = None,
+        generator: torch.Generator | None = None,
         **_: Any,
     ) -> Tensor:
         """

@@ -27,7 +27,7 @@ batch_size: 40
 enable_val_loss: False
 eval_freq: 10000
 save_freq: 10000
-seed: 11723
+seed: 2
 wandb:
   enable: true
 job_name: smolvla_libero_base

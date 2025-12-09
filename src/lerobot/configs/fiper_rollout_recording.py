@@ -5,19 +5,17 @@ from pathlib import Path
 
 from lerobot import envs
 from lerobot.configs import parser
-from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.fiper_data_recorder.configuration_fiper_data_recorder import (
-    FiperDataRecorderConfig,
+from lerobot.fiper_data_recorder.configuration_fiper_rollout_recorder import (
+    FiperRolloutRecorderConfig,
 )
 
 
 @dataclass
-class FiperDataRecordingPipelineConfig:
+class FiperRolloutRecordingPipelineConfig:
     env: envs.EnvConfig
-    fiper_data_recorder: FiperDataRecorderConfig = field(default_factory=FiperDataRecorderConfig)
+    fiper_rollout_recorder: FiperRolloutRecorderConfig = field(default_factory=FiperRolloutRecorderConfig)
     policy: PreTrainedConfig | None = None
-    dataset: DatasetConfig | None = None
 
     n_calib_episodes: int = 60
     n_test_episodes: int = 240
@@ -37,7 +35,7 @@ class FiperDataRecordingPipelineConfig:
             self.policy.pretrained_path = policy_path
         else:
             logging.warning(
-                "No pretrained path was provided, policy for FIPER data recording will be built from "
+                "No pretrained path was provided, policy for FIPER rollout data recording will be built from "
                 "scratch (random weights)."
             )
 
@@ -50,7 +48,7 @@ class FiperDataRecordingPipelineConfig:
         if not self.output_dir:
             now = dt.datetime.now()
             run_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
-            self.output_dir = Path("outputs/fiper_data_recording") / run_dir
+            self.output_dir = Path("outputs/fiper_rollout_recording") / run_dir
 
         self.validate()
 
