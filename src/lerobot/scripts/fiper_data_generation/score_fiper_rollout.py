@@ -3,8 +3,8 @@ import pickle
 import random
 from itertools import zip_longest
 from pathlib import Path
-import torch
 
+import torch
 from tqdm import tqdm
 
 from lerobot.configs import parser

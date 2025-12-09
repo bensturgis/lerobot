@@ -1,7 +1,9 @@
+import datetime as dt
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from lerobot import envs
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
@@ -13,6 +15,7 @@ from lerobot.fiper_data_recorder.configuration_fiper_rollout_scorer import (
 @dataclass
 class FiperRolloutScoringPipelineConfig:
     input_dir: Path | None = None
+    env: envs.EnvConfig
     fiper_rollout_scorer: FiperRolloutScorerConfig = field(default_factory=FiperRolloutScorerConfig)
     policy: PreTrainedConfig | None = None
     dataset: DatasetConfig | None = None
@@ -34,8 +37,16 @@ class FiperRolloutScoringPipelineConfig:
                 "scratch (random weights)."
             )
 
+        if not self.job_name:
+            if self.env is None:
+                self.job_name = f"{self.policy.type}"
+            else:
+                self.job_name = f"{self.env.type}_{self.policy.type}"
+
         if not self.output_dir:
-            self.output_dir = self.input_dir.parent / f"{self.input_dir.name}_scored"
+            now = dt.datetime.now()
+            run_dir = f"{now:%Y-%m-%d}/{now:%H-%M-%S}_{self.job_name}"
+            self.output_dir = Path("outputs/fiper_rollout_scoring") / run_dir
 
         self.validate()
 

@@ -3,6 +3,9 @@ input_dir: outputs/fiper_rollout_recording/2025-12-09/12-30-09_flow_matching_pus
 dataset:
   repo_id: lerobot/pusht
 
+env:
+  type: pusht
+
 fiper_rollout_scorer:
   scores_by_method:
     bayesian_laplace: []
