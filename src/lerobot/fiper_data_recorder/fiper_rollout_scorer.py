@@ -1,5 +1,6 @@
 import pickle
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -552,7 +553,7 @@ class FiperRolloutScorer:
         data = {
             "metadata": episode_metadata,
             "rollout": self.fiper_data,
-            "config": self.config,
+            "config": asdict(self.config),
         }
 
         output_dir = Path(output_dir)
