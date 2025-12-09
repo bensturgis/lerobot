@@ -1,13 +1,14 @@
-from typing import Any, Callable, Dict, List, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch import Tensor, nn
 from torch.utils.data.dataloader import default_collate
 
-from lerobot.constants import ACTION, OBS_IMAGES
 from lerobot.policies.flow_matching.configuration_flow_matching import FlowMatchingConfig
 from lerobot.policies.flow_matching.modelling_flow_matching import FlowMatchingModel
 from lerobot.processor import PolicyProcessorPipeline
+from lerobot.utils.constants import ACTION, OBS_IMAGES
 from lerobot.utils.utils import get_safe_torch_device
 
 from .laplace_wrapper import LaplaceBatch, LaplaceWrapper
@@ -15,7 +16,7 @@ from .laplace_wrapper import LaplaceBatch, LaplaceWrapper
 
 class FlowMatchingLaplaceWrapper(LaplaceWrapper):
     """Laplace wrapper for FlowMatching models."""
-    def __init__(self, config: FlowMatchingConfig, model: FlowMatchingModel, scopes: List[str]):
+    def __init__(self, config: FlowMatchingConfig, model: FlowMatchingModel, scopes: list[str]):
         """
         Initialize a Laplace approximation wrapper around a FlowMatching model.
 
@@ -31,7 +32,7 @@ class FlowMatchingLaplaceWrapper(LaplaceWrapper):
         scopes = scopes or ["velocity_last", "rgb_last"]
         super().__init__(model=model, config=config, scopes=scopes)
 
-        self.scope_abbr: Dict[str, str] = {
+        self.scope_abbr: dict[str, str] = {
             "velocity_last": "vel",
             "rgb_last": "rgb",
         }
@@ -40,7 +41,7 @@ class FlowMatchingLaplaceWrapper(LaplaceWrapper):
 
     def build_collate_fn(
         self, preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]]
-    ) -> Callable[[Dict[str, Tensor]], Tuple[LaplaceBatch, Tensor]]:
+    ) -> Callable[[dict[str, Tensor]], tuple[LaplaceBatch, Tensor]]:
         """
         Factory that builds a dataloader collate function tailored for Laplace calibration of
         a FlowMatchingModel.
@@ -54,15 +55,27 @@ class FlowMatchingLaplaceWrapper(LaplaceWrapper):
         # Check device is available
         device = get_safe_torch_device(self.device)
 
-        def collate_fn(batch: Dict[str, Tensor]) -> Tuple[LaplaceBatch, Tensor]:
+        def collate_fn(batch: dict[str, Tensor]) -> tuple[LaplaceBatch, Tensor]:
+            # Turn into batched dict of tensors
             batch = default_collate(batch)
+            # Apply the dataset preprocessor
             batch = preprocessor(batch)
 
             if self.config.image_features:
                 batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
-                batch[OBS_IMAGES] = torch.stack(
-                    [batch[key] for key in self.config.image_features], dim=-4
-                )
+
+                imgs = []
+                for key in self.config.image_features:
+                    img = batch[key]
+
+                    if img.dim() == 4:
+                        img = img.unsqueeze(1)
+                    elif img.dim() != 5:
+                        raise ValueError(f"Unexpected image tensor shape {img.shape} for key {key}")
+
+                    imgs.append(img)
+
+                batch[OBS_IMAGES] = torch.stack(imgs, dim=2)
 
             # Get ground-truth trajectory (x_1)
             trajectory = batch[ACTION]

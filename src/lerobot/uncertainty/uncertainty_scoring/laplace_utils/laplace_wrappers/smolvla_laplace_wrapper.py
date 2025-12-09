@@ -1,10 +1,10 @@
-from typing import Any, Callable, Dict, List, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch import Tensor, nn
 from torch.utils.data.dataloader import default_collate
 
-from lerobot.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS, OBS_STATE
 from lerobot.policies.common.aloha import (
     pi_aloha_decode_state,
     pi_aloha_encode_actions_inv,
@@ -12,6 +12,7 @@ from lerobot.policies.common.aloha import (
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.smolvla.modeling_smolvla import VLAFlowMatching, make_att_2d_masks
 from lerobot.processor import PolicyProcessorPipeline
+from lerobot.utils.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS, OBS_STATE
 from lerobot.utils.utils import get_safe_torch_device
 
 from .laplace_wrapper import LaplaceBatch, LaplaceWrapper
@@ -19,7 +20,7 @@ from .laplace_wrapper import LaplaceBatch, LaplaceWrapper
 
 class SmolVLALaplaceWrapper(LaplaceWrapper):
     """Laplace wrapper for VLAFlowMatching models."""
-    def __init__(self, config: SmolVLAConfig, model: VLAFlowMatching, scopes: List[str]):
+    def __init__(self, config: SmolVLAConfig, model: VLAFlowMatching, scopes: list[str]):
         """
         Initialize a Laplace approximation wrapper around a VLAFlowMatching model.
 
@@ -41,7 +42,7 @@ class SmolVLALaplaceWrapper(LaplaceWrapper):
         scopes = scopes or ["action_out_proj"]
         super().__init__(model=model, config=config, scopes=scopes)
 
-        self.scope_abbr: Dict[str, str] = {
+        self.scope_abbr: dict[str, str] = {
             "action_out_proj": "aop",
             "action_time_embed": "ate",
             "expert_last": "el",
@@ -52,7 +53,7 @@ class SmolVLALaplaceWrapper(LaplaceWrapper):
 
     def build_collate_fn(
         self, preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]]
-    ) -> Callable[[Dict[str, Tensor]], Tuple[LaplaceBatch, Tensor]]:
+    ) -> Callable[[dict[str, Tensor]], tuple[LaplaceBatch, Tensor]]:
         """
         Factory that builds a dataloader collate function tailored for Laplace calibration of
         a VLAFlowMatching model.
@@ -66,7 +67,7 @@ class SmolVLALaplaceWrapper(LaplaceWrapper):
         # Check device is available
         device = get_safe_torch_device(self.device)
 
-        def collate_fn(batch: Dict[str, Tensor]) -> Tuple[LaplaceBatch, Tensor]:
+        def collate_fn(batch: dict[str, Tensor]) -> tuple[LaplaceBatch, Tensor]:
             # Turn into batched dict of tensors
             batch = default_collate(batch)
             # Apply the dataset preprocessor
