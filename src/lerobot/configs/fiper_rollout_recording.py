@@ -6,7 +6,7 @@ from pathlib import Path
 from lerobot import envs
 from lerobot.configs import parser
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.fiper_data_recorder.configuration_fiper_rollout_recorder import (
+from lerobot.fiper_data_generator.configuration_fiper_rollout_recorder import (
     FiperRolloutRecorderConfig,
 )
 

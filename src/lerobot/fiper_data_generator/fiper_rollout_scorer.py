@@ -292,6 +292,9 @@ class FiperRolloutScorer:
                     n_obs_steps=self.n_obs_steps
                 )
 
+        if any(self.config.should_compute(m, "mode_distance") for m in self.config.scores_by_method):
+            fiper_step_data["terminal_eval_times"] = np.asarray(self.config.terminal_vel_eval_times)
+
         if self.config.should_compute("bayesian_laplace", "mode_distance"):
             laplace_terminal_velocities = self.eval_terminal_velocities(
                 action_samples=action_candidates,
@@ -498,7 +501,7 @@ class FiperRolloutScorer:
         vel_diff_scaling_factors: list[float] = []
         for time in ode_eval_times:
             vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
-        fiper_step_data["vel_diff_scaling_factors"] = np.asarray(vel_diff_scaling_factors)
+        fiper_step_data["vel_diff_scaling"] = np.asarray(vel_diff_scaling_factors)
 
         # Store velocity functions, ODE states and selected action index from the previous sampling step
         self.prev_sampler_velocity_fn = sampler_velocity_fn

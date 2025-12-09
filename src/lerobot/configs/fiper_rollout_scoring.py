@@ -7,20 +7,21 @@ from lerobot import envs
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.fiper_data_recorder.configuration_fiper_rollout_scorer import (
+from lerobot.fiper_data_generator.configuration_fiper_rollout_scorer import (
     FiperRolloutScorerConfig,
 )
 
 
 @dataclass
 class FiperRolloutScoringPipelineConfig:
-    input_dir: Path | None = None
     env: envs.EnvConfig
+    input_dir: Path | None = None
     fiper_rollout_scorer: FiperRolloutScorerConfig = field(default_factory=FiperRolloutScorerConfig)
     policy: PreTrainedConfig | None = None
     dataset: DatasetConfig | None = None
 
     seed: int | None = None
+    job_name: str | None = None
     output_dir: Path | None = None
     save_videos: bool = True
 

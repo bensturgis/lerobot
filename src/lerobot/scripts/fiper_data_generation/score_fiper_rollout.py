@@ -10,7 +10,7 @@ from tqdm import tqdm
 from lerobot.configs import parser
 from lerobot.configs.fiper_rollout_scoring import FiperRolloutScoringPipelineConfig
 from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.fiper_data_recorder.fiper_rollout_scorer import FiperRolloutScorer
+from lerobot.fiper_data_generator.fiper_rollout_scorer import FiperRolloutScorer
 from lerobot.policies.factory import (
     make_flow_matching_adapter_from_policy,
     make_policy,

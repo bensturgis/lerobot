@@ -6,7 +6,7 @@ from typing import Any
 from laplace import Laplace
 
 from lerobot.configs.default import DatasetConfig
-from lerobot.fiper_data_recorder.configuration_fiper_rollout_scorer import (
+from lerobot.fiper_data_generator.configuration_fiper_rollout_scorer import (
     FiperRolloutScorerConfig,
 )
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter

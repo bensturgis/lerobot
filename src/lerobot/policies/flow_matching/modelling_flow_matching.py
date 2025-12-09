@@ -15,7 +15,7 @@ import torchvision
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from lerobot.fiper_data_recorder.configuration_fiper_rollout_recorder import (
+from lerobot.fiper_data_generator.configuration_fiper_rollout_recorder import (
     FiperRolloutRecorderConfig,
 )
 from lerobot.policies.common.flow_matching.conditional_probability_path import make_cond_prob_path
@@ -98,7 +98,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
         """
         Constructs the FIPER data recorder based on the config.
         """
-        from lerobot.fiper_data_recorder.fiper_rollout_recorder import FiperRolloutRecorder
+        from lerobot.fiper_data_generator.fiper_rollout_recorder import FiperRolloutRecorder
         from lerobot.policies.factory import make_flow_matching_adapter
 
         flow_matching_adapter = make_flow_matching_adapter(
