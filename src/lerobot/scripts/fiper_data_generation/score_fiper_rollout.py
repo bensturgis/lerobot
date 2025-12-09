@@ -29,6 +29,15 @@ def interleave_paths(a: list[Path], b: list[Path]):
         if y is not None:
             yield "test", y
 
+def get_episode_idx(path: Path) -> int:
+    """
+    Extract the numeric episode index from filenames like:
+    'episode_f_0146.pkl' or 'episode_s_0008.pkl'.
+    """
+    stem = path.stem
+    idx_str = stem.split("_")[-1]
+    return int(idx_str)
+
 @parser.wrap()
 def main(cfg: FiperRolloutScoringPipelineConfig):
     # Set global seed
@@ -88,6 +97,20 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
 
     calib_files = sorted(input_calib_dir.glob("*.pkl"))
     test_files = sorted(input_test_dir.glob("*.pkl"))
+
+    start_ep = cfg.start_episode
+    end_ep = cfg.end_episode
+
+    def in_range(p: Path) -> bool:
+        idx = get_episode_idx(p)
+        if start_ep is not None and idx < start_ep:
+            return False
+        if end_ep is not None and idx > end_ep:
+            return False
+        return True
+
+    calib_files = [p for p in calib_files if in_range(p)]
+    test_files = [p for p in test_files if in_range(p)]
 
     if not calib_files and not test_files:
         raise FileNotFoundError(

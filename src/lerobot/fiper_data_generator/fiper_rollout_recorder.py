@@ -154,6 +154,8 @@ class FiperRolloutRecorder:
         """
         Reset internal state to prepare for a new rollout.
         """
+        self.prev_noise_sample = None
+
         # Clear recorded rollout data
         self.rollout_data.clear()
 

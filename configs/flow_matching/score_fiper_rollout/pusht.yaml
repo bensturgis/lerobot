@@ -1,4 +1,4 @@
-input_dir: outputs/fiper_rollout_recording/2025-12-09/12-30-09_flow_matching_pusht
+input_dir: outputs/fiper_rollout_recording/2025-12-09/16-31-11_flow_matching_pusht
 
 dataset:
   repo_id: lerobot/pusht
@@ -8,11 +8,11 @@ env:
 
 fiper_rollout_scorer:
   scores_by_method:
-    bayesian_laplace: []
-    bayesian_ensemble: [mode_distance, inter_vel_diff]
-    composed: [mode_distance, inter_vel_diff]
-    composed_bayesian_laplace: []
-    composed_bayesian_ensemble: [mode_distance, inter_vel_diff]
+    bayesian_laplace: [mode_distance, inter_vel_diff, likelihood]
+    bayesian_ensemble: [mode_distance, inter_vel_diff, likelihood]
+    composed: [mode_distance, inter_vel_diff, likelihood]
+    composed_bayesian_laplace: [mode_distance, inter_vel_diff, likelihood]
+    composed_bayesian_ensemble: [mode_distance, inter_vel_diff, likelihood]
   
   terminal_vel_eval_times: [0, 0.05, 0.1, 0.15, 0.2, 0.25]
   ensemble_model_paths: [
@@ -24,5 +24,8 @@ fiper_rollout_scorer:
     scopes: [velocity_last, rgb_last]
     calib_fraction: 1.0
     num_samples: 3
+
+# start_episode: 0
+# end_episode: 19
 
 # python src/lerobot/scripts/fiper_data_generation/score_fiper_rollout.py --config=configs/flow_matching/score_fiper_rollout/pusht.yaml --policy.path=outputs/train/flow_matching/pusht_01/checkpoints/200000/pretrained_model

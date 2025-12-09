@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.distributions import Independent, Normal
+from tqdm.auto import tqdm
 
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.common.flow_matching.conditional_probability_path import (
@@ -93,6 +94,8 @@ class FiperRolloutScorer:
 
         # Store the velocity function and ODE states from the previous action sequence generation
         self.prev_sampler_velocity_fn: Callable[[Tensor, Tensor], Tensor] | None = None
+        self.prev_ensemble_velocity_fns: list[Callable[[Tensor, Tensor], Tensor]] | None = None
+        self.prev_laplace_velocity_fns: list[Callable[[Tensor, Tensor], Tensor]] | None = None
         self.prev_ode_states: Tensor | None = None
         self.prev_velocities: Tensor | None = None
         self.prev_selected_action_idx: int | None = None
@@ -130,7 +133,6 @@ class FiperRolloutScorer:
         """
         Create NaN-filled placeholder terminal velocities matching single/multi layout.
         """
-
         if num_models is None:
             out_shape = (len(self.config.terminal_vel_eval_times), *reference_samples.shape)
         else:
@@ -326,7 +328,7 @@ class FiperRolloutScorer:
             if self.prev_action_sample is not None:
                 composed_laplace_terminal_velocities = self.eval_terminal_velocities(
                     action_samples=composed_action_samples,
-                    velocity_fns=laplace_velocity_fns,
+                    velocity_fns=self.prev_laplace_velocity_fns,
                 )
             else:
                 composed_laplace_terminal_velocities = self.make_nan_terminal_velocities(
@@ -339,7 +341,7 @@ class FiperRolloutScorer:
             if self.prev_action_sample is not None:
                 composed_ensemble_terminal_velocities = self.eval_terminal_velocities(
                     action_samples=composed_action_samples,
-                    velocity_fns=ensemble_velocity_fns,
+                    velocity_fns=self.prev_ensemble_velocity_fns,
                 )
             else:
                 composed_ensemble_terminal_velocities = self.make_nan_terminal_velocities(
@@ -379,7 +381,7 @@ class FiperRolloutScorer:
             if self.prev_action_sample is not None:
                 composed_laplace_log_likelihood = self.compute_log_likelihoods(
                     action_samples=composed_action_samples,
-                    velocity_fns=laplace_velocity_fns,
+                    velocity_fns=self.prev_laplace_velocity_fns,
                     generator=generator,
                 )
             else:
@@ -393,7 +395,7 @@ class FiperRolloutScorer:
             if self.prev_action_sample is not None:
                 composed_ensemble_log_likelihood = self.compute_log_likelihoods(
                     action_samples=composed_action_samples,
-                    velocity_fns=ensemble_velocity_fns,
+                    velocity_fns=self.prev_ensemble_velocity_fns,
                     generator=generator,
                 )
             else:
@@ -419,6 +421,11 @@ class FiperRolloutScorer:
                 requested_times=torch.tensor(ode_eval_times, device=self.device, dtype=self.dtype)
             )
             fiper_step_data["velocities"] = selected_velocities.detach().cpu().numpy()
+
+            vel_diff_scaling_factors: list[float] = []
+            for time in ode_eval_times:
+                vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
+            fiper_step_data["vel_diff_scaling"] = np.asarray(vel_diff_scaling_factors)
 
         if self.config.should_compute("bayesian_laplace", "inter_vel_diff"):
             laplace_vels = self.eval_statewise_velocities(
@@ -498,11 +505,6 @@ class FiperRolloutScorer:
                 )
             fiper_step_data["composed_ensemble_velocities"] = composed_ensemble_vels.detach().cpu().numpy()
 
-        vel_diff_scaling_factors: list[float] = []
-        for time in ode_eval_times:
-            vel_diff_scaling_factors.append(self.cond_prob_path.get_vel_diff_scaling_factor(t=time))
-        fiper_step_data["vel_diff_scaling"] = np.asarray(vel_diff_scaling_factors)
-
         # Store velocity functions, ODE states and selected action index from the previous sampling step
         self.prev_sampler_velocity_fn = sampler_velocity_fn
         self.prev_ode_states = ode_states
@@ -521,7 +523,13 @@ class FiperRolloutScorer:
     ) -> list[dict[str, Any]]:
         """Scores all steps in the given rollout data."""
         self.fiper_data = []
-        for step_data in rollout_data:
+
+        for step_data in tqdm(
+            rollout_data,
+            total=len(rollout_data),
+            desc="Scoring rollout steps",
+            leave=False,
+        ):
             fiper_step_data = self.score_step_data(step_data, generator=generator)
             self.fiper_data.append(fiper_step_data)
 

@@ -25,6 +25,9 @@ class FiperRolloutScoringPipelineConfig:
     output_dir: Path | None = None
     save_videos: bool = True
 
+    start_episode: int | None = None
+    end_episode: int | None = None
+
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
         policy_path = parser.get_path_arg("policy")
