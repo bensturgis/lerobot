@@ -95,9 +95,6 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
     input_calib_dir = input_rollout_dir / "calibration"
     input_test_dir = input_rollout_dir / "test"
 
-    calib_files = sorted(input_calib_dir.glob("*.pkl"))
-    test_files = sorted(input_test_dir.glob("*.pkl"))
-
     start_ep = cfg.start_episode
     end_ep = cfg.end_episode
 
@@ -109,8 +106,12 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
             return False
         return True
 
-    calib_files = [p for p in calib_files if in_range(p)]
-    test_files = [p for p in test_files if in_range(p)]
+    # Filter by episode range and then sort by episode id
+    calib_files = [p for p in input_calib_dir.glob("*.pkl") if in_range(p)]
+    test_files  = [p for p in input_test_dir.glob("*.pkl") if in_range(p)]
+
+    calib_files.sort(key=get_episode_idx)
+    test_files.sort(key=get_episode_idx)
 
     if not calib_files and not test_files:
         raise FileNotFoundError(
