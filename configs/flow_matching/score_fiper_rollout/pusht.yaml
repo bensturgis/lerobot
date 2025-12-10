@@ -1,4 +1,4 @@
-input_dir: outputs/fiper_rollout_recording/2025-12-09/16-31-11_flow_matching_pusht
+input_dir: outputs/fiper_rollout_recording/2025-12-09/23-10-17_flow_matching_pusht
 
 dataset:
   repo_id: lerobot/pusht

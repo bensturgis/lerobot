@@ -239,7 +239,16 @@ class FiperRolloutScorer:
         action_candidates = ode_states[-1]
         num_uncertainty_sequences = ode_states.shape[1]
 
-        fiper_step_data["action_pred"] = action_candidates.detach().cpu().numpy()
+        action_pred = action_candidates
+        if action_pred.shape[-1] == 2:
+            zero_padding = torch.zeros(
+                (*action_pred.shape[:-1], 1),
+                device=action_pred.device,
+                dtype=action_pred.dtype,
+            )
+            action_pred = torch.cat([action_pred, zero_padding], dim=-1)
+
+        fiper_step_data["action_pred"] = action_pred.detach().cpu().numpy()
 
         laplace_velocity_fns: list[Callable[[Tensor, Tensor], Tensor]] | None = None
         if self.config.is_method_enabled("bayesian_laplace") or self.config.is_method_enabled("composed_bayesian_laplace"):
@@ -297,6 +306,10 @@ class FiperRolloutScorer:
         if any(self.config.should_compute(m, "mode_distance") for m in self.config.scores_by_method):
             fiper_step_data["terminal_eval_times"] = np.asarray(self.config.terminal_vel_eval_times)
 
+        # --------------------------------------------------------------
+        # MODE DISTANCE COMPUTATION
+        # --------------------------------------------------------------
+
         if self.config.should_compute("bayesian_laplace", "mode_distance"):
             laplace_terminal_velocities = self.eval_terminal_velocities(
                 action_samples=action_candidates,
@@ -349,6 +362,10 @@ class FiperRolloutScorer:
                     num_models=len(ensemble_velocity_fns)
                 )
             fiper_step_data["composed_ensemble_terminal_velocities"] = composed_ensemble_terminal_velocities.detach().cpu().numpy()
+
+        # --------------------------------------------------------------
+        # LIKELIHOOD COMPUTATION
+        # --------------------------------------------------------------
 
         if self.config.should_compute("bayesian_laplace", "likelihood"):
             laplace_log_likelihood = self.compute_log_likelihoods(
@@ -404,6 +421,10 @@ class FiperRolloutScorer:
                     num_models=len(ensemble_velocity_fns),
                 )
             fiper_step_data["composed_ensemble_log_likelihood"] = composed_ensemble_log_likelihood.detach().cpu().numpy()
+
+        # --------------------------------------------------------------
+        # INTERMEDIATE VELOCITY DIFFERENCE COMPUTATION
+        # --------------------------------------------------------------
 
         if any(self.config.should_compute(m, "inter_vel_diff") for m in self.config.scores_by_method):
             # Select the ODE states that correspond to the ODE evaluation times
