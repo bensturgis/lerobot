@@ -62,7 +62,7 @@ from torch import Tensor, nn
 from tqdm import tqdm
 from typing_extensions import Unpack
 
-from lerobot.fiper_data_recorder.configuration_fiper_rollout_recorder import (
+from lerobot.fiper_data_generator.configuration_fiper_rollout_recorder import (
     FiperRolloutRecorderConfig,
 )
 from lerobot.policies.common.aloha import (
@@ -233,7 +233,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         """
         Constructs the FIPER data recorder based on the config.
         """
-        from lerobot.fiper_data_recorder.fiper_rollout_recorder import FiperRolloutRecorder
+        from lerobot.fiper_data_generator.fiper_rollout_recorder import FiperRolloutRecorder
         from lerobot.policies.factory import make_flow_matching_adapter
 
         flow_matching_adapter = make_flow_matching_adapter(
