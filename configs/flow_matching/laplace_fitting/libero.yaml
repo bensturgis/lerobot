@@ -12,9 +12,8 @@ policy:
   device: cuda
 
 laplace:
-  scopes: [velocity_last, rgb_last]
+  scopes: [velocity_last]
   calib_fraction: 1.0
-  batch_size: 2
 
 seed: 91
 

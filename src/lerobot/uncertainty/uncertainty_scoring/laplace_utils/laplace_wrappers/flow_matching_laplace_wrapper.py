@@ -85,7 +85,7 @@ class FlowMatchingLaplaceWrapper(LaplaceWrapper):
             times = torch.rand(
                 size=(batch_size,),
                 device=device,
-            )
+            ) * 0.999
 
             # Sample from conditional probability path and vector field.
             interpolated_trajectory = self.cond_prob_path.sample(
@@ -163,7 +163,13 @@ class FlowMatchingLaplaceWrapper(LaplaceWrapper):
                     )
                 target_modules.append(self.model.unet.final_conv[1].linear_layer)
             elif scope == "rgb_last":
-                target_modules.append(self.model.rgb_encoder.out)
+                rgb_encoder = self.model.rgb_encoder
+
+                if isinstance(rgb_encoder, nn.ModuleList):
+                    for enc in rgb_encoder:
+                        target_modules.append(enc.out)
+                else:
+                    target_modules.append(rgb_encoder.out)
             else:
                 raise ValueError(
                     f"Unknown Laplace approximation target {scope}. "
