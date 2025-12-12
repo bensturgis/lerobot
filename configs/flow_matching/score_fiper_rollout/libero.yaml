@@ -1,0 +1,39 @@
+input_dir: outputs/fiper_rollout_recording/flow_matching/libero_10
+
+dataset:
+  repo_id: HuggingFaceVLA/libero
+  libero_tasks: {
+    libero_spatial: [],
+    libero_object: [],
+    libero_goal: [],
+    libero_10: [0, 4, 7, 8, 9]
+  }
+
+env:
+  type: libero
+  task: libero_10
+  task_ids: [0, 4, 7, 8, 9]
+
+fiper_rollout_scorer:
+  scores_by_method:
+    bayesian_laplace: [mode_distance]
+    bayesian_ensemble: [mode_distance]
+    composed: []
+    composed_bayesian_laplace: []
+    composed_bayesian_ensemble: []
+  
+  terminal_vel_eval_times: [0, 0.05, 0.1, 0.15, 0.2, 0.25]
+  ensemble_model_paths: [
+    outputs/train/flow_matching/libero_02/checkpoints/050000/pretrained_model,
+    outputs/train/flow_matching/libero_03/checkpoints/050000/pretrained_model,
+    outputs/train/flow_matching/libero_04/checkpoints/050000/pretrained_model,
+  ]
+  laplace_config:
+    scopes: [velocity_last, rgb_last]
+    calib_fraction: 1.0
+    num_samples: 5
+
+# start_episode: 0
+# end_episode: 19
+
+# python src/lerobot/scripts/fiper_data_generation/score_fiper_rollout.py --config=configs/flow_matching/score_fiper_rollout/libero.yaml --policy.path=outputs/train/flow_matching/libero_01/checkpoints/050000/pretrained_model

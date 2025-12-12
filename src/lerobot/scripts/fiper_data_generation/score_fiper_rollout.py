@@ -3,6 +3,7 @@ import pickle
 import random
 from itertools import zip_longest
 from pathlib import Path
+from typing import NamedTuple
 
 import torch
 from tqdm import tqdm
@@ -22,21 +23,79 @@ from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import get_safe_torch_device, init_logging
 
 
-def interleave_paths(a: list[Path], b: list[Path]):
-    for x, y in zip_longest(a, b):
-        if x is not None:
-            yield "calibration", x
-        if y is not None:
-            yield "test", y
-
 def get_episode_idx(path: Path) -> int:
     """
     Extract the numeric episode index from filenames like:
-    'episode_f_0146.pkl' or 'episode_s_0008.pkl'.
+    'episode_f_0146(_task03).pkl' or 'episode_s_0008(_task01).pkl'.
     """
     stem = path.stem
-    idx_str = stem.split("_")[-1]
+    idx_str = stem.split("_")[2]
     return int(idx_str)
+
+class TaskRollouts(NamedTuple):
+    name: str
+    calib_files: list[Path]
+    test_files: list[Path]
+
+def build_task_rollouts(
+    input_root: Path,
+    start_ep: int | None,
+    end_ep: int | None,
+) -> list[TaskRollouts]:
+    """
+    Discover task folders under `input_root`, collect calibration and test rollouts
+    for each task, and return them sorted.
+    """
+
+    def in_range(p: Path) -> bool:
+        idx = get_episode_idx(p)
+        if start_ep is not None and idx < start_ep:
+            return False
+        if end_ep is not None and idx > end_ep:
+            return False
+        return True
+
+    task_dirs = sorted([d for d in input_root.iterdir() if d.is_dir() and d.name.startswith("task")])
+
+    tasks: list[TaskRollouts] = []
+
+    for task_dir in task_dirs:
+        rollouts_dir = task_dir / "rollouts"
+        calib_dir = rollouts_dir / "calibration"
+        test_dir = rollouts_dir / "test"
+
+        calib_files = []
+        test_files = []
+
+        if calib_dir.is_dir():
+            calib_files = [p for p in calib_dir.glob("*.pkl") if in_range(p)]
+            calib_files.sort(key=get_episode_idx)
+
+        if test_dir.is_dir():
+            test_files = [p for p in test_dir.glob("*.pkl") if in_range(p)]
+            test_files.sort(key=get_episode_idx)
+
+        # If a task has no files at all, we skip it
+        if not calib_files and not test_files:
+            logging.warning(f"No calibration/test files found for task '{task_dir.name}'. Skipping.")
+            continue
+
+        tasks.append(TaskRollouts(name=task_dir.name, calib_files=calib_files, test_files=test_files))
+
+    return tasks
+
+def iter_round_robin_tasks(tasks: list[TaskRollouts]):
+    if not tasks:
+        return
+
+    max_len = max(max(len(t.calib_files), len(t.test_files)) for t in tasks)
+
+    for ep_idx in range(max_len):
+        for t in tasks:
+            if ep_idx < len(t.calib_files):
+                yield t.name, "calibration", t.calib_files[ep_idx]
+            if ep_idx < len(t.test_files):
+                yield t.name, "test", t.test_files[ep_idx]
 
 @parser.wrap()
 def main(cfg: FiperRolloutScoringPipelineConfig):
@@ -91,49 +150,29 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
     )
 
     input_dir = Path(cfg.input_dir)
-    input_rollout_dir = input_dir / "rollouts"
-    input_calib_dir = input_rollout_dir / "calibration"
-    input_test_dir = input_rollout_dir / "test"
 
     start_ep = cfg.start_episode
     end_ep = cfg.end_episode
 
-    def in_range(p: Path) -> bool:
-        idx = get_episode_idx(p)
-        if start_ep is not None and idx < start_ep:
-            return False
-        if end_ep is not None and idx > end_ep:
-            return False
-        return True
+    tasks = build_task_rollouts(input_root=input_dir, start_ep=start_ep, end_ep=end_ep)
 
-    # Filter by episode range and then sort by episode id
-    calib_files = [p for p in input_calib_dir.glob("*.pkl") if in_range(p)]
-    test_files  = [p for p in input_test_dir.glob("*.pkl") if in_range(p)]
-
-    calib_files.sort(key=get_episode_idx)
-    test_files.sort(key=get_episode_idx)
-
-    if not calib_files and not test_files:
+    if not tasks:
         raise FileNotFoundError(
-            f"No calibration or test files found in {input_calib_dir} or {input_test_dir}."
+            f"No calibration or test files found in any task subdirectory of {input_dir}."
         )
 
     output_root = Path(cfg.output_dir)
-    output_rollouts_dir = output_root / "rollouts"
-    output_rollouts_dir.mkdir(parents=True, exist_ok=True)
-    output_calib_dir = output_rollouts_dir / "calibration"
-    output_test_dir = output_rollouts_dir / "test"
-    output_calib_dir.mkdir(parents=True, exist_ok=True)
-    output_test_dir.mkdir(parents=True, exist_ok=True)
 
-    total_num_episodes = len(calib_files) + len(test_files)
-    for split, pkl_path in tqdm(
-        interleave_paths(calib_files, test_files),
-        total=total_num_episodes,
+    # Compute total number of files for the progress bar
+    total_num_files = sum(len(t.calib_files) + len(t.test_files) for t in tasks)
+
+    for task_name, split, pkl_path in tqdm(
+        iter_round_robin_tasks(tasks),
+        total=total_num_files,
         desc="Scoring rollouts",
         unit="file",
     ):
-        logging.info(f"Scoring [{split}] {pkl_path.name}")
+        logging.info(f"Scoring [task={task_name} | split={split}] {pkl_path.name}")
 
         with pkl_path.open("rb") as f:
             data = pickle.load(f)
@@ -147,11 +186,25 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
         with torch.no_grad():
             fiper_rollout_scorer.score_rollout_data(rollout_data=rollout_data)
 
-        # Save scored result into split-specific folder
-        output_dir = output_calib_dir if split == "calibration" else output_test_dir
-        fiper_rollout_scorer.save_data(output_dir=output_dir, episode_metadata=episode_metadata)
+        # NEW: mirror task structure in the output directory
+        task_output_root = output_root / task_name
+        task_output_rollouts_dir = task_output_root / "rollouts"
+        output_calib_dir = task_output_rollouts_dir / "calibration"
+        output_test_dir = task_output_rollouts_dir / "test"
 
-    logging.info("Done scoring all calibration/test rollouts.")
+        # Make sure directories exist
+        output_calib_dir.mkdir(parents=True, exist_ok=True)
+        output_test_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save scored result into task- and split-specific folder
+        output_dir_for_split = output_calib_dir if split == "calibration" else output_test_dir
+        fiper_rollout_scorer.save_data(
+            output_dir=output_dir_for_split,
+            episode_metadata=episode_metadata,
+        )
+
+    logging.info("Done scoring all calibration/test rollouts for all tasks.")
+
 
 if __name__ == "__main__":
     init_logging()

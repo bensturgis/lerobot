@@ -155,7 +155,7 @@ class FlowMatchingPolicy(PreTrainedPolicy):
             "observation.environment_state": (B, environment_dim)
         }
         """
-        batch_size, n_obs_steps = batch["observation.state"].shape[:2]
+        batch_size, n_obs_steps = batch[OBS_STATE].shape[:2]
         assert n_obs_steps == self.config.n_obs_steps
 
         # Run sampling.

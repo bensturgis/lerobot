@@ -12,7 +12,7 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.fiper_rollout_recording import FiperRolloutRecordingPipelineConfig
-from lerobot.envs.factory import build_env_for_domain
+from lerobot.envs.factory import build_env_for_domain, make_env_pre_post_processors
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -26,6 +26,8 @@ from lerobot.utils.utils import get_safe_torch_device, init_logging
 def rollout(
     env: gym.Env,
     policy: PreTrainedPolicy,
+    env_preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
+    env_postprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],
     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction],
     seed: int | None = None,
@@ -88,14 +90,25 @@ def rollout(
 
         # Infer "task" from attributes of environments.
         observation = add_envs_task(env, observation)
-        observation = preprocessor(observation)
 
+        # Apply environment-specific preprocessing (e.g., LiberoProcessorStep for LIBERO)
+        observation = env_preprocessor(observation)
+
+        observation = preprocessor(observation)
         with torch.no_grad():
             action = policy.select_action(observation, generator)
         action = postprocessor(action)
 
+        action_transition = {"action": action}
+        action_transition = env_postprocessor(action_transition)
+        action = action_transition["action"]
+
+        # Convert to CPU / numpy.
+        action_numpy: np.ndarray = action.to("cpu").numpy()
+        assert action_numpy.ndim == 2, "Action dimensions should be (batch, action_dim)"
+
         # Apply the next action
-        observation, _, terminated, truncated, info = env.step(action[0].cpu().numpy())
+        observation, _, terminated, truncated, info = env.step(action_numpy[0])
         if hasattr(env, "camera_names") and env.camera_names is not None:
             for camera in env.camera_names:
                 ep_frames[camera].append(env.unwrapped.render(camera_name=camera))
@@ -190,6 +203,9 @@ def main(cfg: FiperRolloutRecordingPipelineConfig):
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
 
+    # Create environment-specific preprocessor and postprocessor (e.g., for LIBERO environments)
+    env_preprocessor, env_postprocessor = make_env_pre_post_processors(env_cfg=cfg.env, policy_cfg=cfg.policy)
+
     policy.init_fiper_rollout_recorder(
         config=cfg.fiper_rollout_recorder,
     )
@@ -235,6 +251,8 @@ def main(cfg: FiperRolloutRecordingPipelineConfig):
                     info, frames = rollout(
                         env=env,
                         policy=policy,
+                        env_postprocessor=env_postprocessor,
+                        env_preprocessor=env_preprocessor,
                         preprocessor=preprocessor,
                         postprocessor=postprocessor,
                         seed=seed,
@@ -283,6 +301,8 @@ def main(cfg: FiperRolloutRecordingPipelineConfig):
                 rollout_info, ep_frames = rollout(
                     env=env,
                     policy=policy,
+                    env_postprocessor=env_postprocessor,
+                    env_preprocessor=env_preprocessor,
                     preprocessor=preprocessor,
                     postprocessor=postprocessor,
                     seed=seed

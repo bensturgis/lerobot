@@ -63,10 +63,12 @@ class LiberoProcessorStep(ObservationProcessorStep):
         if "observation.robot_state" in processed_obs:
             robot_state = processed_obs.pop("observation.robot_state")
 
-            # Extract components
-            eef_pos = robot_state["eef"]["pos"]  # (B, 3,)
-            eef_quat = robot_state["eef"]["quat"]  # (B, 4,)
-            gripper_qpos = robot_state["gripper"]["qpos"]  # (B, 2,)
+            def ensure_batch_dim(x: torch.Tensor) -> torch.Tensor:
+                return x if x.dim() > 1 else x.unsqueeze(0)
+
+            eef_pos = ensure_batch_dim(robot_state["eef"]["pos"])
+            eef_quat = ensure_batch_dim(robot_state["eef"]["quat"])
+            gripper_qpos = ensure_batch_dim(robot_state["gripper"]["qpos"])
 
             # Convert quaternion to axis-angle
             eef_axisangle = self._quat2axisangle(eef_quat)  # (B, 3)
