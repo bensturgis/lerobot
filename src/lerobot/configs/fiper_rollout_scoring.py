@@ -25,8 +25,11 @@ class FiperRolloutScoringPipelineConfig:
     output_dir: Path | None = None
     save_videos: bool = True
 
+    task_ids: list[int] | None = field(default=None)
     start_episode: int | None = None
     end_episode: int | None = None
+    max_calib_episodes: int | None = None
+    max_test_episodes: int | None = None
 
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
@@ -60,11 +63,6 @@ class FiperRolloutScoringPipelineConfig:
 
         if not self.input_dir.is_dir():
             raise NotADirectoryError(f"input_dir is not a directory: {self.input_dir}")
-
-        if self.output_dir.exists():
-            raise FileExistsError(
-                f"output_dir already exists: {self.output_dir}. Please remove it or provide a different --output_dir."
-            )
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:

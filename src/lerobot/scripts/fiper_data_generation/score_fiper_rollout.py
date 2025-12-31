@@ -1,7 +1,7 @@
 import logging
 import pickle
 import random
-from itertools import zip_longest
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -23,17 +23,52 @@ from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import get_safe_torch_device, init_logging
 
 
+def get_task_id(task_dir_name: str) -> int | None:
+    if not task_dir_name.startswith("task"):
+        return None
+    suffix = task_dir_name[4:]
+    if not suffix.isdigit():
+        return None
+    return int(suffix)
+
 def get_episode_idx(path: Path) -> int:
-    """
-    Extract the numeric episode index from filenames like:
-    'episode_f_0146(_task03).pkl' or 'episode_s_0008(_task01).pkl'.
-    """
     stem = path.stem
-    idx_str = stem.split("_")[2]
-    return int(idx_str)
+    episode_id_regex = re.compile(r"^episode_[^_]+_(\d+)")
+    m = episode_id_regex.search(stem)
+    if not m:
+        raise ValueError(f"Could not parse episode index from filename: {path.name}")
+    return int(m.group(1))
+
+def build_scored_index(output_root: Path) -> dict[tuple[str, str], set[int]]:
+    scored: dict[tuple[str, str], set[int]] = {}
+    if not output_root.is_dir():
+        return scored
+
+    for task_dir in output_root.iterdir():
+        if not task_dir.is_dir():
+            continue
+
+        rollouts_dir = task_dir / "rollouts"
+        for split in ("calibration", "test"):
+            split_dir = rollouts_dir / split
+            if not split_dir.is_dir():
+                continue
+
+            key = (task_dir.name, split)
+            scored[key] = {get_episode_idx(p) for p in split_dir.glob("*.pkl")}
+
+    return scored
+
+def get_split_cap(cfg: FiperRolloutScoringPipelineConfig, split: str) -> int | None:
+    if split == "calibration":
+        return cfg.max_calib_episodes
+    if split == "test":
+        return cfg.max_test_episodes
+    raise ValueError(f"Unknown split: {split}")
 
 class TaskRollouts(NamedTuple):
     name: str
+    task_id: int
     calib_files: list[Path]
     test_files: list[Path]
 
@@ -41,6 +76,7 @@ def build_task_rollouts(
     input_root: Path,
     start_ep: int | None,
     end_ep: int | None,
+    allowed_task_ids: set[int] | None = None,
 ) -> list[TaskRollouts]:
     """
     Discover task folders under `input_root`, collect calibration and test rollouts
@@ -60,6 +96,14 @@ def build_task_rollouts(
     tasks: list[TaskRollouts] = []
 
     for task_dir in task_dirs:
+        tid = get_task_id(task_dir.name)
+        if tid is None:
+            logging.warning(f"Task dir '{task_dir.name}' does not match expected format taskXX. Skipping.")
+            continue
+
+        if allowed_task_ids is not None and tid not in allowed_task_ids:
+            continue
+
         rollouts_dir = task_dir / "rollouts"
         calib_dir = rollouts_dir / "calibration"
         test_dir = rollouts_dir / "test"
@@ -80,7 +124,9 @@ def build_task_rollouts(
             logging.warning(f"No calibration/test files found for task '{task_dir.name}'. Skipping.")
             continue
 
-        tasks.append(TaskRollouts(name=task_dir.name, calib_files=calib_files, test_files=test_files))
+        tasks.append(TaskRollouts(name=task_dir.name, task_id=tid, calib_files=calib_files, test_files=test_files))
+
+    tasks.sort(key=lambda t: t.task_id)
 
     return tasks
 
@@ -154,14 +200,34 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
     start_ep = cfg.start_episode
     end_ep = cfg.end_episode
 
-    tasks = build_task_rollouts(input_root=input_dir, start_ep=start_ep, end_ep=end_ep)
+    output_root = Path(cfg.output_dir)
+
+    resume_from_output = (start_ep is None and end_ep is None)
+
+    need_scored_index = (
+        resume_from_output
+        or (cfg.max_calib_episodes is not None)
+        or (cfg.max_test_episodes is not None)
+    )
+
+    scored_index = build_scored_index(output_root) if need_scored_index else {}
+
+    allowed_task_ids = None
+
+    if cfg.task_ids:
+        allowed_task_ids = set(cfg.task_ids)
+
+    tasks = build_task_rollouts(
+        input_root=input_dir,
+        start_ep=start_ep,
+        end_ep=end_ep,
+        allowed_task_ids=allowed_task_ids,
+    )
 
     if not tasks:
         raise FileNotFoundError(
             f"No calibration or test files found in any task subdirectory of {input_dir}."
         )
-
-    output_root = Path(cfg.output_dir)
 
     # Compute total number of files for the progress bar
     total_num_files = sum(len(t.calib_files) + len(t.test_files) for t in tasks)
@@ -172,6 +238,25 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
         desc="Scoring rollouts",
         unit="file",
     ):
+        ep_idx = get_episode_idx(pkl_path)
+
+        existing_eps = scored_index.get((task_name, split), set())
+        split_cap = get_split_cap(cfg, split)
+
+        if resume_from_output and ep_idx in existing_eps:
+            logging.info(
+                f"Skipping already-scored [task={task_name} | split={split}] {pkl_path.name}"
+            )
+            continue
+
+        if split_cap is not None and ep_idx not in existing_eps and len(existing_eps) >= split_cap:
+            logging.info(
+                f"Skipping due to cap [task={task_name} | split={split}]: "
+                f"already have {len(existing_eps)}/{split_cap} episodes in output. "
+                f"Not adding {pkl_path.name}."
+            )
+            continue
+
         logging.info(f"Scoring [task={task_name} | split={split}] {pkl_path.name}")
 
         with pkl_path.open("rb") as f:
@@ -186,7 +271,6 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
         with torch.no_grad():
             fiper_rollout_scorer.score_rollout_data(rollout_data=rollout_data)
 
-        # NEW: mirror task structure in the output directory
         task_output_root = output_root / task_name
         task_output_rollouts_dir = task_output_root / "rollouts"
         output_calib_dir = task_output_rollouts_dir / "calibration"
@@ -202,6 +286,9 @@ def main(cfg: FiperRolloutScoringPipelineConfig):
             output_dir=output_dir_for_split,
             episode_metadata=episode_metadata,
         )
+
+        if need_scored_index:
+            scored_index.setdefault((task_name, split), set()).add(ep_idx)
 
     logging.info("Done scoring all calibration/test rollouts for all tasks.")
 

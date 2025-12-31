@@ -1,4 +1,4 @@
-input_dir:
+input_dir: outputs/fiper_rollout_recording/smolvla/libero_10
 
 dataset:
   repo_id: HuggingFaceVLA/libero
@@ -9,16 +9,34 @@ dataset:
     libero_10: [0, 4, 7, 8, 9]
   }
 
+env:
+  type: libero
+  task: libero_10
+  task_ids: [0, 4, 7, 8, 9]
+
 fiper_rollout_scorer:
-  terminal_vel_eval_times: [0, 0.05, 0.1, 0.15, 0.2, 0.25]
+  scores_by_method:
+    bayesian_laplace: [mode_distance, inter_vel_diff]
+    bayesian_ensemble: [mode_distance, inter_vel_diff]
+    composed: []
+    composed_bayesian_laplace: []
+    composed_bayesian_ensemble: []
+  
+  terminal_vel_eval_times: [0]
   ensemble_model_paths: [
-    outputs/train/smolvla/libero_finetuned_02/checkpoints/010000/pretrained_model,
-    outputs/train/smolvla/libero_finetuned_03/checkpoints/010000/pretrained_model,
-    outputs/train/smolvla/libero_finetuned_04/checkpoints/010000/pretrained_model,
+    outputs/train/smolvla/libero_finetuned_02/checkpoints/015000/pretrained_model,
+    outputs/train/smolvla/libero_finetuned_03/checkpoints/015000/pretrained_model,
+    outputs/train/smolvla/libero_finetuned_04/checkpoints/015000/pretrained_model,
+    outputs/train/smolvla/libero_finetuned_05/checkpoints/015000/pretrained_model,
+    outputs/train/smolvla/libero_finetuned_06/checkpoints/015000/pretrained_model,
   ]
   laplace_config:
     scopes: [action_out_proj]
     calib_fraction: 1.0
-    num_samples: 3
+    num_samples: 5
 
-# python src/lerobot/scripts/fiper_data_generation/record_fiper_rollout.py --config=configs/smolvla/record_fiper_rollout/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model
+output_dir: outputs/fiper_rollout_scoring/smolvla/libero_10_5_scorers
+
+seed: 15
+
+# python src/lerobot/scripts/fiper_data_generation/score_fiper_rollout.py --config=configs/smolvla/score_fiper_rollout/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/015000/pretrained_model

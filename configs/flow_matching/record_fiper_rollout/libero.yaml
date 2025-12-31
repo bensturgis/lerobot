@@ -10,7 +10,8 @@ fiper_rollout_recorder:
 n_calib_episodes: 50
 n_test_episodes: 150
 
-seed: 28
-job_name: flow_matching_libero
+seed: 31
+output_dir: outputs/fiper_rollout_recording/flow_matching
+# job_name: flow_matching_libero
 
 # python src/lerobot/scripts/fiper_data_generation/record_fiper_rollout.py --config=configs/flow_matching/record_fiper_rollout/libero.yaml --policy.path=outputs/train/flow_matching/libero_01/checkpoints/050000/pretrained_model

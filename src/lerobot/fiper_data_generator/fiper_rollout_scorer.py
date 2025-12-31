@@ -233,7 +233,13 @@ class FiperRolloutScorer:
         fiper_step_data: dict[str, Any] = {}
         fiper_step_data["obs_embedding"] = rollout_step_data["obs_embedding"]
 
-        observation = {k: v.to(self.device, self.dtype) for k, v in rollout_step_data["observation"].items()}
+        observation = {}
+        for k, v in rollout_step_data["observation"].items():
+            if torch.is_tensor(v):
+                observation[k] = v.to(self.device)
+            else:
+                observation[k] = v
+        
         ode_states = rollout_step_data["ode_states"].to(self.device, self.dtype)
         velocities = rollout_step_data["velocities"].to(self.device, self.dtype)
         action_candidates = ode_states[-1]
@@ -599,6 +605,9 @@ class FiperRolloutScorer:
         if "libero" in task and task_id is not None:
             filename += f"_task{task_id:02d}"
         output_path = output_dir / (filename + ".pkl")
+
+        if output_path.exists():
+            raise FileExistsError(f"File {output_path} already exists. Not overwriting.")
 
         with output_path.open("wb") as f:
             pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)

@@ -1,7 +1,7 @@
 import copy
 import logging
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 import torch
 from laplace import Laplace
@@ -85,8 +85,8 @@ def sample_from_posterior(
     laplace_posterior: BaseLaplace,
     uncertainty_adapter: BaseFlowMatchingAdapter,
     num_samples: int = 1,
-    generator: Optional[torch.Generator] = None,
-) -> List[BaseFlowMatchingAdapter]:
+    generator: torch.Generator | None = None,
+) -> list[BaseFlowMatchingAdapter]:
     """
     Draw one weight sample from a fitted Laplace posterior and return a cloned
     uncertainty adapter whose underlying model uses those sampled weights.
@@ -106,7 +106,7 @@ def sample_from_posterior(
         generator=generator
     )
 
-    laplace_adapters: List[BaseFlowMatchingAdapter] = []
+    laplace_adapters: list[BaseFlowMatchingAdapter] = []
     for i in range(num_samples):
         # Copy the MAP model so we never mutate the original
         laplace_adapter = copy.deepcopy(uncertainty_adapter)

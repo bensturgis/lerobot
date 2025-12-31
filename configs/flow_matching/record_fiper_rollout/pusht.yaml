@@ -9,6 +9,6 @@ n_calib_episodes: 70
 n_test_episodes: 150
 
 seed: 27
-job_name: flow_matching_pusht
+output_dir: outputs/fiper_rollout_recording/flow_matching
 
 # python src/lerobot/scripts/fiper_data_generation/record_fiper_rollout.py --config=configs/flow_matching/record_fiper_rollout/pusht.yaml --policy.path=outputs/train/flow_matching/pusht_01/checkpoints/200000/pretrained_model

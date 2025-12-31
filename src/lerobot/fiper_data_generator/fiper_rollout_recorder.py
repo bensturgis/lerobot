@@ -80,7 +80,12 @@ class FiperRolloutRecorder:
         step_data: dict[str, Any] = {}
 
         # Store the observation
-        step_data["observation"] = {k: v.detach().cpu() for k, v in observation.items()}
+        step_data["observation"] = {}
+        for k, v in observation.items():
+            if torch.is_tensor(v):
+                step_data["observation"][k] = v.detach().cpu()
+            else:
+                step_data["observation"][k] = v
 
         conditioning = self.flow_matching_adapter.prepare_conditioning(observation, self.config.num_uncertainty_sequences)
         velocity_fn = self.flow_matching_adapter.make_velocity_fn(conditioning=conditioning)

@@ -12,9 +12,9 @@ policy:
   device: cuda
 
 laplace:
-  scopes: [velocity_last]
+  scopes: [velocity_last, rgb_last]
   calib_fraction: 1.0
 
-seed: 91
+seed: 1111
 
-# python src/lerobot/scripts/uncertainty/fit_laplace_posterior.py --config=configs/flow_matching/laplace_fitting/libero.yaml --policy.path=outputs/train/flow_matching/libero_01/checkpoints/050000/pretrained_model
+# python src/lerobot/scripts/uncertainty/fit_laplace_posterior.py --config=configs/flow_matching/laplace_fitting/libero.yaml --policy.path=outputs/train/flow_matching/libero_02/checkpoints/050000/pretrained_model

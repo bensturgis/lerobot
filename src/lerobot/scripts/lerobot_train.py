@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-import math
 import time
 from contextlib import nullcontext
 from pprint import pformat
@@ -28,7 +27,7 @@ from torch.optim import Optimizer
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.compute_stats import compute_stats_for_episodes
-from lerobot.datasets.factory import make_dataset, make_train_val_split
+from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
 from lerobot.datasets.utils import cycle, filter_libero_episodes
 from lerobot.envs.factory import make_env, make_env_pre_post_processors

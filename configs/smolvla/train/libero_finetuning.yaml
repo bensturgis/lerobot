@@ -10,7 +10,7 @@ dataset:
 policy:
   type: smolvla
   device: cuda
-  repo_id: bensturgis/smolvla-libero-finetuned-04
+  repo_id: bensturgis/smolvla-libero-finetuned-06
 
 env:
   type: libero
@@ -21,15 +21,15 @@ eval:
   batch_size: 1
   n_episodes: 10
 
-output_dir: outputs/train/smolvla/libero_finetuned_04
+output_dir: outputs/train/smolvla/libero_finetuned_06
 steps: 50000
 batch_size: 48
 eval_freq: 5000
 save_freq: 5000
 enable_val_loss: False
-seed: 2212
+seed: 8142
 wandb:
   enable: true
-job_name: smolvla_libero_finetuned_04
+job_name: smolvla_libero_finetuned_06
 
-# python src/lerobot/scripts/lerobot_train.py --config=configs/smolvla/train/libero_finetuning.yaml --policy.path=outputs/train/smolvla/libero_base/checkpoints/090000/pretrained_model --policy.repo_id=bensturgis/smolvla-libero-finetuned-04
+# python src/lerobot/scripts/lerobot_train.py --config=configs/smolvla/train/libero_finetuning.yaml --policy.path=outputs/train/smolvla/libero_base/checkpoints/090000/pretrained_model --policy.repo_id=bensturgis/smolvla-libero-finetuned-06

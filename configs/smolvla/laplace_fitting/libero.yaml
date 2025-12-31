@@ -15,6 +15,6 @@ laplace:
   scopes: [action_out_proj]
   calib_fraction: 1.0
 
-seed: 91
+seed: 78
 
 # python src/lerobot/scripts/uncertainty/fit_laplace_posterior.py --config=configs/smolvla/laplace_fitting/libero.yaml --policy.path=outputs/train/smolvla/libero_finetuned_01/checkpoints/015000/pretrained_model
