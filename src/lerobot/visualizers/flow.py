@@ -134,10 +134,10 @@ class FlowVisualizer(FlowMatchingVisualizer):
     def _render_action_steps(
         self,
         path_positions: Tensor,
-        vector_fields: Dict[str, Tensor],
+        vector_fields: dict[str, Tensor],
         eval_times: Tensor,
         ode_states: Tensor,
-        final_action_overlays: List[Dict[str, Any]],                # list of dicts: {name, tensor, color, scale, zorder}
+        final_action_overlays: list[dict[str, Any]],                # list of dicts: {name, tensor, color, scale, zorder}
     ):
         """Render the flow plots including overlaid actions."""
         # Compute global axis limits to create plots of equal size
@@ -180,11 +180,11 @@ class FlowVisualizer(FlowMatchingVisualizer):
                     action_dims=self.action_dims,
                     colors=[overlay["color"]],
                     zorder=overlay.get("zorder", 3),
-                    scale=overlay.get("scale", 30),
+                    scale=60,
                 )
 
             # Draw the legend
-            fig.axes[0].legend()
+            # fig.axes[0].legend()
 
             # Show plot if requested
             if self.show:
@@ -200,7 +200,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
             self._create_gif()
 
     def visualize(
-        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: dict[str, Tensor], generator: torch.Generator | None = None, **kwargs
     ):
         """
         Visualize flow trajectories for specified action steps and dimensions.
@@ -293,6 +293,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         generator: Optional[torch.Generator] = None
     ):
         device = self.model.device
+        dtype = self.model.dtype
 
         self.run_dir = self._update_run_dir()
 
@@ -310,6 +311,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         velocity_eval_times, sampling_time_grid = self._make_sampling_grid(
             vel_eval_times=velocity_eval_times,
             device=device,
+            dtype=dtype,
         )
 
         # Sample paths from the ODE
@@ -383,7 +385,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         self,
         fig: Figure,
         path_positions: torch.Tensor,      # (num_paths, T, horizon, d) with d=2 or 3
-        vector_fields: Dict[str, torch.Tensor],
+        vector_fields: dict[str, torch.Tensor],
         time_grid: torch.Tensor,
         action_step: int,
     ) -> plt.Figure:
@@ -415,7 +417,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 if dim == 2:
                     quiv = ax.quiver(
                         x, y, vel_components[0], vel_components[1],
-                        angles='xy', scale_units='xy', width=0.004,
+                        angles='xy', scale_units='xy', width=0.1,
                         color=colour, label=label
                     )
                 else:
@@ -434,7 +436,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 # Presentation: width=0.006
                 quiv = ax.quiver(
                     x, y, vel_components[0], vel_components[1],
-                    time_norm, angles='xy', scale_units='xy', width=0.004,
+                    time_norm, angles='xy', scale_units='xy', width=0.007,
                     cmap='viridis', scale=1.0
                 )
             else:
@@ -446,9 +448,9 @@ class FlowVisualizer(FlowMatchingVisualizer):
                     normalize=False, color=colors, label=None
                 )
             # cbar.ax.set_ylabel('Time', fontsize=32, labelpad=12)
+            # cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
+            # cbar.ax.set_ylabel('Time', fontsize=32)
             # cbar.ax.tick_params(labelsize=28)
-            cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
-            cbar.ax.set_ylabel('Time', fontsize=12)
 
         # Axis labels
         dims = self.action_dims[:dim]
@@ -456,8 +458,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
             labels = [self.action_dim_names[d] for d in dims]
         else:
             labels = [f"Action dimension {d}" for d in dims]
-        ax.set_xlabel(labels[0], fontsize=14)
-        ax.set_ylabel(labels[1], fontsize=14)
+        # ax.set_xlabel(labels[0], fontsize=14)
+        # ax.set_ylabel(labels[1], fontsize=14)
         if dim == 3:
             ax.set_zlabel(labels[2], fontsize=14, labelpad=8)
 
@@ -468,10 +470,10 @@ class FlowVisualizer(FlowMatchingVisualizer):
         ax.set_aspect('equal')
 
         # Title
-        ax.set_title(
-            f"Flows of Action Step {action_step+1} (Horizon: {self.model.horizon})",
-            fontsize=16
-        )
+        # ax.set_title(
+        #     f"Flows of Action Step {action_step+1} (Horizon: {self.model.horizon})",
+        #     fontsize=16
+        # )
         # Presentation
         # ax.tick_params(
         #     axis='both',
@@ -479,8 +481,13 @@ class FlowVisualizer(FlowMatchingVisualizer):
         #     labelbottom=False,
         #     labelleft=False
         # )
-        ax.tick_params(axis='both', labelsize=12)
-        ax.grid(True)
+        # ax.tick_params(axis='both', labelsize=32)
+        ax.tick_params(
+            axis="both", which="both",
+            bottom=False, top=False, left=False, right=False,  # hide tick marks
+            labelbottom=False, labelleft=False                   # hide tick labels
+        )
+        ax.grid(False)
         plt.tight_layout()
 
         if was_interactive:

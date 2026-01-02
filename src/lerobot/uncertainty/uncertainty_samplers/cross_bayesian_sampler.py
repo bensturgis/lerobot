@@ -1,5 +1,3 @@
-from typing import Dict, List, Optional, Tuple
-
 import torch
 from torch import Tensor
 
@@ -62,16 +60,16 @@ class CrossBayesianSampler(UncertaintySampler):
             raise ValueError("Laplace posterior is required for scorer_type='laplace'.")
         elif config.scorer_type not in {"ensemble", "laplace"}:
             raise ValueError(f"Unknown scorer_type: {config.scorer_type!r}")
-        self.scorer_models: List[BaseFlowMatchingAdapter] = []
+        self.scorer_models: list[BaseFlowMatchingAdapter] = []
 
         # Sampler-specific settings
         self.config = config
 
     def conditional_sample_with_uncertainty(
         self,
-        observation: Dict[str, Tensor],
-        generator: Optional[torch.Generator] = None,
-    ) -> Tuple[Tensor, float]:
+        observation: dict[str, Tensor],
+        generator: torch.Generator | None = None,
+    ) -> tuple[Tensor, float]:
         """
         Generates action sequences using a sampler flow matching model, then scores these
         samples under a Laplace-sampled or an ensemble model, and finally averages these scores
@@ -120,7 +118,7 @@ class CrossBayesianSampler(UncertaintySampler):
             self.scorer_models = self.ensemble_models
 
         # Compute uncertainty scores from each scorer model
-        scorer_uncertanty_means: List[float] = []
+        scorer_uncertanty_means: list[float] = []
         for scorer in self.scorer_models:
             # Build the conditioned velocity function of the scorer
             scorer_conditioning = scorer.prepare_conditioning(observation, self.num_action_samples)

@@ -45,15 +45,15 @@ def next_available_name(base_dir: Path, file_name_base: str, ext: str) -> str:
 
 def add_actions(
     ax: Axes,
-    action_data: Dict[str, Tensor],
+    action_data: dict[str, Tensor],
     action_step: int,
     action_dims: int,
     colors: Iterable[str] = [],
     zorder: int = 3,
-    scale: float = 10.0,
+    scale: float = 30.0,
     marker: str = "o",
-    step_label: Optional[str] = None,
-    text_kwargs: Optional[Dict[str, Any]] = None,
+    step_label: str | None = None,
+    text_kwargs: dict[str, Any] | None = None,
 ) -> Axes:
     """
     Overlay action samples on flow matching visualizations.

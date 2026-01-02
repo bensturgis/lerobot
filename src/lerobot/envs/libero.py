@@ -155,6 +155,8 @@ class LiberoEnv(gym.Env):
         self.num_steps_wait = num_steps_wait
         self.episode_index = episode_index
         self.episode_length = episode_length
+        self._namespace = "gym_libero"
+
         # Load once and keep
         self._init_states = get_task_init_states(task_suite, self.task_id) if self.init_states else None
         self._init_state_id = self.episode_index  # tie each sub-env to a fixed init state

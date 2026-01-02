@@ -15,7 +15,7 @@ vis:
   ]
 
 vector_field:
-  action_dims: [4, 5]
+  action_dims: [1, 2]
   # action_steps: [5, 10, 15, 20, 25, 30, 35, 40, 45, 49]
   grid_size: 20
   min_action: -1
@@ -29,14 +29,16 @@ flows:
 cross_bayesian_sampler:
   scorer_type: ensemble
   ensemble_model_paths: [
-    outputs/train/smolvla/libero_finetuned_01/checkpoints/010000/pretrained_model
+    outputs/train/smolvla/libero_finetuned_02/checkpoints/015000/pretrained_model
   ]
   laplace_config:
     scopes: [action_out_proj]
-  num_action_samples: 25
+    calib_fraction: 1.0
+    num_samples: 1
+  num_action_samples: 15
   scoring_metric:
     metric_type: mode_distance
-    velocity_eval_times: [0.0]
+    velocity_eval_times: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9]
 
 show: False
 seed: 58

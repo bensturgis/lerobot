@@ -28,8 +28,7 @@ from tqdm import trange
 
 from lerobot.configs import parser
 from lerobot.configs.visualize import VisualizePipelineConfig
-from lerobot.constants import ACTION
-from lerobot.envs.factory import make_single_env
+from lerobot.envs.factory import make_env_pre_post_processors, make_single_env
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.factory import (
     make_flow_matching_adapter_from_policy,
@@ -37,6 +36,7 @@ from lerobot.policies.factory import (
     make_pre_post_processors,
 )
 from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot.utils.constants import ACTION
 from lerobot.utils.io_utils import get_task_dir, write_video
 from lerobot.utils.live_window import LiveWindow
 from lerobot.utils.random_utils import set_seed
@@ -85,6 +85,9 @@ def main(config: VisualizePipelineConfig):
         # The inference device is automatically set to match the detected hardware, overriding any previous device settings from training to ensure compatibility.
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
+
+    # Create environment-specific preprocessor and postprocessor (e.g., for LIBERO environments)
+    env_preprocessor, env_postprocessor = make_env_pre_post_processors(env_cfg=config.env, policy_cfg=config.policy)
 
     flow_matching_adapter = make_flow_matching_adapter_from_policy(policy=policy)
 
@@ -176,10 +179,7 @@ def main(config: VisualizePipelineConfig):
                 )
 
             # Roll through one episode
-            if env.spec is None:
-                max_episode_steps = env._max_episode_steps
-            else:
-                max_episode_steps = env.spec.max_episode_steps
+            max_episode_steps = env._max_episode_steps if env.spec is None else env.spec.max_episode_steps
             max_vis_steps = (
                 max_episode_steps if config.vis.max_steps is None else min(max_episode_steps, config.vis.max_steps)
             )
@@ -196,6 +196,10 @@ def main(config: VisualizePipelineConfig):
 
                 # Infer "task" from attributes of environments.
                 observation = add_envs_task(env, observation)
+
+                # Apply environment-specific preprocessing (e.g., LiberoProcessorStep for LIBERO)
+                observation = env_preprocessor(observation)
+
                 observation = preprocessor(observation)
 
                 # Decide whether a new sequence will be generated
@@ -204,6 +208,10 @@ def main(config: VisualizePipelineConfig):
                 with torch.no_grad():
                     action = policy.select_action(observation)
                 action = postprocessor(action)
+
+                action_transition = {"action": action}
+                action_transition = env_postprocessor(action_transition)
+                action = action_transition["action"]
 
                 if new_action_gen and (config.vis.start_step is None or step_idx >= config.vis.start_step):
                     for k in policy._queues:

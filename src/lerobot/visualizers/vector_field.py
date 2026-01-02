@@ -57,7 +57,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         self.vis_type = "vector_field"
 
     def visualize(
-        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: dict[str, Tensor], generator: torch.Generator | None = None, **kwargs
     ):
         device = self.model.device
         dtype = self.model.dtype
@@ -96,7 +96,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             rtol=self.model.ode_solver_config["rtol"],
         )
 
-        action_data_colors: List[str] = []
+        action_data_colors: list[str] = []
         if visualize_actions and not action_data:
             action_data["action_samples"] = action_samples[1:]
             action_data_colors = ["red"]
@@ -175,9 +175,10 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     action_dims=self.action_dims,
                     colors=action_data_colors,
+                    scale=60,
                 )
 
-            fig.axes[0].legend()
+            # fig.axes[0].legend()
 
             if self.show:
                 plt.show(block=True)
@@ -191,7 +192,7 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             self._create_gif()
 
     def visualize_vector_field_over_time(
-        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: dict[str, Tensor], generator: torch.Generator | None = None, **kwargs
     ):
         """
         Visualize the 2D action vector field produced by a flow matching policy at a given time.
@@ -482,47 +483,47 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         ax.set_aspect('equal')
 
         # Colorbar and title
-        cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
+        # cbar = fig.colorbar(quiv, ax=ax, shrink=0.95)
         # Presentation: fontsize=32, labelpad=12
-        cbar.ax.set_ylabel('Velocity Norm', fontsize=12)
+        # cbar.ax.set_ylabel('Velocity Norm', fontsize=12)
         # Presentation
         # cbar.ax.tick_params(labelsize=28)
         # cbar.set_ticks(np.arange(0.0, 2.01, 0.5))
 
         # Title
-        ax.set_title(
-            f"Vector Field of Action Step {action_step+1} at t={time:.2f}",
-            fontsize=16,
-            pad=12
-        )
+        # ax.set_title(
+        #     f"Vector Field of Action Step {action_step+1} at t={time:.2f}",
+        #     fontsize=16,
+        #     pad=12
+        # )
 
         # Axis labels
-        if self.action_dim_names:
-            x_label = self.action_dim_names[self.action_dims[0]]
-            y_label = self.action_dim_names[self.action_dims[1]]
-        else:
-            x_label = f"Action dimension {self.action_dims[0]}"
-            y_label = f"Action dimension {self.action_dims[1]}"
+        # if self.action_dim_names:
+        #     x_label = self.action_dim_names[self.action_dims[0]]
+        #     y_label = self.action_dim_names[self.action_dims[1]]
+        # else:
+        #     x_label = f"Action dimension {self.action_dims[0]}"
+        #     y_label = f"Action dimension {self.action_dims[1]}"
         # Presentation: fontsize=34, labelpad=4
-        ax.set_xlabel(x_label, fontsize=14)
-        ax.set_ylabel(y_label, fontsize=14)
+        # ax.set_xlabel(x_label, fontsize=14)
+        # ax.set_ylabel(y_label, fontsize=14)
 
-        if uncertainty:
-            ax.text(
-                0.02, 0.98,
-                f"Uncertainty: {uncertainty:.2f}",
-                transform=ax.transAxes,
-                fontsize=12,
-                verticalalignment="top",
-                bbox={
-                    "boxstyle": "round,pad=0.3",
-                    "facecolor": "white",
-                    "edgecolor": "none",
-                    "alpha": 0.8
-                },
-            )
+        # if uncertainty:
+        #     ax.text(
+        #         0.02, 0.98,
+        #         f"Uncertainty: {uncertainty:.2f}",
+        #         transform=ax.transAxes,
+        #         fontsize=12,
+        #         verticalalignment="top",
+        #         bbox={
+        #             "boxstyle": "round,pad=0.3",
+        #             "facecolor": "white",
+        #             "edgecolor": "none",
+        #             "alpha": 0.8
+        #         },
+        #     )
 
-        ax.tick_params(axis='both', labelsize=12)
+        # ax.tick_params(axis='both', labelsize=12)
         # Presentation
         # ax.tick_params(
         #     axis='both',
@@ -530,7 +531,12 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
         #     labelbottom=False,
         #     labelleft=False
         # )
-        ax.grid(True)
+        ax.tick_params(
+            axis="both", which="both",
+            bottom=False, top=False, left=False, right=False,
+            labelbottom=False, labelleft=False
+        )
+        ax.grid(False)
         plt.tight_layout()
 
         if was_interactive:
@@ -550,5 +556,5 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                 "`action_step` must be provided to get filename of vector field figure."
             )
         action_step = kwargs["action_step"]
-        
+
         return f"vector_field_action_{action_step+1:02d}_time_{int(time * 100):03d}.png"

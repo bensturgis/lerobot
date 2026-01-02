@@ -392,8 +392,8 @@ def euler_integrate(
         - The ODE states evaluated at each time in `time_grid`.
         - The velocities v(t_i, x_i) at these ODE states and evaluation times.
     """
-    states: List[Tensor] = []
-    vels: List[Tensor] = []
+    states: list[Tensor] = []
+    vels: list[Tensor] = []
 
     x_t = x_0
     for i in range(len(time_grid) - 1):

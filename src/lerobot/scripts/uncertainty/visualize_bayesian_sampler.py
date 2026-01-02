@@ -17,7 +17,6 @@ python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py \
 import logging
 import time
 from pathlib import Path
-from typing import Dict
 
 import gymnasium as gym
 import numpy as np
@@ -27,8 +26,7 @@ from tqdm import tqdm, trange
 
 from lerobot.configs import parser
 from lerobot.configs.visualize_bayesian_sampler import VisualizeBayesianSamplerPipelineConfig
-from lerobot.constants import ACTION
-from lerobot.envs.factory import make_single_env
+from lerobot.envs.factory import make_env_pre_post_processors, make_single_env
 from lerobot.envs.utils import add_envs_task, preprocess_observation
 from lerobot.policies.common.flow_matching.adapter import BaseFlowMatchingAdapter
 from lerobot.policies.common.flow_matching.ode_solver import ODESolver
@@ -44,6 +42,7 @@ from lerobot.uncertainty.uncertainty_samplers.uncertainty_sampler import Uncerta
 from lerobot.uncertainty.uncertainty_scoring.scorer_artifacts import (
     build_scorer_artifacts_for_uncertainty_sampler,
 )
+from lerobot.utils.constants import ACTION
 from lerobot.utils.io_utils import get_task_dir, write_video
 from lerobot.utils.live_window import LiveWindow
 from lerobot.utils.random_utils import set_seed
@@ -97,6 +96,9 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
         # The inference device is automatically set to match the detected hardware, overriding any previous device settings from training to ensure compatibility.
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
+
+    # Create environment-specific preprocessor and postprocessor (e.g., for LIBERO environments)
+    env_preprocessor, env_postprocessor = make_env_pre_post_processors(env_cfg=config.env, policy_cfg=config.policy)
 
     # Prepare scorer artifacts for cross-bayesian uncertainty sampler
     scorer_artifacts = build_scorer_artifacts_for_uncertainty_sampler(
@@ -189,13 +191,10 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
             )
 
             # Initialize the dictionary of actions to visualize in the vector field plot
-            action_data: Dict[str, Tensor] = {}
+            action_data: dict[str, Tensor] = {}
 
             # Roll through one episode
-            if env.spec is None:
-                max_episode_steps = env._max_episode_steps
-            else:
-                max_episode_steps = env.spec.max_episode_steps
+            max_episode_steps = env._max_episode_steps if env.spec is None else env.spec.max_episode_steps
             max_vis_steps = (
                 max_episode_steps if config.vis.max_steps is None else min(max_episode_steps, config.vis.max_steps)
             )
@@ -213,6 +212,10 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
 
                 # Infer "task" from attributes of environments.
                 observation = add_envs_task(env, observation)
+
+                # Apply environment-specific preprocessing (e.g., LiberoProcessorStep for LIBERO)
+                observation = env_preprocessor(observation)
+
                 observation = preprocessor(observation)
 
                 # Decide whether a new sequence will be generated
@@ -226,6 +229,10 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                     action = policy.select_action(observation)
                 action = postprocessor(action)
 
+                action_transition = {"action": action}
+                action_transition = env_postprocessor(action_transition)
+                action = action_transition["action"]
+
                 if new_action_gen and (config.vis.start_step is None or step_idx >= config.vis.start_step):
                     # Clear action data dictionary
                     action_data.clear()
@@ -235,9 +242,10 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                             observation[k] = torch.stack(list(policy._queues[k]), dim=1)
 
                     # Sample actions and get their uncertainties based on the scorer model
-                    _, uncertainty = cross_bayesian_sampler.conditional_sample_with_uncertainty(
-                        observation=observation, generator=generator
-                    )
+                    with torch.no_grad():
+                        _, uncertainty = cross_bayesian_sampler.conditional_sample_with_uncertainty(
+                            observation=observation, generator=generator
+                        )
 
                     # Extract the current scorer model
                     scorer_model: BaseFlowMatchingAdapter = cross_bayesian_sampler.scorer_models[0]
@@ -259,12 +267,12 @@ def main(config: VisualizeBayesianSamplerPipelineConfig):
                     scorer_conditioning = scorer_model.prepare_conditioning(observation, num_samples)
                     scorer_velocity_fn = scorer_model.make_velocity_fn(conditioning=scorer_conditioning)
 
-                    if config.cross_bayesian_sampler.scoring_metric == "inter_vel_diff":
+                    if config.cross_bayesian_sampler.scoring_metric.metric_type == "inter_vel_diff":
                         flow_visualizer.visualize_velocity_difference(
                             sampler_velocity_fn=sampler_velocity_fn,
                             scorer_velocity_fn=scorer_velocity_fn,
                             velocity_eval_times=torch.tensor(
-                                config.cross_bayesian_sampler.velocity_eval_times,
+                                config.cross_bayesian_sampler.scoring_metric.velocity_eval_times,
                                 device=device
                             )
                         )

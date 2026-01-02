@@ -53,7 +53,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         self.vis_type = "action_seq"
 
     def visualize(
-        self, observation: Dict[str, Tensor], generator: Optional[torch.Generator] = None, **kwargs
+        self, observation: dict[str, Tensor], generator: torch.Generator | None = None, **kwargs
     ):
         """
         Visualize a batch of action sequences onto the current frame.
@@ -103,10 +103,7 @@ class ActionSeqVisualizer(FlowMatchingVisualizer):
         actions = self.postprocessor(actions)
 
         # Plotting of action sequences depends on environment
-        if env.spec is None:
-            env_namespace = env._namespace
-        else:
-            env_namespace = env.spec.namespace
+        env_namespace = env._namespace if env.spec is None else env.spec.namespace
         if env_namespace == "gym_aloha":
             fig = self._create_aloha_action_seq_image(env=env, actions=actions.cpu())
         elif env_namespace == "gym_pusht":

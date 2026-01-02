@@ -239,7 +239,7 @@ class FiperRolloutScorer:
                 observation[k] = v.to(self.device)
             else:
                 observation[k] = v
-        
+
         ode_states = rollout_step_data["ode_states"].to(self.device, self.dtype)
         velocities = rollout_step_data["velocities"].to(self.device, self.dtype)
         action_candidates = ode_states[-1]
