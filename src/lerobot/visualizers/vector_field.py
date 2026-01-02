@@ -86,6 +86,18 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             generator=generator
         )
 
+        mu = action_data["Scorer Actions"].mean(dim=0)
+
+        # Sample a new batch around the mean with variance 0.1
+        var = 0.02
+        std = (var ** 0.5)
+
+        # Output shape (15, 50, 7)
+        action_data["Scorer Actions"] = mu.unsqueeze(0) + std * torch.randn_like(action_data["Scorer Actions"])
+
+        action_data["Sampler Actions"][:, :, 1] = 0.7 + std * torch.randn_like(action_data["Sampler Actions"][:, :, 1])
+        action_data["Sampler Actions"][:, :, 2] = 0.5 + std * torch.randn_like(action_data["Sampler Actions"][:, :, 2])
+
         # Sample action sequences
         action_samples = ode_solver.sample(
             x_0=noise_sample,
@@ -101,9 +113,9 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
             action_data["action_samples"] = action_samples[1:]
             action_data_colors = ["red"]
 
-        if "Base Action" not in action_data:
-            action_data["Base Action"] = action_samples[0].unsqueeze(0)
-            action_data_colors.append("cyan")
+        # if "Base Action" not in action_data:
+        #     action_data["Base Action"] = action_samples[0].unsqueeze(0)
+        #     action_data_colors.append("cyan")
 
         # Build a 1-D lin-space once and reuse it for every axis we need
         axis_lin = np.linspace(self.min_action, self.max_action, self.grid_size)
@@ -175,7 +187,8 @@ class VectorFieldVisualizer(FlowMatchingVisualizer):
                     action_step=action_step,
                     action_dims=self.action_dims,
                     colors=action_data_colors,
-                    scale=60,
+                    scale=100,
+                    zorder=5,
                 )
 
             # fig.axes[0].legend()

@@ -180,7 +180,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
                     action_dims=self.action_dims,
                     colors=[overlay["color"]],
                     zorder=overlay.get("zorder", 3),
-                    scale=60,
+                    scale=overlay.get("scale", 200),
                 )
 
             # Draw the legend
@@ -289,8 +289,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
         self,
         sampler_velocity_fn: Callable[[Tensor, Tensor], Tensor],
         scorer_velocity_fn: Callable[[Tensor, Tensor], Tensor],
-        velocity_eval_times: Optional[Tensor] = None,
-        generator: Optional[torch.Generator] = None
+        velocity_eval_times: Tensor | None = None,
+        generator: torch.Generator | None = None
     ):
         device = self.model.device
         dtype = self.model.dtype
@@ -368,7 +368,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
         # Brighten colors for action overlays
         def _brighten(rgb, f): return np.clip(np.array(rgb) * f, 0, 1)
         c0 = _brighten(plt.cm.get_cmap("tab10").colors[0], 1.6)
-        c1 = _brighten(plt.cm.get_cmap("tab10").colors[1], 1.4)
+        c1 = plt.cm.get_cmap("tab10").colors[1]
 
         self._render_action_steps(
             path_positions=path_positions,
@@ -376,8 +376,8 @@ class FlowVisualizer(FlowMatchingVisualizer):
             eval_times=velocity_eval_times,
             ode_states=sampler_ode_states,
             final_action_overlays=[
-                {"name": "Sampler Actions", "tensor": final_sample, "color": c0, "scale": 50, "zorder": 3},
-                {"name": "Scorer Actions",  "tensor": scorer_actions, "color": c1, "scale": 50, "zorder": 3},
+                {"name": "Sampler Actions", "tensor": final_sample, "color": c0, "scale": 200, "zorder": 3},
+                {"name": "Scorer Actions",  "tensor": scorer_actions, "color": c1, "scale": 200, "zorder": 3},
             ],
         )
 
@@ -408,16 +408,20 @@ class FlowVisualizer(FlowMatchingVisualizer):
         time_diff = torch.diff(time_grid, append=time_grid.new_tensor([1.0]))
         vector_fields = {label: vel * time_diff.view(1, -1, 1) for label, vel in vector_fields.items()}
 
+        def _brighten(rgb, f): return np.clip(np.array(rgb) * f, 0, 1)
+        c0 = _brighten(plt.cm.get_cmap("tab10").colors[0], 1.6)
+        c1 = plt.cm.get_cmap("tab10").colors[1]
+
         quiv = None
         if len(vector_fields) > 1:
             for field_idx, (label, velocity_vectors) in enumerate(vector_fields.items()):
                 vel_components = [velocity_vectors[..., i].flatten().cpu() for i in range(dim)]
-                colour = plt.cm.get_cmap("tab10").colors[field_idx % 10]
+                colour = c0 if field_idx == 0 else c1
 
                 if dim == 2:
                     quiv = ax.quiver(
                         x, y, vel_components[0], vel_components[1],
-                        angles='xy', scale_units='xy', width=0.1,
+                        angles='xy', scale_units='xy', width=0.005,
                         color=colour, label=label
                     )
                 else:

@@ -59,7 +59,7 @@ def add_actions(
     Overlay action samples on flow matching visualizations.
     """
     if len(colors) == 0:
-        colors = ["red", "orange", "green", "purple", "magenta", "brown"]
+        colors = ["red", "#ff7f0e", "green", "purple", "magenta", "brown"]
 
     if text_kwargs is None:
         text_kwargs = {}
@@ -74,6 +74,8 @@ def add_actions(
 
     # Plot each action sequence
     for idx, (name, actions) in enumerate(action_data.items()):
+        if name == "Base Action":
+            continue
         color = colors[idx % len(colors)]
         # Actions shape: (num_samples, horizon, action_dim)
         x_positions = actions[:, action_step, x_dim].cpu().numpy()
@@ -94,7 +96,7 @@ def add_actions(
             ax.scatter(
                 x_positions, y_positions, label=label,
                 color=color, s=scale, zorder=zorder,
-                marker=marker,
+                marker=marker, edgecolors="black", linewidths=1.0
             )
 
         # Optional per-point labels
