@@ -1,5 +1,7 @@
 env:
   type: pusht
+  ood:
+    enable: true
 
 policy:
   type: flow_matching
@@ -13,14 +15,22 @@ vector_field:
   action_dims: [0, 1]
   action_steps: [15]
 
+flows:
+  num_paths: 5
+  action_dims: [0, 1]
+  axis_limits: [[-1, 1], [-1, 1]]
+
 cross_bayesian_sampler:
-  ensemble_model_path: outputs/train/flow_matching/pusht_02/checkpoints/last/pretrained_model_migrated
-  num_action_samples: 25
+  scorer_type: ensemble
+  ensemble_model_paths: [
+    outputs/train/flow_matching/pusht_02/checkpoints/060000/pretrained_model
+  ]
+  num_action_samples: 5
   scoring_metric:
-    metric_type: mode_distance
-    velocity_eval_times: [0.0, 0.1, 0.2]
+    metric_type: inter_vel_diff
+    velocity_eval_times: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 show: False
 seed: 15
 
-# python lerobot/scripts/flow_matching/visualize_ensemble_uncertainty_estimation.py --config=configs/flow_matching/visualize_ensemble/pusht.yaml --policy.path=outputs/train/flow_matching_pusht/checkpoints/last/pretrained_model
+# python src/lerobot/scripts/uncertainty/visualize_bayesian_sampler.py --config=configs/flow_matching/visualize_bayesian_sampler/pusht.yaml --policy.path=outputs/train/flow_matching/pusht_01/checkpoints/060000/pretrained_model

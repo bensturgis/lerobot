@@ -6,14 +6,16 @@ seed: 40
 env:
   type: libero
   task: libero_10
-  task_ids: [0]
+  task_ids: [9]
+  ood:
+    enable: true
 
 policy:
   type: smolvla
   device: cuda
 
 vis:
-  num_rollouts: 2
+  num_rollouts: 20
   action_dim_names: [
     "ee_pos_x", "ee_pos_y", "ee_pos_z", "ee_rot_x",
     "ee_rot_y", "ee_rot_z", "gripper_open"

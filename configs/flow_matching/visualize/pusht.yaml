@@ -1,11 +1,11 @@
 # Choose from "action_seq", "flows", "noise_to_action" and "vector_field"
-vis_types: [flows]
+vis_types: [action_seq]
 show: False
 
 env:
   type: pusht
   ood:
-    enabled: true
+    enable: true
 
 policy:
   type: flow_matching

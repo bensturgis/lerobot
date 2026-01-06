@@ -306,6 +306,15 @@ class FlowVisualizer(FlowMatchingVisualizer):
             num_samples=self.num_paths,
             generator=generator
         )
+        # z = torch.tensor([
+        #     [-1.2, 1.0],
+        #     [-1.2, -0.4],
+        #     [-0.2, -1.3],
+        #     [0.1, 2.0],
+        #     [1.3, 1.7],
+        # ], device=device, dtype=dtype)  # (5, 2)
+
+        # noise_sample = z[:, None, :].expand(5, 16, 2).contiguous()
 
         # Create time grid for solving the ODE
         velocity_eval_times, sampling_time_grid = self._make_sampling_grid(
@@ -421,7 +430,7 @@ class FlowVisualizer(FlowMatchingVisualizer):
                 if dim == 2:
                     quiv = ax.quiver(
                         x, y, vel_components[0], vel_components[1],
-                        angles='xy', scale_units='xy', width=0.005,
+                        angles='xy', scale_units='xy', scale=0.87, width=0.007,
                         color=colour, label=label
                     )
                 else:
